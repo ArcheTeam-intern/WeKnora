@@ -265,8 +265,13 @@ func OutOfScope(format string, args ...any) *Error {
 }
 
 // AsError extracts an *Error from err, synthesising an upstream-tool-error when
-// the failure came from somewhere else.
+// the failure came from somewhere else. A nil error is folded into a stable
+// internal error so a nil result can still be rendered as a machine-readable
+// tool error instead of panicking on err.Error().
 func AsError(err error) *Error {
+	if err == nil {
+		return &Error{Code: CodeInternal, Message: "unknown error"}
+	}
 	var toolErr *Error
 	if errors.As(err, &toolErr) {
 		return toolErr

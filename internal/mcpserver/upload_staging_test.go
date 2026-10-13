@@ -32,6 +32,11 @@ func (f *fakeReceiptRepo) Create(_ context.Context, record *UploadRecord) error 
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	copyRecord := *record
+	// Mirror the real SQL receipt row: PayloadPath is derived from identity and
+	// is never persisted (UploadReceipt has no such column), so a record read
+	// back has no path until the staging layer rebuilds it. Keeping it here
+	// would let tests pass against a fake that is more permissive than the DB.
+	copyRecord.PayloadPath = ""
 	f.rows[record.UploadID] = &copyRecord
 	f.created++
 	return nil
@@ -200,6 +205,49 @@ func TestStageUsesVerifiedCallerIdentityForThePath(t *testing.T) {
 	}
 	if _, statErr := os.Stat(record.PayloadPath); statErr != nil {
 		t.Fatalf("payload not on disk: %v", statErr)
+	}
+}
+
+// A receipt read back from the database carries no payload path; the staging
+// layer must rebuild it from the persisted identity so import can still open
+// the bytes (regression: the path was dropped on read, making every import fail
+// with "payload no longer on disk").
+func TestGetRebuildsDerivedPayloadPath(t *testing.T) {
+	staging, repo, root := newTestStaging(t)
+	record, existing, err := staging.Stage(context.Background(),
+		baseUploadRequest(kbA), bytes.NewReader([]byte("hello weknora")))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	if existing {
+		t.Fatal("a fresh upload must not be reported as existing")
+	}
+	// The fake repo models the SQL row: Create stripped PayloadPath. Confirm
+	// that, then prove Get rebuilds it.
+	stored, _ := repo.Get(context.Background(), uploadLookup{
+		UploadID:          record.UploadID,
+		EndpointID:        record.EndpointID,
+		CallerWorkspaceID: record.CallerWorkspaceID,
+		CallerStorageID:   record.CallerStorageID,
+	})
+	if stored == nil || stored.PayloadPath != "" {
+		t.Fatalf("fake repo must not persist PayloadPath; got %+v", stored)
+	}
+	got, err := staging.Get(context.Background(), uploadLookup{
+		UploadID:          record.UploadID,
+		EndpointID:        record.EndpointID,
+		CallerWorkspaceID: record.CallerWorkspaceID,
+		CallerStorageID:   record.CallerStorageID,
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	want := filepath.Join(root, "7", sha256HexForTest("web_user:user-1"), record.UploadID, "payload")
+	if got.PayloadPath != want {
+		t.Fatalf("Get must rebuild the payload path; got %q, want %q", got.PayloadPath, want)
+	}
+	if _, statErr := os.Stat(got.PayloadPath); statErr != nil {
+		t.Fatalf("rebuilt payload path is not on disk: %v", statErr)
 	}
 }
 

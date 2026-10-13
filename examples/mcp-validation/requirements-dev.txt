@@ -1,0 +1,5 @@
+# Offline validation scripts only. The Agent runtime (WeKnora-Agent/requirements.txt)
+# must not gain these; import_corpus/mcp_smoke/run_eval run from the Agent's venv
+# where the SDK is already installed, and add only what the scripts themselves need.
+-r ../../WeKnora-Agent/requirements.txt
+httpx==0.28.1

@@ -70,17 +70,19 @@ func (s *enqueueFailureKnowledgeService) ListKnowledgeByKnowledgeBaseID(
 // import path and skips a real database by handing the uploadStaging field
 // directly. The newTestStaging helper produces a fully working UploadStaging
 // in front of an in-memory receipt repository.
-func enqueueFailureServer(t *testing.T) (*Server, *fakeReceiptRepo) {
+func enqueueFailureServer(t *testing.T) (*Server, *fakeReceiptRepo, UploadStaging) {
 	t.Helper()
 	staging, repo, _ := newTestStaging(t)
 	kb := &types.KnowledgeBase{ID: kbA, TenantID: 7, Name: "kb-" + kbA}
-	srv := &Server{
-		kbService:        &stubKBService{kbs: map[string]*types.KnowledgeBase{kb.ID: kb}},
-		kbShareService:   &stubKBShareService{shared: map[string]types.OrgMemberRole{}},
-		tenantService:    &stubTenantService{tenants: map[uint64]*types.Tenant{7: {ID: 7, Name: "Caller"}}},
-		uploadStagingSvc: staging,
-	}
-	return srv, repo
+	// NewServer initializes the MCP server and its Streamable HTTP handler;
+	// constructing &Server{} directly would leave s.handler nil and panic when
+	// the transport is mounted. The fakes are swapped in over the nil defaults.
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	srv.kbService = &stubKBService{kbs: map[string]*types.KnowledgeBase{kb.ID: kb}}
+	srv.kbShareService = &stubKBShareService{shared: map[string]types.OrgMemberRole{}}
+	srv.tenantService = &stubTenantService{tenants: map[uint64]*types.Tenant{7: {ID: 7, Name: "Caller"}}}
+	srv.uploadStagingSvc = staging
+	return srv, repo, staging
 }
 
 // enqueueFailureContext assembles the context handleImportDocumentFile needs:
@@ -90,7 +92,10 @@ func enqueueFailureServer(t *testing.T) (*Server, *fakeReceiptRepo) {
 func enqueueFailureContext(ep *types.MCPEndpoint) context.Context {
 	ctx := context.WithValue(context.Background(), types.MCPEndpointContextKey, ep)
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, ep.TenantID)
-	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalMCPEndpoint, ID: ep.ID})
+	// The principal must resolve to the same StorageID baseUploadRequest staged
+	// the upload under ("web_user:user-1"), otherwise the staged receipt will
+	// not resolve for the caller doing the import.
+	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-1"})
 	return ctx
 }
 
@@ -103,7 +108,7 @@ func enqueueFailureContext(ep *types.MCPEndpoint) context.Context {
 //
 // The test name is fixed by § 7.2 so it can be grepped.
 func TestEnqueueFailureNotIndexed(t *testing.T) {
-	srv, repo := enqueueFailureServer(t)
+	srv, repo, staging := enqueueFailureServer(t)
 	enqueueErr := errors.New("asynq: enqueue failed, broker unreachable")
 	srv.knowledgeService = &enqueueFailureKnowledgeService{enqueueErr: enqueueErr}
 
@@ -119,10 +124,6 @@ func TestEnqueueFailureNotIndexed(t *testing.T) {
 	// bytes are on disk. The newTestStaging helper returns a storage service
 	// backed by fakeReceiptRepo, so every claim / fail / get below exercises
 	// the same code path production runs.
-	staging, _, _ := newTestStaging(t)
-	// Make the server use this exact staging instance so the receipt we just
-	// staged is the one the tool resolves.
-	srv.uploadStagingSvc = staging
 	record, _, err := staging.Stage(context.Background(), baseUploadRequest(kbA),
 		bytes.NewReader([]byte("hello weknora from the enqueue-failure test")))
 	if err != nil {
@@ -232,7 +233,7 @@ func TestEnqueueFailureNotIndexed(t *testing.T) {
 		UploadID:          record.UploadID,
 		EndpointID:        "ep-1",
 		CallerWorkspaceID: 7,
-		CallerStorageID:   types.PrincipalMCPEndpoint + ":ep-1",
+		CallerStorageID:   "web_user:user-1",
 	}
 	receipt, err := staging.Get(ctx, lookup)
 	if err != nil {

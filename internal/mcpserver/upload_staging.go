@@ -176,6 +176,16 @@ func (s *stagedUploadStorage) stageDir(record UploadRecord) string {
 	)
 }
 
+// payloadPath derives the on-disk payload location from the record identity.
+// It is deliberately NOT persisted: the receipt row stores the identity fields,
+// and the path is rebuilt from them, so a record read back from the database
+// (after a restart, or by a different request than the one that staged it) still
+// locates its bytes. Persisting the path would also make the row stale if the
+// staging root ever moves.
+func (s *stagedUploadStorage) payloadPath(record UploadRecord) string {
+	return filepath.Join(s.stageDir(record), "payload")
+}
+
 // Ping verifies the root exists and is writable.
 func (s *stagedUploadStorage) Ping(_ context.Context) error {
 	if strings.TrimSpace(s.root) == "" {
@@ -259,14 +269,13 @@ func (s *stagedUploadStorage) Stage(
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return UploadRecord{}, false, fmt.Errorf("cannot create the staging directory: %w", err)
 	}
-	payloadPath := filepath.Join(dir, "payload")
-	record.PayloadPath = payloadPath
+	record.PayloadPath = s.payloadPath(record)
 
 	// Stream in bounded chunks and enforce the limit BEFORE anything is decoded
 	// further: the plan forbids "read it all, then measure".
 	digest := sha256.New()
 	var written int64
-	file, err := os.OpenFile(payloadPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+	file, err := os.OpenFile(record.PayloadPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
 	if err != nil {
 		return UploadRecord{}, false, fmt.Errorf("cannot create the staged payload: %w", err)
 	}
@@ -342,6 +351,9 @@ func (s *stagedUploadStorage) Get(ctx context.Context, lookup uploadLookup) (Upl
 				record.UploadID, record.ExpiresAt.Format(time.RFC3339)),
 		}
 	}
+	// The payload path is derived, not persisted (see payloadPath): rebuild it so
+	// a record read back from the receipt row still points at its bytes.
+	record.PayloadPath = s.payloadPath(*record)
 	return *record, nil
 }
 
