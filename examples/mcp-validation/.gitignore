@@ -3,4 +3,5 @@ deploy/mcp-endpoints.json
 eval/reports/*
 !eval/reports/manual-review.template.json
 !eval/reports/baseline.md
+!eval/reports/delivery.md
 __pycache__/
