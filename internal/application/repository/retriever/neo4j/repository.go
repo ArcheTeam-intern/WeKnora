@@ -114,7 +114,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
 			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
-			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
+			CALL apoc.merge.relationship(source, row.type, {}, {kg: row.knowledge_id, chunks: row.chunks}, target) YIELD rel
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
@@ -124,6 +124,7 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 				"target":        rel.Node2,
 				"knowledge_id":  namespace.Knowledge,
 				"type":          rel.Type,
+				"chunks":        rel.ChunkIDs,
 				"source_labels": n.Labels(namespace),
 				"target_labels": n.Labels(namespace),
 			})
@@ -284,9 +285,20 @@ func decodeGraphSearchResult(ctx context.Context, result neo4j.Result) (*types.G
 		}
 		if !relationSeen[r.ElementId] {
 			relationSeen[r.ElementId] = true
+			knowledgeID, _ := r.Props["kg"].(string)
+			var chunks []any
+			if c, ok := r.Props["chunks"].([]any); ok {
+				chunks = c
+			}
 			graph.Relation = append(graph.Relation, &types.GraphRelation{
 				Node1: nodeSeen[source.ElementId].Name, Node2: nodeSeen[target.ElementId].Name, Type: r.Type,
 				ID: r.ElementId, SourceID: source.ElementId, TargetID: target.ElementId,
+				// Per-relation provenance restored from the relationship props:
+				// kg is the knowledge id and chunks are the exact chunks the
+				// extraction service bound to this relation. Pre-provenance rows
+				// have neither and read as unknown downstream.
+				KnowledgeID: knowledgeID,
+				ChunkIDs:    listI2listS(chunks),
 			})
 		}
 	}

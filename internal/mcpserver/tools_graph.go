@@ -137,27 +137,21 @@ func (s *Server) handleKnowledgeGraphQuery(ctx context.Context, req mcp.CallTool
 	return toolResultFromAgentTool(res, nil), nil
 }
 
-// enrichGraphEdgesWithSourceRefsV2 attaches SourceRefsV2 entries to each
-// edge inside the local_graph view built by the agent tool. The agent tool
-// keeps graphNode-to-chunk associations internally; what survives into
-// graph_data is just the entity → entity edges and the chunk evidence list
-// under res.Data["results"]. We rebuild the citation view here from those
-// evidence chunks — every edge gets one V2 per evidence chunk whose
-// knowledge_base matches the queried KBs, so the citation set is the KB
-// context the relation was extracted under. A chunk whose KB is outside the
-// query scope is dropped to keep the V2 view a strict subset of what the
-// tool's own authorization boundary allowed.
+// enrichGraphEdgesWithSourceRefsV2 attaches SourceRefsV2 entries to each edge
+// inside the local_graph view. Each edge is cited from ITS OWN per-relation
+// chunk provenance (chunk_ids + knowledge_id + knowledge_base_id + quote), never
+// from the query-wide evidence set: assigning every chunk to every edge would
+// make one relation's quote look like another relation's source. An edge that
+// carries no per-relation provenance is marked unknown rather than borrowing
+// evidence, so a client can tell "this relation has no verified source" from
+// "this relation is backed by chunk X".
 //
-// Provenance marks:
-//   - "verified"          when the edge has at least one evidence chunk with
-//     a non-empty content quote attached.
-//   - "unverified_source" when the edge has evidence chunks but none of them
-//     carried quotable content (chunk text was not read
-//     back, only the metadata was loaded).
-//   - "unknown"           when no evidence chunks could be associated with
-//     the edge at all.
+// Provenance is decided per edge (and per ref), not per query:
+//   - "verified"          when the edge's own quote is non-empty.
+//   - "unverified_source" when the edge has chunks but no readable quote.
+//   - "unknown"           when the edge has no per-relation chunk provenance.
 func enrichGraphEdgesWithSourceRefsV2(
-	data map[string]interface{}, graphView interface{}, kbs []*types.KnowledgeBase,
+	data map[string]interface{}, graphView interface{}, _ []*types.KnowledgeBase,
 ) {
 	view, ok := graphView.(map[string]interface{})
 	if !ok {
@@ -167,137 +161,110 @@ func enrichGraphEdgesWithSourceRefsV2(
 	if !ok {
 		return
 	}
-	// Restrict the V2 view to chunks that came from the queried KBs.
-	// graphView was built from the same set, but the chunk evidence list is
-	// the broader "all KBs in scope" view, so restricting here keeps the
-	// per-edge citation honest about which KB authored it.
-	allowedKBs := knowledgeBaseIDsToSet(kbs)
-	chunks := collectGraphEvidenceChunks(data["results"], allowedKBs)
-	if len(chunks) == 0 {
-		// Mark every edge as unknown so consumers see the empty citation set
-		// rather than infer "no citations" from a missing field.
-		for _, raw := range edgesRaw {
-			edge, ok := raw.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			edge["source_refs_v2"] = []types.SourceRefV2{{ProvenanceStatus: "unknown"}}
-		}
-		return
-	}
-	// Pre-compute the verified set: chunks whose content is non-empty can
-	// surface as a quote, so the edge gets "verified" provenance when at
-	// least one of its chunks qualifies.
-	hasQuote := false
-	for _, c := range chunks {
-		if c.Quote != "" {
-			hasQuote = true
-			break
-		}
-	}
-	refs := make([]types.SourceRefV2, 0, len(chunks))
-	status := "unverified_source"
-	if hasQuote {
-		status = "verified"
-	}
-	for _, c := range chunks {
-		refs = append(refs, types.SourceRefV2{
-			KnowledgeID:      c.KnowledgeID,
-			KnowledgeBaseID:  c.KnowledgeBaseID,
-			ChunkIDs:         []string{c.ChunkID},
-			Quote:            c.Quote,
-			ProvenanceStatus: status,
-		})
-	}
-	edgeRefs := refs
+	// The agent tool already loaded the evidence chunks into data["results"];
+	// index them by chunk id so each edge can cite exactly its own chunks'
+	// content and KB, never the whole query's set.
+	quotes, kbs := graphChunkIndex(data["results"])
 	for _, raw := range edgesRaw {
 		edge, ok := raw.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		// Each edge gets a fresh slice so a downstream mutator cannot
-		// leak one edge's citations into another.
-		edge["source_refs_v2"] = append([]types.SourceRefV2(nil), edgeRefs...)
+		edge["source_refs_v2"] = graphEdgeRefs(edge, quotes, kbs)
 	}
 }
 
-// graphEvidenceChunk is one piece of evidence the agent tool already loaded
-// for the graph query — what we need to construct the V2 source-ref view for
-// each relation edge. text-only here, mirroring the real result map keys
-// (knowledge_id, knowledge_base_id, chunk_id, content).
-type graphEvidenceChunk struct {
-	ChunkID         string
-	KnowledgeID     string
-	KnowledgeBaseID string
-	Quote           string
-}
-
-// knowledgeBaseIDsToSet is the typed-knowledge-base version of the KB-id
-// filter the V2 enricher applies. Taking the KB slice directly (instead of
-// going through res.Data["knowledge_bases"]) keeps the scope independent of
-// how res.Data is constructed — the enricher runs before the KB-ref payload
-// is attached, so the slice is the only reliable source of "which KBs are
-// in scope".
-func knowledgeBaseIDsToSet(kbs []*types.KnowledgeBase) map[string]bool {
-	out := make(map[string]bool, len(kbs))
-	for _, kb := range kbs {
-		if kb != nil && kb.ID != "" {
-			out[kb.ID] = true
-		}
-	}
-	return out
-}
-
-// collectGraphEvidenceChunks turns the agent tool's result entries into the
-// smaller graphEvidenceChunk shape we need for V2 construction. Entries
-// that fail to parse are dropped (a partial chunk is still a chunk). When
-// allowedKBs is non-empty, chunks whose knowledge_base_id is not in the
-// set are dropped so the V2 view stays scoped to the queried KBs.
-func collectGraphEvidenceChunks(raw interface{}, allowedKBs map[string]bool) []graphEvidenceChunk {
+// graphChunkIndex indexes the result entries by chunk id, returning the content
+// quote and knowledge_base_id for each. Entries that do not carry a chunk id are
+// dropped; a chunk present here but not cited by an edge is simply unused.
+func graphChunkIndex(raw interface{}) (quotes, kbs map[string]string) {
+	quotes, kbs = map[string]string{}, map[string]string{}
 	entries, ok := raw.([]interface{})
 	if !ok {
-		return nil
+		return quotes, kbs
 	}
-	out := make([]graphEvidenceChunk, 0, len(entries))
 	for _, e := range entries {
-		entry := graphEntryAsMap(e)
-		if entry == nil {
+		entry, ok := e.(map[string]interface{})
+		if !ok {
 			continue
 		}
 		chunkID := graphEntryString(entry, "chunk_id")
-		knowledgeID := graphEntryString(entry, "knowledge_id")
-		knowledgeBaseID := graphEntryString(entry, "knowledge_base_id")
-		if chunkID == "" && knowledgeID == "" {
+		if chunkID == "" {
 			continue
 		}
-		if len(allowedKBs) > 0 && knowledgeBaseID != "" && !allowedKBs[knowledgeBaseID] {
-			continue
+		if content := graphEntryString(entry, "content"); content != "" {
+			quotes[chunkID] = content
 		}
-		out = append(out, graphEvidenceChunk{
-			ChunkID:         chunkID,
-			KnowledgeID:     knowledgeID,
-			KnowledgeBaseID: knowledgeBaseID,
-			Quote:           graphEntryString(entry, "content"),
-		})
+		if kb := graphEntryString(entry, "knowledge_base_id"); kb != "" {
+			kbs[chunkID] = kb
+		}
 	}
-	return out
+	return quotes, kbs
 }
 
-// graphEntryAsMap normalizes a result entry to map[string]interface{}.
-// The agent tool's JSON-decoded results may surface as either
-// map[string]interface{} (top-level json.Unmarshal) or map[string]any
-// (when built in-process) — both spellings are the same underlying type
-// in Go, so a single case covers both. Non-map inputs return nil and the
-// call site silently drops them.
-func graphEntryAsMap(raw interface{}) map[string]interface{} {
-	if m, ok := raw.(map[string]interface{}); ok {
-		return m
+// graphEdgeRefs builds the per-edge source view from the edge's own provenance
+// fields, resolving each cited chunk's quote and knowledge base from the indexed
+// evidence. An unmapped edge (no chunk ids or knowledge id) returns a single
+// unknown ref so the absence of a citation is explicit, not implied.
+func graphEdgeRefs(edge map[string]interface{}, quotes, kbs map[string]string) []types.SourceRefV2 {
+	chunkIDs := graphEdgeStringSlice(edge, "chunk_ids")
+	knowledgeID := graphEntryString(edge, "knowledge_id")
+	if len(chunkIDs) == 0 || knowledgeID == "" {
+		return []types.SourceRefV2{{ProvenanceStatus: "unknown"}}
 	}
-	return nil
+	knowledgeBaseID := graphEntryString(edge, "knowledge_base_id")
+	quote := graphEntryString(edge, "quote")
+	for _, cid := range chunkIDs {
+		if quote == "" {
+			quote = quotes[cid]
+		}
+		if knowledgeBaseID == "" {
+			knowledgeBaseID = kbs[cid]
+		}
+	}
+	status := "unverified_source"
+	if quote != "" {
+		status = "verified"
+	}
+	return []types.SourceRefV2{{
+		KnowledgeID:      knowledgeID,
+		KnowledgeBaseID:  knowledgeBaseID,
+		ChunkIDs:         chunkIDs,
+		Quote:            quote,
+		ProvenanceStatus: status,
+	}}
 }
 
-// graphEntryString pulls a string field out of a result entry. The lookup
-// is plain because we already normalized the entry through graphEntryAsMap.
+// graphEdgeStringSlice reads a string-slice field that may surface as either
+// []interface{} (JSON decode) or []string (in-process build).
+func graphEdgeStringSlice(edge map[string]interface{}, key string) []string {
+	raw, ok := edge[key]
+	if !ok {
+		return nil
+	}
+	switch v := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, s := range v {
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// graphEntryString pulls a string field out of an edge map.
 func graphEntryString(entry map[string]interface{}, key string) string {
 	if v, ok := entry[key].(string); ok {
 		return v

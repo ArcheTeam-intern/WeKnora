@@ -378,6 +378,14 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	for _, node := range graph.Node {
 		node.Chunks = []string{chunk.ID}
 	}
+	// A relation is extracted from this chunk, so bind it to the same source:
+	// the provenance is decided by the document/chunk processing context, never
+	// by the extraction model. This is what lets query_knowledge_graph cite the
+	// exact chunk (and only that chunk) for each relation instead of guessing.
+	for _, rel := range graph.Relation {
+		rel.KnowledgeID = chunk.KnowledgeID
+		rel.ChunkIDs = []string{chunk.ID}
+	}
 	if err = s.graphEngine.AddGraph(ctx,
 		types.NameSpace{KnowledgeBase: chunk.KnowledgeBaseID, Knowledge: chunk.KnowledgeID},
 		[]*types.GraphData{graph},

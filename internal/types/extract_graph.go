@@ -33,6 +33,13 @@ type GraphRelation struct {
 	ID       string `json:"-" yaml:"-"`
 	SourceID string `json:"-" yaml:"-"`
 	TargetID string `json:"-" yaml:"-"`
+	// Per-relation provenance, filled in by the extraction service (not by the
+	// extraction model) and persisted on the relationship so a query can cite the
+	// exact document chunks that produced this relation. A relation without these
+	// (pre-provenance rows) reads as unknown rather than borrowing another
+	// relation's evidence.
+	KnowledgeID string   `json:"-" yaml:"-"`
+	ChunkIDs    []string `json:"-" yaml:"-"`
 }
 
 type GraphData struct {

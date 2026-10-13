@@ -379,7 +379,12 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 		}
 		for _, rel := range result.relations {
-			key := rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
+			// The uniqueness key includes the relation's provenance so two
+			// same-named same-typed relations from different documents stay
+			// distinct instances instead of collapsing into one (whose source
+			// list would then be wrong). A pre-provenance relation has an empty
+			// KnowledgeID and degrades to the name/type key.
+			key := rel.KnowledgeID + "\x00" + rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
 			if seenRelations[key] {
 				continue
 			}
@@ -411,6 +416,11 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	for _, rel := range relations {
 		relationData = append(relationData, map[string]interface{}{
 			"source": rel.Node1, "type": rel.Type, "target": rel.Node2,
+			// Keep the real relation identity and its per-relation provenance so
+			// the MCP layer can cite the exact chunks (not the query-wide set).
+			"id":           rel.ID,
+			"knowledge_id": rel.KnowledgeID,
+			"chunk_ids":    rel.ChunkIDs,
 		})
 	}
 
@@ -856,6 +866,11 @@ func buildGraphVisualizationData(
 		addEntity(rel.Node2)
 		edges = append(edges, map[string]interface{}{
 			"source": "entity:" + rel.Node1, "target": "entity:" + rel.Node2, "label": rel.Type,
+			// Provenance rides along so the MCP enrichment can cite each edge's
+			// own chunks instead of guessing from the whole query's evidence.
+			"id":           rel.ID,
+			"knowledge_id": rel.KnowledgeID,
+			"chunk_ids":    rel.ChunkIDs,
 		})
 	}
 	for i, result := range results {
