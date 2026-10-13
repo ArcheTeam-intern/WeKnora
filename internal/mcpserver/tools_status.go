@@ -54,6 +54,19 @@ var knownParseStatuses = map[string]struct{}{
 }
 
 func describeKnowledgeStatus(k *types.Knowledge) documentStatusReport {
+	// Defensive: an empty or zero Knowledge pointer is not a knowledge row,
+	// but the tool would panic on k.* if it ever reached here. Render an
+	// explicit "unknown" row instead of letting the recovery middleware report
+	// a JSON-RPC 500.
+	if k == nil {
+		return documentStatusReport{
+			ParseStatus:        unknownStatus,
+			ParseStatusKnown:   false,
+			IndexStatus:        unknownStatus,
+			PendingSubtasksKnown: true,
+			Note:               "the document row is not available",
+		}
+	}
 	report := documentStatusReport{
 		KnowledgeID:          k.ID,
 		Title:                k.Title,
