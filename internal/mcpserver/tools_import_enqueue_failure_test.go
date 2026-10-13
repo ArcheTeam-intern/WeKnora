@@ -96,6 +96,11 @@ func enqueueFailureContext(ep *types.MCPEndpoint) context.Context {
 	// the upload under ("web_user:user-1"), otherwise the staged receipt will
 	// not resolve for the caller doing the import.
 	ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "user-1"})
+	// The caller is the KB's creator AND an admin, so the R1 ownership gate
+	// (creator-or-admin) passes and the import reaches the enqueue failure this
+	// test asserts on — the gate is not the thing under test here.
+	ctx = types.WithCaller(ctx, types.Caller{TenantID: ep.TenantID, UserID: "user-1",
+		Role: types.TenantRoleAdmin})
 	return ctx
 }
 

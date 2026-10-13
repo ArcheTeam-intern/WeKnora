@@ -129,6 +129,33 @@ func (s *Server) authorizeKB(
 	return grant, scoped, nil
 }
 
+// requireKBWriteOwnership enforces the REST OwnedKBOrAdmin rule on user-mode MCP
+// write calls: the caller must be the knowledge base's creator or an Admin. The
+// ResolveKB path below grants same-tenant callers an Admin grant without checking
+// role or creator, so without this gate a Viewer (or a Contributor who did not
+// create the KB) could import into a KB they neither own nor administer.
+// Machine-mode endpoints have no web-user principal and keep the capability-only
+// path.
+func (s *Server) requireKBWriteOwnership(ctx context.Context, kb *types.KnowledgeBase) error {
+	if kb == nil {
+		return notFound("knowledge base not found")
+	}
+	principal, ok := types.PrincipalFromContext(ctx)
+	if !ok || principal.Type != types.PrincipalWebUser {
+		return nil
+	}
+	caller := types.CallerFromContext(ctx)
+	if caller.Role.HasPermission(types.TenantRoleAdmin) {
+		return nil
+	}
+	if kb.CreatorID != "" && kb.CreatorID == caller.UserID {
+		return nil
+	}
+	return forbidden(
+		"this caller is not allowed to write to knowledge base %s; only its creator or an admin may write",
+		kb.ID)
+}
+
 // selectKnowledgeBases narrows the allowed set to the ones a caller named,
 // accepting either IDs or exact (case-insensitive) names. With no selector the
 // frozen request selection (or the whole allowed set when none was sent) is

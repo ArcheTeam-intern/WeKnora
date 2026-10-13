@@ -110,11 +110,20 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 		}
 
 		// Relationship import query
+		//
+		// apoc.merge.relationship's 4th argument (onCreateProps) only applies on
+		// create; a second chunk that matches an existing same-type edge between
+		// the same endpoints would otherwise leave the original chunks and never
+		// record the new chunk. The trailing SET unions the new chunks into the
+		// existing list and re-asserts kg so provenance accumulates across
+		// AddGraph calls instead of being overwritten on the first create.
 		rel_import_query := `
 			UNWIND $data AS row
 			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
 			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
 			CALL apoc.merge.relationship(source, row.type, {}, {kg: row.knowledge_id, chunks: row.chunks}, target) YIELD rel
+			SET rel.kg = row.knowledge_id
+			SET rel.chunks = apoc.coll.union(coalesce(rel.chunks, []), row.chunks)
 			RETURN distinct 'done'
 		`
 		relData := []map[string]interface{}{}
@@ -218,6 +227,7 @@ func (n *Neo4jRepository) SearchNode(
 		// Make truncation visible. A silent cap reads as "the graph has no more
 		// matches" when in fact candidates were dropped.
 		if len(graphData.Relation) >= graphSearchMaxRows {
+			graphData.RelationTruncated = true
 			logger.Warnf(ctx,
 				"graph search hit the row cap: %d nodes / %d relations returned "+
 					"(seed cap %d, row cap %d) — results are truncated; "+

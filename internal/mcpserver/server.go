@@ -167,6 +167,14 @@ func (s *Server) uploadStaging() UploadStaging {
 	return s.uploadStagingSvc
 }
 
+// NewStagingSweepRunner builds the production cleanup scheduler for this
+// server's staging area. The runner resolves the staging service per tick, so
+// it stays dormant on servers without a database or staging root instead of
+// needing separate wiring.
+func (s *Server) NewStagingSweepRunner() *StagingSweepRunner {
+	return NewStagingSweepRunner(s.uploadStaging)
+}
+
 // fileSizeLimit is the upload ceiling in bytes, taken from the same
 // MAX_FILE_SIZE_MB setting the existing HTTP upload handler uses so the two
 // entries cannot disagree.

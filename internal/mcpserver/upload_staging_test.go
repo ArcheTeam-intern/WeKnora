@@ -163,6 +163,34 @@ func (f *fakeReceiptRepo) Sweep(_ context.Context, now time.Time) (int, int, err
 	return payloads, receipts, nil
 }
 
+func (f *fakeReceiptRepo) ExpiredPayloadRecords(_ context.Context, now time.Time) ([]UploadRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []UploadRecord
+	for _, row := range f.rows {
+		if row.State == UploadStateImported {
+			continue
+		}
+		if row.ExpiresAt.Before(now) && row.LeaseToken == "" {
+			out = append(out, *row)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeReceiptRepo) LivePayloadRecords(_ context.Context) ([]UploadRecord, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []UploadRecord
+	for _, row := range f.rows {
+		switch row.State {
+		case UploadStateStaged, UploadStateImporting, UploadStateFailed:
+			out = append(out, *row)
+		}
+	}
+	return out, nil
+}
+
 func newTestStaging(t *testing.T) (UploadStaging, *fakeReceiptRepo, string) {
 	t.Helper()
 	root := t.TempDir()

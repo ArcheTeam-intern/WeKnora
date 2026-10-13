@@ -624,6 +624,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		cleaner.Promote("BrowserSkill")
 	}))
 
+	// The staged-upload sweep sits at the end of init on purpose: it pulls in
+	// *mcpserver.Server, whose dependency graph (SessionService →
+	// chatpipeline.EventManager) is only complete this late, and an earlier
+	// Invoke would panic the container while dig resolves it.
+	must(container.Invoke(startStagedUploadSweep))
+	logger.Debugf(ctx, "[Container] Staged upload sweep runner registered")
+
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
 }
@@ -2013,6 +2020,23 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
+		runner.StopWithin(cleanupStepTimeout)
+		return nil
+	})
+}
+
+// startStagedUploadSweep runs the staged-upload cleanup loop. The sweep logic
+// (expired payload bytes, then rows, then orphan directories on disk) lives in
+// UploadStaging.Sweep; without this wiring nothing called it in production, so
+// bytes past the 24h payload TTL only ever left when an import completed.
+// Mirrors startAuditLogRetention: container init kicks the goroutine,
+// ResourceCleaner stops it during graceful shutdown. The runner resolves the
+// staging service per tick, so deployments without MCP uploads (no staging
+// root, or no database in tests) just idle.
+func startStagedUploadSweep(srv *mcpserver.Server, cleaner interfaces.ResourceCleaner) {
+	runner := srv.NewStagingSweepRunner()
+	runner.Start(context.Background())
+	cleaner.RegisterWithName("StagedUploadSweep", func() error {
 		runner.StopWithin(cleanupStepTimeout)
 		return nil
 	})

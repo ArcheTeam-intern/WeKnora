@@ -46,6 +46,12 @@ type GraphData struct {
 	Text     string           `json:"text,omitempty"`
 	Node     []*GraphNode     `json:"node,omitempty"`
 	Relation []*GraphRelation `json:"relation,omitempty"`
+	// RelationTruncated reports that the graph store hit its row cap while
+	// reading this result, so Relation is a subset of the matched relations and
+	// not the entity's whole neighbourhood. It is an in-process signal (never
+	// persisted, never model-output) so callers can surface truncation instead of
+	// treating a capped list as complete.
+	RelationTruncated bool `json:"-" yaml:"-"`
 }
 
 // NameSpace represents the name space of the knowledge base and knowledge

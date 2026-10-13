@@ -91,6 +91,17 @@ type UploadReceiptRepository interface {
 	MarkFailed(ctx context.Context, uploadID, leaseToken, code, message string) error
 	// Sweep expires payloads (state -> expired) and removes old receipts.
 	Sweep(ctx context.Context, now time.Time) (payloadsRemoved, receiptsRemoved int, err error)
+	// ExpiredPayloadRecords lists the records whose bytes are past their payload
+	// deadline and no longer leased, so the storage layer can delete the files
+	// before Sweep flips the rows to expired. Live leases are never listed.
+	ExpiredPayloadRecords(ctx context.Context, now time.Time) ([]UploadRecord, error)
+	// LivePayloadRecords lists every row whose payload bytes may still be
+	// claimed: staged and failed rows, plus importing rows in any lease state
+	// because a crashed attempt must be recoverable against the same bytes.
+	// The disk scan keeps these directories and removes the rest; imported and
+	// expired rows are deliberately excluded so the scan also retries deletions
+	// a previous sweep missed.
+	LivePayloadRecords(ctx context.Context) ([]UploadRecord, error)
 }
 
 type uploadReceiptRepository struct {
@@ -286,6 +297,48 @@ func (r *uploadReceiptRepository) Sweep(
 		return int(payloads.RowsAffected), 0, receipts.Error
 	}
 	return int(payloads.RowsAffected), int(receipts.RowsAffected), nil
+}
+
+// ExpiredPayloadRecords returns the records whose bytes are past their payload
+// deadline and no longer held by a live lease. The storage layer deletes the
+// files first (so a partial failure can be retried against the same rows), then
+// Sweep flips them to expired. It deliberately does not return imported rows:
+// their bytes are already removed at Complete.
+func (r *uploadReceiptRepository) ExpiredPayloadRecords(
+	_ context.Context, now time.Time,
+) ([]UploadRecord, error) {
+	var rows []UploadReceipt
+	err := r.db.Where("state IN ?", []string{UploadStateStaged, UploadStateFailed, UploadStateExpired}).
+		Where("expires_at < ?", now).
+		Where("lease_token = ''").
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UploadRecord, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toRecord())
+	}
+	return out, nil
+}
+
+// LivePayloadRecords returns the rows the disk sweep must not touch: staged and
+// failed rows still inside their payload TTL, plus importing rows regardless of
+// age or lease — an expired lease on an importing row is exactly the crash
+// recovery case, and recovery re-imports the same bytes.
+func (r *uploadReceiptRepository) LivePayloadRecords(ctx context.Context) ([]UploadRecord, error) {
+	var rows []UploadReceipt
+	err := r.db.WithContext(ctx).
+		Where("state IN ?", []string{UploadStateStaged, UploadStateImporting, UploadStateFailed}).
+		Find(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]UploadRecord, 0, len(rows))
+	for i := range rows {
+		out = append(out, rows[i].toRecord())
+	}
+	return out, nil
 }
 
 // AutoMigrateUploadReceipts creates the table when the schema migration has not

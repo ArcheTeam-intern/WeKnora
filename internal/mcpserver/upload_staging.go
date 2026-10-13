@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // uploadIDPattern restricts upload ids to the UUID v4 shape this server mints.
@@ -229,8 +231,7 @@ func (s *stagedUploadStorage) Stage(
 		if existing != nil {
 			sameTarget := strings.EqualFold(existing.KnowledgeBaseID, req.KnowledgeBaseID)
 			sameName := existing.FileName == fileName
-			sameSize := req.DeclaredSize <= 0 || existing.FileSize == req.DeclaredSize
-			if !sameTarget || !sameName || !sameSize {
+			if !sameTarget || !sameName {
 				return UploadRecord{}, false, &ToolError{
 					Code:    CodeIdempotencyConflict,
 					Message: "this Idempotency-Key was already used for a different file or knowledge base",
@@ -238,6 +239,47 @@ func (s *stagedUploadStorage) Stage(
 						"existing_knowledge_base_id": existing.KnowledgeBaseID,
 						"existing_file_name":         existing.FileName,
 						"existing_file_size":         existing.FileSize,
+					},
+				}
+			}
+			// Replay must still verify the bytes: the HTTP transport does not set
+			// DeclaredSize, so the old size-only check never fired and a key reused
+			// with different content (even a different length) would silently
+			// return the stale receipt. Read the body bounded by the size limit,
+			// hash it, and refuse the replay on any mismatch.
+			digest := sha256.New()
+			var size int64
+			buf := make([]byte, 1<<20)
+			for {
+				n, readErr := content.Read(buf)
+				if n > 0 {
+					size += int64(n)
+					if size > existing.FileSize {
+						return UploadRecord{}, false, &ToolError{
+							Code:    CodeIdempotencyConflict,
+							Message: "this Idempotency-Key was reused with different bytes",
+							Details: map[string]any{
+								"existing_file_size": existing.FileSize,
+								"declared_size":      size,
+							},
+						}
+					}
+					digest.Write(buf[:n])
+				}
+				if readErr != nil {
+					if errors.Is(readErr, io.EOF) {
+						break
+					}
+					return UploadRecord{}, false, fmt.Errorf("cannot read the replay body: %w", readErr)
+				}
+			}
+			if size != existing.FileSize || hex.EncodeToString(digest.Sum(nil)) != existing.SHA256 {
+				return UploadRecord{}, false, &ToolError{
+					Code:    CodeIdempotencyConflict,
+					Message: "this Idempotency-Key was reused with different bytes",
+					Details: map[string]any{
+						"existing_file_size": existing.FileSize,
+						"actual_size":        size,
 					},
 				}
 			}
@@ -453,7 +495,124 @@ func (s *stagedUploadStorage) Sweep(ctx context.Context) (int, int, error) {
 	if s.receipts == nil {
 		return 0, 0, nil
 	}
-	return s.receipts.Sweep(ctx, time.Now().UTC())
+	now := time.Now().UTC()
+	// Delete the on-disk payloads FIRST, then flip the rows: a crash between the
+	// two leaves a row whose bytes are already gone (safe to retry) rather than a
+	// row pointing at a file that still consumes disk. Live leases are never in
+	// the returned set, so an in-flight import is not cut off.
+	expired, err := s.receipts.ExpiredPayloadRecords(ctx, now)
+	if err == nil {
+		for _, record := range expired {
+			removeAllQuiet(filepath.Dir(s.payloadPath(record)))
+		}
+	}
+	payloads, receipts, sweepErr := s.receipts.Sweep(ctx, now)
+	// The row-driven pass only sees rows. The disk scan closes the gaps a row
+	// cannot report: bytes left behind by a crash between the receipt write and
+	// the file delete, and directories whose row is already gone. Without it the
+	// row counts look clean while the disk still fills up.
+	orphans := s.sweepOrphanDirs(ctx, now)
+	return payloads + orphans, receipts, sweepErr
+}
+
+// sweepDirGrace spares directories young enough to be mid-Stage. Stage writes
+// the bytes BEFORE the receipt row exists, so for the length of one upload a
+// legitimate directory has no row; a directory modified within this grace is
+// left for the next sweep rather than deleted under the writer.
+const sweepDirGrace = 15 * time.Minute
+
+// sweepOrphanDirs walks the staging tree and removes upload directories the
+// database no longer accounts for. A directory is kept when its upload id still
+// belongs to a live record — staged/failed inside the payload TTL or with a
+// live lease, importing in any lease state so crash recovery can retry against
+// the bytes — or when it was modified within the grace window. Everything else
+// (rows already imported or expired whose bytes survived a failed delete, and
+// directories with no row at all) is removed, which is what makes the sweep
+// converge on the disk contents instead of only on the row counts.
+func (s *stagedUploadStorage) sweepOrphanDirs(ctx context.Context, now time.Time) int {
+	live, err := s.receipts.LivePayloadRecords(ctx)
+	if err != nil {
+		logger.Warnf(ctx, "[mcpserver] staging disk sweep skipped: cannot list live receipts: %v", err)
+		return 0
+	}
+	keep := make(map[string]struct{}, len(live))
+	for _, record := range live {
+		if record.State == UploadStateImporting {
+			keep[record.UploadID] = struct{}{}
+			continue
+		}
+		leaseLive := record.LeaseToken != "" &&
+			(record.LeaseExpiresAt == nil || record.LeaseExpiresAt.After(now))
+		if record.ExpiresAt.After(now) || leaseLive {
+			keep[record.UploadID] = struct{}{}
+		}
+	}
+
+	removed := 0
+	// The tree is root/<workspace>/<storage-hash>/<upload-id>; walk it level by
+	// level so only that shape is considered, and prune directories left empty.
+	workspaces, err := os.ReadDir(s.root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			logger.Warnf(ctx, "[mcpserver] staging disk sweep cannot read %s: %v", s.root, err)
+		}
+		return 0
+	}
+	for _, ws := range workspaces {
+		wsDir := filepath.Join(s.root, ws.Name())
+		if !ws.IsDir() {
+			continue
+		}
+		storageDirs, err := os.ReadDir(wsDir)
+		if err != nil {
+			logger.Warnf(ctx, "[mcpserver] staging disk sweep cannot read %s: %v", wsDir, err)
+			continue
+		}
+		for _, storage := range storageDirs {
+			storageDir := filepath.Join(wsDir, storage.Name())
+			if !storage.IsDir() {
+				continue
+			}
+			uploads, err := os.ReadDir(storageDir)
+			if err != nil {
+				logger.Warnf(ctx, "[mcpserver] staging disk sweep cannot read %s: %v", storageDir, err)
+				continue
+			}
+			for _, upload := range uploads {
+				id := upload.Name()
+				if _, liveID := keep[id]; liveID {
+					continue
+				}
+				// Only UUID-shaped entries are considered upload directories; the
+				// tree is server-owned but a misconfigured root must not turn
+				// the sweep into a purge of anything unrecognizable.
+				if !uploadIDPattern.MatchString(id) {
+					continue
+				}
+				dir := filepath.Join(storageDir, id)
+				if recentlyModified(dir, now, sweepDirGrace) {
+					continue
+				}
+				removeAllQuiet(dir)
+				removed++
+			}
+			// os.Remove only succeeds on an empty directory, so this prunes the
+			// tree without ever touching remaining uploads.
+			_ = os.Remove(storageDir)
+		}
+		_ = os.Remove(wsDir)
+	}
+	return removed
+}
+
+// recentlyModified reports whether the directory exists and was touched within
+// the grace window. Unreadable state errs on the side of keeping the directory.
+func recentlyModified(dir string, now time.Time, grace time.Duration) bool {
+	info, err := os.Stat(dir)
+	if err != nil {
+		return !os.IsNotExist(err)
+	}
+	return now.Sub(info.ModTime()) < grace
 }
 
 // fileHeaderFromReader adapts a staged payload into the *multipart.FileHeader

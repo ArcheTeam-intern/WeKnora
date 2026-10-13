@@ -148,3 +148,31 @@ $ ./.venv/Scripts/python.exe -m pytest tests -q
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/tests/{test_import_corpus,test_eval_metrics}.py` —— 单元测试
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/requirements-dev.txt` —— 脚本依赖
 - `E:/GoLandCode/WeKnora-Agent/{main,agent}.py`、`tests/` —— 纯 Agent 实现 + 13 测试
+
+## 9. 审查修复（R1–R14，2026-10-13）
+
+依据《WeKnora 与纯 Agent 实施审查》(2026-10-13) 修复全部 P1/P2：
+
+| 编号 | 修复 |
+| --- | --- |
+| R1 | 用户模式上传过 `requireKBWriteOwnership` 门禁（scope/upload_transport/tools_import） |
+| R2 | Wiki `SourceRefsV2` 改 `gorm:"-"` 派生视图，无数据库迁移 |
+| R3 | `tools_graph` 增 `mapSliceOf` 兼容两种 provenance 形状 |
+| R4 | `tools_wiki` `found_kbs` 断言改 `map[string][]string` |
+| R5 | 图谱关系去重 key 优先 `rel.ID`；端点 id 缺失时按名字兜底（修复同名同型关系误合并） |
+| R6 | 评估闭环改从**检索类工具原始轨迹**取证：`found_documents`/`hit_evidence` 只认 search/grep/read/ask/graph/wiki 输出，列表与状态工具不再灌水；证据子串经本地语料反查归属文档（补 search 文本不带文档 UUID 的缺口）；`recompute_found.py` 同源重derive |
+| R7 | 状态计数零值误判 known → 真实计数查询，失败标 unknown |
+| R8 | 幂等回放仍做有界读取 + 大小 + SHA256 校验 |
+| R9 | Sweep 补齐生产调度入口：`StagingSweepRunner`（1h 周期、启动延迟 5min、ResourceCleaner 优雅停止）；Sweep 增加磁盘扫描，清理 DB 行已消失/已导入但字节残留的孤儿目录，尊重活跃租约与写入宽限期 |
+| R10 | Complete 落回执失败返回 retryable errorResult，携带已建知识 id |
+| R11 | CORS `AllowHeaders` 补 KB scope 与 `Idempotency-Key` |
+| R12 | Neo4j 关系匹配后 union chunks（不再只 onCreate） |
+| R13 | backend 截断信号 `backendTruncated` 端到端透传 |
+| R14 | `requirements-dev.txt` 不再 `-r` 相邻仓库路径 |
+
+### R1–R14 验证
+
+- `weknora-check`（Linux 容器，sqlite_fts5 tag）：mcpserver / middleware / service / sqlite retriever / router / types / agent/tools（-skip DuckDB、Excel 沙箱）/ neo4j 全部 **PASS**；新增 R9 磁盘扫描 + 调度器 5 项单测通过。
+- 重建 `weknora-agent-app:local` 并重启验证栈（healthy），启动日志确认 `[mcpserver] staged-upload sweep starting: interval=1h0m0s`。
+- 12 题评估真实模型重跑（12/12 ok）：文档 recall 1.0（宏平均）、找齐率 10/10、必需证据 recall 1.0（工具证据子串）、无答案诚实 2/2。旧报告（R6 前语义）存档于 `report.pre-r6.md`、`runs.pre-r6.jsonl`。
+- 人工复核仍未执行（0/12），事实准确率 / 完整率 / 引用支持率维持 not_evaluated。

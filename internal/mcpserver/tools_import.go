@@ -163,7 +163,13 @@ func (s *Server) handleImportDocumentFile(
 		})
 	}
 
-	// Step 3: the write check uses the original caller's own grants.
+	// Step 3: the write check uses the original caller's own grants. The
+	// ownership gate (creator-or-admin) runs before the grant so a Viewer or a
+	// non-creator Contributor is refused even though ResolveKB would mint a
+	// same-tenant Admin grant for them.
+	if err := s.requireKBWriteOwnership(ctx, kb); err != nil {
+		return errorResult(err), nil
+	}
 	scopedCtx, err := s.scopedKBContext(ctx, kb, types.OrgRoleEditor)
 	if err != nil {
 		return errorResult(err), nil
@@ -237,14 +243,26 @@ func (s *Server) handleImportDocumentFile(
 	// enqueue, and that must never be reported as a silent success.
 	queued := created.ParseStatus != types.ParseStatusFailed && created.ErrorMessage == ""
 
-	// Step 6: persist the receipt BEFORE the payload is released.
+	// Step 6: persist the receipt BEFORE the payload is released. A failure
+	// here is NOT a full success: the document exists but the upload receipt
+	// was not recorded, so a replay later cannot be answered from the receipt.
+	// Report it as a retryable error that names the created document — the
+	// caller can recover via get_upload_status / get_document_status instead of
+	// re-uploading the same bytes.
 	if err := staging.Complete(ctx, lease, UploadCompletion{
 		DocumentID:   created.ID,
 		Deduplicated: duplicate,
 		Queued:       queued,
 	}); err != nil {
-		logger.Warnf(ctx, "[mcpserver] imported document %s but could not persist the receipt: %v",
-			created.ID, err)
+		return errorResult(&ToolError{
+			Code:      CodeInternal,
+			Message:   fmt.Sprintf("document %s was created but the upload receipt could not be persisted", created.ID),
+			Retryable: true,
+			Details: map[string]any{
+				"knowledge_id": created.ID,
+				"upload_id":    uploadID,
+			},
+		}), nil
 	}
 
 	result := map[string]any{

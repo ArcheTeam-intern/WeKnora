@@ -1,5 +1,10 @@
 # Offline validation scripts only. The Agent runtime (WeKnora-Agent/requirements.txt)
-# must not gain these; import_corpus/mcp_smoke/run_eval run from the Agent's venv
-# where the SDK is already installed, and add only what the scripts themselves need.
--r ../../WeKnora-Agent/requirements.txt
+# must not gain these; import_corpus/mcp_smoke/run_eval/score_eval run from the
+# Agent's venv where langchain / langchain-mcp-adapters / python-dotenv are already
+# installed (implementation-plan §11.3 points at that venv's python). This file
+# therefore lists ONLY the extra packages the scripts need and does not -r the
+# Agent requirements — a relative -r from here resolves inside the WeKnora tree
+# (WeKnora/WeKnora-Agent) instead of the sibling checkout, which is a hard-coded
+# wrong path. Install into the Agent venv with:
+#   E:\GoLandCode\WeKnora-Agent\.venv\Scripts\python.exe -m pip install -r examples/mcp-validation/requirements-dev.txt
 httpx==0.28.1

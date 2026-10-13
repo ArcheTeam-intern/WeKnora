@@ -60,11 +60,11 @@ func describeKnowledgeStatus(k *types.Knowledge) documentStatusReport {
 	// a JSON-RPC 500.
 	if k == nil {
 		return documentStatusReport{
-			ParseStatus:        unknownStatus,
-			ParseStatusKnown:   false,
-			IndexStatus:        unknownStatus,
+			ParseStatus:          unknownStatus,
+			ParseStatusKnown:     false,
+			IndexStatus:          unknownStatus,
 			PendingSubtasksKnown: true,
-			Note:               "the document row is not available",
+			Note:                 "the document row is not available",
 		}
 	}
 	report := documentStatusReport{
@@ -232,19 +232,34 @@ func (s *Server) handleGetKnowledgeBaseStatus(ctx context.Context, req mcp.CallT
 		},
 	}
 
-	// Counts come from the same counters the admin API shows. They are read from
-	// the knowledge base record rather than counted here, because the count
-	// methods live on the knowledge REPOSITORY (not the service) and the service
-	// already fills these fields for exactly this purpose.
-	//
-	// A nil counter is reported as unknown rather than as zero: zero documents
-	// and "could not count" must not look the same to an agent.
-	if kb.KnowledgeCount >= 0 && kb.ChunkCount >= 0 {
-		report.Documents = kb.KnowledgeCount
-		report.Chunks = kb.ChunkCount
-		report.Processing = kb.ProcessingCount
-		report.CountsKnown = true
-	} else {
+	// Counts are read from the live service, not from the knowledge-base row:
+	// KnowledgeCount / ChunkCount / ProcessingCount are gorm:"-" computed
+	// fields that the read path does not fill, so their Go zero value (0) must
+	// never be mistaken for a real "zero documents" count. A count that cannot
+	// be obtained is reported unknown, so "could not count" and "zero documents"
+	// stay distinguishable.
+	countsKnown := false
+	if s.knowledgeService != nil {
+		if docs, err := s.knowledgeService.GetRepository().CountKnowledgeByKnowledgeBaseID(
+			ctx, kb.TenantID, kb.ID); err == nil {
+			report.Documents = docs
+			countsKnown = true
+		}
+		if processing, err := s.knowledgeService.GetRepository().CountKnowledgeByStatus(ctx, kb.TenantID, kb.ID,
+			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}); err == nil {
+			report.Processing = processing
+		}
+	}
+	if s.chunkService != nil {
+		if chunks, err := s.chunkService.GetRepository().CountChunksByKnowledgeBaseID(
+			ctx, kb.TenantID, kb.ID); err == nil {
+			report.Chunks = chunks
+		} else {
+			countsKnown = false
+		}
+	}
+	report.CountsKnown = countsKnown
+	if !countsKnown {
 		report.Note = "document counters are unavailable; treat the counts as unknown"
 	}
 	report.IsProcessing = kb.IsProcessing || report.Processing > 0

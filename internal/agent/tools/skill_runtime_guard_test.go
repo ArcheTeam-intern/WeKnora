@@ -53,6 +53,15 @@ func TestSkillPythonPackageRecoveryInstallsWithoutPip(t *testing.T) {
 					t.Skip("uv is required")
 				}
 			}
+			if variant.name == "ensurepip" {
+				// Debian splits ensurepip into python3-venv, so minimal images
+				// ship a python3 that cannot run the fallback at all — an
+				// environment gap, not a recovery-logic failure.
+				probe := exec.Command("python3", "-m", "ensurepip", "--version")
+				if out, err := probe.CombinedOutput(); err != nil {
+					t.Skipf("python3 -m ensurepip is required: %v: %s", err, out)
+				}
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 			defer cancel()
 			dir := t.TempDir()

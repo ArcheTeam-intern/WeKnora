@@ -97,42 +97,25 @@ def build_report(runs_path: Path, review_path: Path, output_path: Path, manifest
     unanswerable = 0
     no_answer_honest = 0
     for run in runs:
-        question = run.get("question_id", "?")
         required_docs = run.get("required_documents", [])
-        # "found" comes from BOTH the model-cited logical doc ids (docNN
-        # pattern) and the cited WeKnora UUIDs reverse-resolved through the
-        # corpus manifest. The plan requires us to read both: docNN identifies
-        # the corpus, UUIDs identify the real KB rows.
-        run["manifest_uuids"] = manifest_uuids
-        uuid2log = {v: k for k, v in manifest_uuids.items()}
-        final = run.get("final_answer", "")
-        from_score = set(run.get("found_documents") or [])
-        from_uuid = set()
-        for u in re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", final):
-            logical = uuid2log.get(u)
-            if logical:
-                from_uuid.add(logical.replace("doc", ""))
-        found_doc_ids = {d.replace("doc", "") for d in from_score} | from_uuid
-        # Evidence: the model wrote the answer text; a required_evidence snippet
-        # is "hit" when its first 18 characters appear verbatim in the answer.
-        # This is a coarse proxy; real support is decided by the human review
-        # template.
+        # run_eval.py now emits found_documents straight from the tool evidence
+        # (cited knowledge UUIDs reverse-resolved through the manifest), and
+        # hit_evidence from the tool content. No further re-derivation here.
+        found_doc_ids = {d.replace("doc", "") for d in run.get("found_documents", [])}
         required_evidence = run.get("required_evidence") or []
-        hit_evidences = [e for e in required_evidence if e and e[:18] in final]
+        hit_evidences = run.get("hit_evidence") or []
         run["_found_doc_ids"] = sorted(found_doc_ids)
         run["_hit_evidence"] = hit_evidences
         if not required_docs:
             run["_doc_metrics"] = document_metrics([], [])
             run["_answerable"] = False
             unanswerable += 1
-            # Honest "I don't know" is when the model names ZERO required_evidence
-            # fragments as truth. Per the plan §8 / §7.2, an unanswerable
-            # question is handled correctly when the answer reports the
-            # evidence gap and never invents a citation. We do NOT use
-            # found_documents here: a model that names docs in its searched
-            # scope is allowed; what matters is whether it quoted an evidence
-            # fragment as truth (hit_evidence is non-empty).
-            if not hit_evidences:
+            # Honest handling: no required_evidence fragment quoted as truth,
+            # AND the run did not surface a tool/service error (an error is
+            # "could not answer", which the plan distinguishes from "no
+            # evidence exists"). Fabrication is judged by the human review's
+            # refusal_fabricated_content field, not guessed here.
+            if not hit_evidences and not run.get("tool_error"):
                 no_answer_honest += 1
             continue
         answerable += 1
@@ -148,19 +131,38 @@ def build_report(runs_path: Path, review_path: Path, output_path: Path, manifest
         if em["recall"] is not None:
             evidence_recalls.append(em["recall"])
 
+    # Human-review metrics: only count questions the reviewer actually marked
+    # reviewed=true. Unreviewed questions contribute nothing (never 0).
+    manual = review.get("questions", {}) if isinstance(review, dict) else {}
+    fact_acc, fact_comp, cit_sup = [], [], []
+    reviewed = 0
+    for qid, entry in manual.items():
+        hr = entry.get("human_review") or {}
+        if not hr.get("reviewed"):
+            continue
+        reviewed += 1
+        if hr.get("verifiable_claims"):
+            fact_acc.append(hr.get("correct_claims", 0) / hr["verifiable_claims"])
+        if hr.get("necessary_facts_total"):
+            fact_comp.append(hr.get("covered_facts", 0) / hr["necessary_facts_total"])
+        if hr.get("total_cited_claims"):
+            cit_sup.append(hr.get("supported_cited_claims", 0) / hr["total_cited_claims"])
+
     lines = ["# WeKnora MCP 验证评估报告", ""]
     lines.append(f"总题数：{len(runs)}（可回答 {answerable}，无答案 {unanswerable}）")
     lines.append(f"文档 recall（宏平均）：{macro_average(doc_recalls)}")
     lines.append(f"文档找齐率：{sum(all_found)}/{len(all_found)}")
-    lines.append(f"必需证据 recall（宏平均，子串匹配启发式）：{macro_average(evidence_recalls)}")
-    lines.append(f"无答案诚实处理：{no_answer_honest}/{unanswerable}")
-    # Manual review rows are keyed by question id; the plan requires a human to
-    # fill fact/citation counts before accuracy is evaluated.
-    manual = review.get("questions", {}) if isinstance(review, dict) else {}
-    lines.append(f"人工复核题数：{len(manual)}")
+    lines.append(f"必需证据 recall（宏平均，工具证据子串匹配）：{macro_average(evidence_recalls)}")
+    lines.append(f"无答案诚实处理（无编造证据 + 无工具错误）：{no_answer_honest}/{unanswerable}")
     lines.append("")
-    lines.append("> 事实准确率 / 完整率 / 引用支持率需人工复核完成后才能评出；")
-    lines.append("> 未复核时保持 not_evaluated。")
+    lines.append("## 人工复核指标")
+    lines.append(f"已复核题数：{reviewed}/{len(manual)}")
+    lines.append(f"事实准确率（宏平均）：{macro_average(fact_acc)}")
+    lines.append(f"事实完整率（宏平均）：{macro_average(fact_comp)}")
+    lines.append(f"引用支持率（宏平均）：{macro_average(cit_sup)}")
+    if reviewed == 0:
+        lines.append("")
+        lines.append("> 尚未有人工复核，事实准确率 / 完整率 / 引用支持率为 not_evaluated。")
     output_path.write_text("\n".join(lines), encoding="utf-8")
 
 

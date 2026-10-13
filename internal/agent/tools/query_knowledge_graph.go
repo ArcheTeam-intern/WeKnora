@@ -78,12 +78,16 @@ type graphTruncation struct {
 	chunksTotal    int
 	termsMatched   int
 	termsTotal     int
+	// backendTruncated marks that the graph store itself hit its row cap, so
+	// the relation list is a subset even when the per-query relation cap did
+	// not fire. Without this, a backend-capped result reads as complete.
+	backendTruncated bool
 }
 
 // truncated reports whether any cap fired.
 func (tr graphTruncation) truncated() bool {
 	return tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksFetched ||
-		tr.termsTotal > tr.termsMatched
+		tr.termsTotal > tr.termsMatched || tr.backendTruncated
 }
 
 // statement renders the block the model reads when a cap fired, and nothing
@@ -109,6 +113,10 @@ func (tr graphTruncation) statement() string {
 			"left out can hide an entity, so name the entity you mean in query.\n",
 			tr.termsMatched, tr.termsTotal, graphQueryMaxTerms)
 	}
+	if tr.backendTruncated {
+		b.WriteString("  - The graph store returned a truncated relation set (its row cap fired); " +
+			"the listed relations may not be the entities' complete neighbourhood.\n")
+	}
 	b.WriteString("\n")
 	return b.String()
 }
@@ -128,6 +136,9 @@ func (tr graphTruncation) addToData(data map[string]interface{}) {
 	if tr.termsTotal > tr.termsMatched {
 		data["query_terms_total"] = tr.termsTotal
 		data["query_terms_omitted"] = tr.termsTotal - tr.termsMatched
+	}
+	if tr.backendTruncated {
+		data["graph_backend_truncated"] = true
 	}
 }
 
@@ -246,10 +257,13 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		graphResults  []*types.SearchResult // chunks the matched entities come from
 		textResults   []*types.SearchResult
 		relations     []*types.GraphRelation
-		chunksFetched int      // evidence chunks fetched, before scope filtering
-		chunksTotal   int      // evidence chunks the matched entities reference
-		warnings      []string // failures of one source while the other returned results
-		err           error
+		chunksFetched int // evidence chunks fetched, before scope filtering
+		chunksTotal   int // evidence chunks the matched entities reference
+		// backendTruncated marks that the graph store hit its row cap, so the
+		// relation list is a subset regardless of the per-query relation cap.
+		backendTruncated bool
+		warnings         []string // failures of one source while the other returned results
+		err              error
 	}
 
 	var wg sync.WaitGroup
@@ -298,6 +312,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			var relations []*types.GraphRelation
 			if graph != nil {
 				relations = graph.Relation
+				res.backendTruncated = graph.RelationTruncated
 			}
 			// Text search complements the graph: relations say how entities
 			// connect, text hits carry statements the extraction missed. A KB
@@ -348,6 +363,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	seenRelations := make(map[string]bool)
 	relationsTotal := 0
 	chunksFetched, chunksTotal := 0, 0
+	backendTruncated := false
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
@@ -366,6 +382,9 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		kbCounts[kbID] = len(result.graphResults) + len(result.textResults)
 		chunksFetched += result.chunksFetched
 		chunksTotal += result.chunksTotal
+		if result.backendTruncated {
+			backendTruncated = true
+		}
 		for _, r := range result.graphResults {
 			if !seenChunks[r.ID] {
 				seenChunks[r.ID] = true
@@ -379,12 +398,24 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 		}
 		for _, rel := range result.relations {
-			// The uniqueness key includes the relation's provenance so two
-			// same-named same-typed relations from different documents stay
-			// distinct instances instead of collapsing into one (whose source
-			// list would then be wrong). A pre-provenance relation has an empty
-			// KnowledgeID and degrades to the name/type key.
-			key := rel.KnowledgeID + "\x00" + rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
+			// The uniqueness key prefers the real relation identity (the Neo4j
+			// element id, then the endpoint ids) so two same-named same-typed
+			// relations from different documents stay distinct instances instead
+			// of collapsing into one (whose source list would then be wrong).
+			// KnowledgeID is a fallback, not the primary key: old edges persisted
+			// before provenance have no kg property, so KnowledgeID is empty and
+			// using it alone would merge them. The endpoint fallback must fire
+			// whenever either endpoint id is missing, not only when the whole
+			// key is empty: an edge read from a store without element ids would
+			// otherwise collapse every same-typed relation into "\x00type\x00".
+			key := rel.ID
+			if key == "" {
+				if rel.SourceID != "" || rel.TargetID != "" {
+					key = rel.SourceID + "\x00" + rel.Type + "\x00" + rel.TargetID
+				} else {
+					key = rel.KnowledgeID + "\x00" + rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
+				}
+			}
 			if seenRelations[key] {
 				continue
 			}
@@ -400,12 +431,13 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 	}
 	truncation := graphTruncation{
-		relationsShown: len(relations),
-		relationsTotal: relationsTotal,
-		chunksFetched:  chunksFetched,
-		chunksTotal:    chunksTotal,
-		termsMatched:   len(terms),
-		termsTotal:     len(terms) + termsDropped,
+		relationsShown:   len(relations),
+		relationsTotal:   relationsTotal,
+		chunksFetched:    chunksFetched,
+		chunksTotal:      chunksTotal,
+		termsMatched:     len(terms),
+		termsTotal:       len(terms) + termsDropped,
+		backendTruncated: backendTruncated,
 	}
 
 	sort.SliceStable(textHits, func(i, j int) bool {

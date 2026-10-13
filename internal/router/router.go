@@ -129,6 +129,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 			// the /mcp/:endpoint_id surface. X-WeKnora-User-Token carries the
 			// caller's user JWT on endpoints with require_user_identity.
 			"MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID", middleware.MCPUserTokenHeader,
+			// The knowledge-base selection header narrows the request scope, and
+			// Idempotency-Key makes the /uploads multipart endpoint replay-safe;
+			// both must survive a browser preflight or the upload/MCP call fails.
+			"X-WeKnora-Knowledge-Base-Ids", "Idempotency-Key",
 		},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin", "Mcp-Session-Id"},
 		AllowCredentials: true,

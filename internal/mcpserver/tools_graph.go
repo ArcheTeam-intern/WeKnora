@@ -157,20 +157,38 @@ func enrichGraphEdgesWithSourceRefsV2(
 	if !ok {
 		return
 	}
-	edgesRaw, ok := view["edges"].([]interface{})
-	if !ok {
+	edges := mapSliceOf(view["edges"])
+	if len(edges) == 0 {
 		return
 	}
 	// The agent tool already loaded the evidence chunks into data["results"];
 	// index them by chunk id so each edge can cite exactly its own chunks'
 	// content and KB, never the whole query's set.
 	quotes, kbs := graphChunkIndex(data["results"])
-	for _, raw := range edgesRaw {
-		edge, ok := raw.(map[string]interface{})
-		if !ok {
-			continue
-		}
+	for _, edge := range edges {
 		edge["source_refs_v2"] = graphEdgeRefs(edge, quotes, kbs)
+	}
+}
+
+// mapSliceOf normalizes a value that may be either []map[string]interface{}
+// (the in-process shape the business tool builds) or []interface{} (a
+// JSON-decoded shape) into the former. The MCP enrichment must accept both:
+// the business tool returns the native slice, and only an HTTP round-trip would
+// turn it into []interface{}, which the MCP layer never does for in-process calls.
+func mapSliceOf(raw interface{}) []map[string]interface{} {
+	switch v := raw.(type) {
+	case []map[string]interface{}:
+		return v
+	case []interface{}:
+		out := make([]map[string]interface{}, 0, len(v))
+		for _, e := range v {
+			if m, ok := e.(map[string]interface{}); ok {
+				out = append(out, m)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
 
@@ -179,15 +197,7 @@ func enrichGraphEdgesWithSourceRefsV2(
 // dropped; a chunk present here but not cited by an edge is simply unused.
 func graphChunkIndex(raw interface{}) (quotes, kbs map[string]string) {
 	quotes, kbs = map[string]string{}, map[string]string{}
-	entries, ok := raw.([]interface{})
-	if !ok {
-		return quotes, kbs
-	}
-	for _, e := range entries {
-		entry, ok := e.(map[string]interface{})
-		if !ok {
-			continue
-		}
+	for _, entry := range mapSliceOf(raw) {
 		chunkID := graphEntryString(entry, "chunk_id")
 		if chunkID == "" {
 			continue

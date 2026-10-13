@@ -244,7 +244,14 @@ type WikiPage struct {
 	// the document store; kept alongside SourceRefs for backward
 	// compatibility with readers that haven't, so older code paths
 	// continue to work unchanged.
-	SourceRefsV2 []SourceRefV2 `json:"source_refs_v2,omitempty" gorm:"type:json"`
+	//
+	// It is a DERIVED view, not a stored column: WikiPageSourceRefsToV2
+	// rebuilds it from the persisted SourceRefs (and only returns a stored
+	// V2 when one was materialized in-memory for a single response). There
+	// is deliberately no database column — the review found that tagging it
+	// type:json made GORM try to write a source_refs_v2 column that no
+	// migration creates, which would fail every wiki page create.
+	SourceRefsV2 []SourceRefV2 `json:"source_refs_v2,omitempty" gorm:"-"`
 	// ChunkRefs records the specific source-document chunks this page was
 	// built from — one UUID per cited chunk. Populated during ingest from
 	// the chunk-citation pass; refreshed wholesale whenever the page is

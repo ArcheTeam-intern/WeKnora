@@ -259,6 +259,12 @@ func (s *Server) authorizeUploadTarget(
 		return nil, err
 	}
 	kb := kbs[0]
+	// User-mode write gate before any grant is minted: the REST file route uses
+	// OwnedKBOrAdmin, and the MCP surface must apply the same creator-or-admin
+	// rule rather than letting ResolveKB grant same-tenant Admin to any member.
+	if err := s.requireKBWriteOwnership(ctx, kb); err != nil {
+		return nil, err
+	}
 	scoped, err := s.scopedKBContext(ctx, kb, types.OrgRoleEditor)
 	if err != nil {
 		return nil, err

@@ -217,7 +217,7 @@ func (s *Server) enrichReadPageWithSourceRefsV2(
 	if res == nil || res.Data == nil || len(kbs) == 0 || s.wikiService == nil {
 		return
 	}
-	foundKBsRaw, ok := res.Data["found_kbs"].(map[string]interface{})
+	foundKBsRaw, ok := res.Data["found_kbs"].(map[string][]string)
 	if !ok || len(foundKBsRaw) == 0 {
 		return
 	}
@@ -242,8 +242,7 @@ func (s *Server) enrichReadPageWithSourceRefsV2(
 	}
 	out := make(map[string]interface{}, len(slugs))
 	for _, slug := range slugs {
-		kbsForSlug := slugEntryToIDs(foundKBsRaw[slug])
-		for _, kbID := range kbsForSlug {
+		for _, kbID := range foundKBsRaw[slug] {
 			kb := kbsByID[kbID]
 			if kb == nil {
 				continue
@@ -262,32 +261,6 @@ func (s *Server) enrichReadPageWithSourceRefsV2(
 	}
 	if len(out) > 0 {
 		res.Data["source_refs_v2"] = out
-	}
-}
-
-// slugEntryToIDs converts a found_kbs entry (either []interface{} of strings
-// or []string) into a flat slice of KB ids. Anything else yields an empty
-// slice; the call site treats that as "skip" rather than erroring.
-func slugEntryToIDs(raw interface{}) []string {
-	switch v := raw.(type) {
-	case []string:
-		out := make([]string, 0, len(v))
-		for _, s := range v {
-			if s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []interface{}:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok && s != "" {
-				out = append(out, s)
-			}
-		}
-		return out
-	default:
-		return nil
 	}
 }
 
