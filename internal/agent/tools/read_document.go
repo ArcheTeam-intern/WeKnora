@@ -330,7 +330,12 @@ func (t *ReadDocumentTool) readPage(
 	data["offset"] = offset
 	data["page_size"] = limit
 	data["page"] = offset/limit + 1
-	if next := offset + len(chunks); int64(next) < total && len(chunks) > 0 {
+	// truncated is always present so a client can branch on it instead of on
+	// whether next_offset happens to exist; next_offset points at the first
+	// chunk not yet returned (the plan's "continue with next_offset" contract).
+	next := offset + len(chunks)
+	data["truncated"] = len(chunks) > 0 && int64(next) < total
+	if data["truncated"].(bool) {
 		data["next_offset"] = next
 	}
 	return &types.ToolResult{

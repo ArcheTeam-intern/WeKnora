@@ -339,6 +339,13 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if rerankRejected > 0 {
 		result.Data["rerank_rejected"] = rerankRejected
 	}
+	// Completeness signal: search is top-K, so reaching the requested limit is
+	// evidence that further relevant chunks may exist but is NOT proof the set
+	// is exhausted. Expose the requested limit and a truncated flag so clients
+	// never read "10 returned" as "only 10 exist" (plan §8 task 4).
+	count, _ := result.Data["count"].(int)
+	result.Data["requested_limit"] = limit
+	result.Data["truncated"] = count >= limit
 	if len(final) == 0 {
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}

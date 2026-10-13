@@ -286,6 +286,30 @@ func TestReadDocumentPagesFromExactOffset(t *testing.T) {
 	}
 }
 
+// A page read must always expose truncated: true with next_offset on a
+// non-final page, and truncated: false with no next_offset on the final page,
+// so a client branches on the flag rather than on next_offset's presence.
+func TestReadDocumentPageTruncatedFlag(t *testing.T) {
+	tool, _ := newReadDocumentFixture(12)
+	first, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":0,"limit":4}`))
+	if err != nil || !first.Success {
+		t.Fatalf("res=%+v err=%v", first, err)
+	}
+	if first.Data["truncated"] != true || first.Data["next_offset"] != 4 {
+		t.Fatalf("first page must be truncated with next_offset=4: %+v", first.Data)
+	}
+	last, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":8,"limit":4}`))
+	if err != nil || !last.Success {
+		t.Fatalf("res=%+v err=%v", last, err)
+	}
+	if last.Data["truncated"] != false {
+		t.Fatalf("last page must not be truncated: %+v", last.Data)
+	}
+	if _, ok := last.Data["next_offset"]; ok {
+		t.Fatalf("last page must not carry next_offset: %+v", last.Data)
+	}
+}
+
 func TestReadDocumentUnalignedWindowReachesDocumentEnd(t *testing.T) {
 	tool, repo := newReadDocumentFixture(9)
 	res, err := tool.Execute(context.Background(), json.RawMessage(`{"id":"doc-1","offset":6,"limit":4}`))
