@@ -1,0 +1,152 @@
+{
+  "_comment": [
+    "12 道标注题（计划 §4 步骤四、§6.5）。题库只使用 manifest 的 logical_doc_id（doc01…），",
+    "真实 WeKnora UUID 由 scripts/run_eval.py 通过 eval/corpus/manifest.json 解析。",
+    "类别与数量固定为：单文档事实 3、跨文档综合 3、Wiki 概览 2、实体关系 2、无答案 2。",
+    "required_evidence 是必须能在被引用语料文件里按字面找到的片段，由仓库校验脚本核对。",
+    "expected_facts 是机器辅助指标 expected_fact_match_rate 的分子来源，不冒充事实准确率。"
+  ],
+  "corpus_manifest": "eval/corpus/manifest.json",
+  "questions": [
+    {
+      "id": "q01",
+      "category": "single_document",
+      "question": "云雀平台的混合检索是怎么执行的？",
+      "relevant_documents": ["doc01"],
+      "required_evidence": ["语义检索与关键词检索并行执行，再由重排模型合并结果"],
+      "expected_facts": ["并行执行", "重排模型合并结果"],
+      "answerable": true
+    },
+    {
+      "id": "q02",
+      "category": "single_document",
+      "question": "知识库分为哪几个级别？机密级知识库的导出需要满足什么条件？",
+      "relevant_documents": ["doc04"],
+      "required_evidence": [
+        "**公开级**：所有员工可读",
+        "**机密级**：需业务空间管理员单独授权，且禁止导出原文",
+        "机密级知识库的导出需要部门负责人与安全负责人双签"
+      ],
+      "expected_facts": ["公开级、内部级、机密级", "禁止导出原文", "双签"],
+      "answerable": true
+    },
+    {
+      "id": "q03",
+      "category": "single_document",
+      "question": "生产环境的发布窗口是什么？发现权限泄露后必须怎么处理？",
+      "relevant_documents": ["doc09"],
+      "required_evidence": [
+        "发布窗口为工作日 10:00 至 16:00，禁止在周五发布",
+        "一旦发现权限泄露，必须立即回滚并按安全事件流程上报"
+      ],
+      "expected_facts": ["禁止在周五发布", "立即回滚"],
+      "answerable": true
+    },
+    {
+      "id": "q04",
+      "category": "cross_document",
+      "question": "2.1 版本的负责人是谁？为什么 2.1 的 Wiki 生成必须在 2.0 上线后开始？",
+      "relevant_documents": ["doc02", "doc03"],
+      "required_evidence": [
+        "负责 Wiki 生成与前端展示，是 2.1 版本的负责人",
+        "2.1 的 Wiki 生成必须在 2.0 上线后开始，因为两者共用同一套分块结果"
+      ],
+      "expected_facts": ["周颖", "共用同一套分块结果"],
+      "answerable": true
+    },
+    {
+      "id": "q05",
+      "category": "cross_document",
+      "question": "语料里「文档召回率」出现了两个不同的数字：云雀平台的目标值是多少，旧版知识库系统的实际值是多少？为什么这两个数字不能混用？",
+      "relevant_documents": ["doc01", "doc10"],
+      "required_evidence": [
+        "混合检索的文档召回率目标：不低于 90%",
+        "旧版系统的文档召回率约为 61%",
+        "该系统已于 2024 年 6 月下线"
+      ],
+      "expected_facts": ["不低于 90%", "约为 61%", "已于 2024 年 6 月下线"],
+      "answerable": true
+    },
+    {
+      "id": "q06",
+      "category": "cross_document",
+      "question": "知识图谱抽取准确率的验收门槛是多少，属于哪个版本？Wiki 页面事实支持率的验收目标是多少，属于哪个版本？",
+      "relevant_documents": ["doc02", "doc06"],
+      "required_evidence": [
+        "2.0 的验收依赖图谱抽取的准确率不低于 85%",
+        "Wiki 页面的事实支持率验收目标为不低于 95%"
+      ],
+      "expected_facts": ["图谱抽取的准确率不低于 85%", "事实支持率验收目标为不低于 95%"],
+      "answerable": true
+    },
+    {
+      "id": "q07",
+      "category": "wiki_overview",
+      "question": "自动生成的 Wiki 包含哪几类页面？一个 Wiki 页面由多篇文档生成时，来源如何归属？",
+      "relevant_documents": ["doc06"],
+      "required_evidence": [
+        "包含摘要页、实体页与概念页",
+        "一个 Wiki 页面可能由多篇文档生成，此时不提供单一文档归属"
+      ],
+      "expected_facts": ["摘要页、实体页与概念页", "不提供单一文档归属"],
+      "answerable": true
+    },
+    {
+      "id": "q08",
+      "category": "wiki_overview",
+      "question": "通过 MCP 浏览 Wiki 时，wiki_graph 的 depth 与 limit 有什么限制？列表页大小上限是多少？",
+      "relevant_documents": ["doc07"],
+      "required_evidence": [
+        "`wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200",
+        "列表页大小最大 100"
+      ],
+      "expected_facts": ["depth", "limit 最大 200", "列表页大小最大 100"],
+      "answerable": true
+    },
+    {
+      "id": "q09",
+      "category": "entity_relation",
+      "question": "赵岚和吴桐分别负责什么？算法组为什么不能同时并行图谱抽取与重排模型调优？",
+      "relevant_documents": ["doc02", "doc03"],
+      "required_evidence": [
+        "负责重排模型与实体抽取质量",
+        "负责向量化与分块策略",
+        "算法组同时支持图谱抽取与重排模型调优，因此排期上两者不能并行"
+      ],
+      "expected_facts": ["重排模型与实体抽取质量", "向量化与分块策略", "两者不能并行"],
+      "answerable": true
+    },
+    {
+      "id": "q10",
+      "category": "entity_relation",
+      "question": "知识图谱抽取相关的线上问题由谁处理？生产环境一线值班如何轮换？",
+      "relevant_documents": ["doc03"],
+      "required_evidence": [
+        "图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列",
+        "一线值班由后端组轮值，每两周轮换一次"
+      ],
+      "expected_facts": ["直接转给算法组，不进入一线值班队列", "每两周轮换一次"],
+      "answerable": true
+    },
+    {
+      "id": "q11",
+      "category": "unanswerable",
+      "question": "云雀平台 3.0 版本计划在什么时间发布？该版本包含哪些功能？",
+      "relevant_documents": [],
+      "required_evidence": [],
+      "expected_facts": [],
+      "answerable": false,
+      "notes": "语料只覆盖 2.0～2.3，从未提到 3.0；正确行为是明确说明证据不足。"
+    },
+    {
+      "id": "q12",
+      "category": "unanswerable",
+      "question": "云雀平台 2025 年的研发预算和人力成本分别是多少？",
+      "relevant_documents": [],
+      "required_evidence": [],
+      "expected_facts": [],
+      "answerable": false,
+      "notes": "语料没有任何金额信息；正确行为是明确说明证据不足，且不得编造数字。"
+    }
+  ]
+}

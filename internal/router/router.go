@@ -126,8 +126,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 			"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID",
 			"X-Embed-Session", "X-External-User-ID", "X-External-User-Token", "X-WeKnora-Desktop-Token",
 			// Streamable HTTP MCP clients running in a browser send these on
-			// the /mcp/:endpoint_id surface.
-			"MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID",
+			// the /mcp/:endpoint_id surface. X-WeKnora-User-Token carries the
+			// caller's user JWT on endpoints with require_user_identity.
+			"MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID", middleware.MCPUserTokenHeader,
 		},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin", "Mcp-Session-Id"},
 		AllowCredentials: true,
@@ -187,8 +188,16 @@ func NewRouter(params RouterParams) *gin.Engine {
 	)
 
 	// Workspace MCP server surface (/mcp/:endpoint_id): bearer-token auth per
-	// endpoint, so it must precede the global Auth middleware.
-	RegisterMCPServerRoutes(r, params.MCPServer, params.MCPEndpointService, params.TenantService)
+	// endpoint, so it must precede the global Auth middleware. Endpoints that
+	// opt into require_user_identity additionally validate the caller's
+	// X-WeKnora-User-Token, which is why the identity services are wired in.
+	RegisterMCPServerRoutes(r, params.MCPServer, params.MCPEndpointService, params.TenantService,
+		middleware.MCPIdentityDeps{
+			TenantService: params.TenantService,
+			UserService:   params.UserService,
+			MemberService: params.TenantMemberService,
+			Config:        params.Config,
+		})
 
 	// Short-lived capability URLs for IM and other clients that cannot attach
 	// WeKnora authentication headers.

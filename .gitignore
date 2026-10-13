@@ -2,6 +2,7 @@
 .*
 # 但不忽略特定隐藏文件和目录
 !.env.example
+!.env.prototype.example
 !.gitignore
 !.github/
 

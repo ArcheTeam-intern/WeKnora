@@ -113,16 +113,17 @@ func (s *mcpEndpointService) Create(
 		return nil, "", err
 	}
 	row := &types.MCPEndpoint{
-		TenantID:           tenantID,
-		Name:               name,
-		Description:        strings.TrimSpace(ep.Description),
-		Enabled:            ep.Enabled,
-		TokenHash:          HashMCPEndpointToken(token),
-		TokenHint:          mcpEndpointTokenHint(token),
-		KnowledgeBaseIDs:   types.StringArray(kbIDs),
-		Tools:              types.StringArray(tools),
-		DefaultAgentID:     agentID,
-		RateLimitPerMinute: rate,
+		TenantID:            tenantID,
+		Name:                name,
+		Description:         strings.TrimSpace(ep.Description),
+		Enabled:             ep.Enabled,
+		TokenHash:           HashMCPEndpointToken(token),
+		TokenHint:           mcpEndpointTokenHint(token),
+		KnowledgeBaseIDs:    types.StringArray(kbIDs),
+		Tools:               types.StringArray(tools),
+		DefaultAgentID:      agentID,
+		RateLimitPerMinute:  rate,
+		RequireUserIdentity: ep.RequireUserIdentity,
 	}
 	if err := requireKeyCoversEndpoint(ctx, row); err != nil {
 		return nil, "", err
@@ -191,6 +192,9 @@ func (s *mcpEndpointService) Update(
 			return nil, err
 		}
 		ep.RateLimitPerMinute = rate
+	}
+	if upd.RequireUserIdentity != nil {
+		ep.RequireUserIdentity = *upd.RequireUserIdentity
 	}
 	if err := requireKeyCoversEndpoint(ctx, ep); err != nil {
 		return nil, err

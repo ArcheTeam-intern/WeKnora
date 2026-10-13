@@ -1,0 +1,221 @@
+# =============================================================================
+# WeKnora-Agent prototype WeKnora image.
+#
+# Requirement (implementation plan task 1): "WeKnora uses the current source,
+# keeps anydoc, and adds the sqlite_fts5 build tag; do not modify the generation
+# or retrieval business logic."
+#
+# The shipped docker/Dockerfile.app cannot express that combination: its
+# `make build-prod GO_BUILD_TAGS=anydoc` hard-codes the tag list. This file
+# mirrors it and adds sqlite_fts5 to the tag list, plus the `check` stage that
+# runs the Go tests in a Linux environment (the plan's `weknora-check`).
+#
+# Build (from the WeKnora checkout, which is the compose build context):
+#   docker build -f <this file> --build-arg WITH_ANYDOC=1 -t weknora-agent-app:local .
+#
+# Stages:
+#   anydoc-lib  - Rust static archive for the anydoc engine (`anydoc` tag)
+#   builder     - Go binary tagged anydoc,sqlite_fts5 + test runner image
+#   check       - go test runner with the sqlite_fts5 tag (weknora-check)
+#   runtime     - debian-slim runtime, same layout as docker/Dockerfile.app
+# =============================================================================
+
+# Registry prefix for the base images. Defaults to Docker Hub; set
+# BASE_REGISTRY=docker.1ms.run/ (or another mirror) where hub.docker.com is
+# slow or blocked. The published WeKnora release is pulled from the same
+# registry so a mirrored deployment stays self-consistent.
+ARG BASE_REGISTRY=
+# Documentation/diagnostics only: buildkit refuses a variable inside
+# `COPY --from=<image>`, so the runtime stage pins the same reference literally.
+# Bump both together with WEKNORA_VERSION in deploy/.env.prototype.
+ARG WEKNORA_RELEASE_ARG=v0.8.2
+
+# ---------------------------------------------------------------------------
+# anydoc static archive (Rust). Skipped entirely when WITH_ANYDOC=0, but the
+# plan requires anydoc for DOCX and text PDF, so it stays on by default.
+# ---------------------------------------------------------------------------
+FROM ${BASE_REGISTRY}golang:1.26-bookworm AS anydoc-lib
+ARG APK_MIRROR_ARG
+ARG WITH_ANYDOC=1
+# Mirror hooks for restricted networks. Empty means "use the official hosts".
+#   RUSTUP_DIST_SERVER=https://mirrors.tuna.tsinghua.edu.cn/rustup
+#   RUSTUP_UPDATE_ROOT=https://mirrors.tuna.tsinghua.edu.cn/rustup/rustup
+#   CARGO_REGISTRY_MIRROR=sparse+https://rsproxy.cn/index/
+ARG RUSTUP_DIST_SERVER_ARG=
+ARG RUSTUP_UPDATE_ROOT_ARG=
+ARG CARGO_REGISTRY_MIRROR_ARG=
+WORKDIR /app
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends git build-essential libsqlite3-dev curl ca-certificates pkg-config && \
+    rm -rf /var/lib/apt/lists/*
+ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
+ENV PATH=/usr/local/cargo/bin:$PATH
+# The toolchain download is the least reliable step of the whole build on a
+# restricted network, and the upstream script is a curl|sh pipeline without
+# `set -e`: a failed download would otherwise surface later as a confusing
+# "cargo not found". Fetch, retry, install, then verify cargo really exists.
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        set -eux; \
+        if [ -n "$RUSTUP_DIST_SERVER_ARG" ]; then export RUSTUP_DIST_SERVER="$RUSTUP_DIST_SERVER_ARG"; fi; \
+        if [ -n "$RUSTUP_UPDATE_ROOT_ARG" ]; then export RUSTUP_UPDATE_ROOT="$RUSTUP_UPDATE_ROOT_ARG"; fi; \
+        curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 30 \
+            --proto '=https' --tlsv1.2 https://sh.rustup.rs -o /tmp/rustup-init.sh; \
+        sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable --no-modify-path; \
+        command -v cargo; \
+        cargo --version; \
+        rm -f /tmp/rustup-init.sh; \
+    fi
+RUN if [ -n "$CARGO_REGISTRY_MIRROR_ARG" ]; then \
+        mkdir -p "$CARGO_HOME" && \
+        printf '[source.crates-io]\nreplace-with = "mirror"\n\n[source.mirror]\nregistry = "%s"\n' \
+            "$CARGO_REGISTRY_MIRROR_ARG" > "$CARGO_HOME/config.toml"; \
+    fi
+COPY scripts/build-anydoc-lib.sh /app/scripts/build-anydoc-lib.sh
+COPY third_party/anydoc-go /app/third_party/anydoc-go
+RUN if [ "$WITH_ANYDOC" = "1" ]; then \
+        /app/scripts/build-anydoc-lib.sh; \
+    else \
+        mkdir -p /app/third_party/anydoc-go/lib; \
+    fi
+
+# ---------------------------------------------------------------------------
+# Builder: compile the application and keep a test runner alongside it.
+# ---------------------------------------------------------------------------
+FROM ${BASE_REGISTRY}golang:1.26-bookworm AS builder
+ARG APK_MIRROR_ARG
+ARG WITH_ANYDOC=1
+ARG VERSION_ARG=unknown
+ARG COMMIT_ID_ARG=unknown
+ARG BUILD_TIME_ARG=unknown
+ARG GO_VERSION_ARG=unknown
+# Go module proxy. proxy.golang.org is frequently slow or unreachable on a
+# restricted network, and a stalled download fails the build with an opaque
+# exit code, so the proxy is passed through explicitly.
+ARG GOPROXY_ARG=https://proxy.golang.org,direct
+ARG GOSUMDB_ARG=sum.golang.org
+
+WORKDIR /app
+
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends git build-essential libsqlite3-dev curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV GOPROXY=${GOPROXY_ARG} GOSUMDB=${GOSUMDB_ARG} GOFLAGS=-mod=mod
+
+COPY go.mod go.sum ./
+COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+# The DuckDB spatial extension bundle is downloaded by the upstream build; the
+# prototype never queries spatial data, so cmd/download is skipped here and the
+# runtime stage copies the prebuilt archive from the base release image instead.
+COPY . .
+COPY --from=anydoc-lib /app/third_party/anydoc-go/lib /app/third_party/anydoc-go/lib
+
+ENV VERSION=${VERSION_ARG} COMMIT_ID=${COMMIT_ID_ARG} \
+    BUILD_TIME=${BUILD_TIME_ARG} GO_VERSION=${GO_VERSION_ARG}
+
+# The one line that differs from docker/Dockerfile.app: sqlite_fts5 joins
+# anydoc in the tag list so the SQLite keyword (FTS5/BM25) index exists.
+RUN --mount=type=cache,target=/go/pkg/mod \
+    if [ "$WITH_ANYDOC" = "1" ]; then \
+        make build-prod GO_BUILD_TAGS="anydoc,sqlite_fts5"; \
+    else \
+        make build-prod GO_BUILD_TAGS="sqlite_fts5"; \
+    fi
+RUN --mount=type=cache,target=/go/pkg/mod cp -r /go/pkg/mod/github.com/yanyiwu/ /app/yanyiwu/
+
+# ---------------------------------------------------------------------------
+# weknora-check: runs the tasks 2/3 test surface in a Linux environment.
+#
+# It is built from golang directly rather than from `builder` so the check image
+# never pays for the Rust/anydoc stage: the check packages do not import the
+# anydoc binding's build tag.
+# ---------------------------------------------------------------------------
+FROM ${BASE_REGISTRY}golang:1.26-bookworm AS check
+ARG APK_MIRROR_ARG
+ARG GOPROXY_ARG=https://proxy.golang.org,direct
+ARG GOSUMDB_ARG=sum.golang.org
+WORKDIR /app
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends git build-essential libsqlite3-dev curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+ENV GOPROXY=${GOPROXY_ARG} GOSUMDB=${GOSUMDB_ARG} GOFLAGS=-mod=mod
+COPY go.mod go.sum ./
+COPY third_party/anydoc-go/go.mod third_party/anydoc-go/go.mod
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+COPY . .
+ENV CGO_ENABLED=1
+RUN chmod +x /app/scripts/weknora-check.sh
+CMD ["/app/scripts/weknora-check.sh"]
+
+# ---------------------------------------------------------------------------
+# Runtime: same layout as docker/Dockerfile.app so the entrypoint, migrations
+# and bundled frontend keep working.
+# ---------------------------------------------------------------------------
+FROM ${BASE_REGISTRY}debian:12.12-slim AS runtime
+
+WORKDIR /app
+ARG APK_MIRROR_ARG
+
+ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
+    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.1.zip
+
+RUN useradd -m -s /bin/bash appuser
+
+# Point apt at the mirror before anything is fetched: the first apt run used to
+# go straight to deb.debian.org, which is exactly the host that is slow or
+# returns 502 on a restricted network.
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends \
+        build-essential postgresql-client default-mysql-client tzdata sed curl bash vim wget \
+        libsqlite3-0 \
+        python3 python3-pip python3-dev libffi-dev libssl-dev \
+        gosu \
+        ffmpeg && \
+    python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /data/files /data/mcp-staging && \
+    chown -R appuser:appuser /app /data/files /data/mcp-staging
+
+# The migrate tool and the DuckDB spatial bundle come from the published
+# release image, which already ships both; only the WeKnora binary is rebuilt.
+#
+# The image reference is pinned literally rather than through an ARG: buildkit
+# does not expand variables inside `COPY --from=<image>`, and the release payload
+# is not what this stage exists to change. Bump it together with
+# WEKNORA_RELEASE_ARG (which still feeds the compose build args) when the
+# upstream release moves.
+COPY --from=wechatopenai/weknora-app:v0.8.2 /usr/local/bin/migrate /usr/local/bin/
+COPY --from=wechatopenai/weknora-app:v0.8.2 /home/appuser/.duckdb /home/appuser/.duckdb
+COPY --from=wechatopenai/weknora-app:v0.8.2 /opt/weknora/browserskill /opt/weknora/browserskill
+
+COPY --from=builder /app/yanyiwu/ /go/pkg/mod/github.com/yanyiwu/
+COPY --from=builder /app/config ./config
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/dataset/samples ./dataset/samples
+COPY --from=builder /app/WeKnora ./WeKnora
+
+RUN chown -R appuser:appuser /home/appuser/.duckdb && \
+    chmod +x ./scripts/*.sh
+
+EXPOSE 8080
+
+ENTRYPOINT ["./scripts/docker-entrypoint.sh"]
+CMD ["./WeKnora"]

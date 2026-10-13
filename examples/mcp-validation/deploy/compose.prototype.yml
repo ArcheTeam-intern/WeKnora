@@ -1,0 +1,172 @@
+# WeKnora knowledge service only. Agent runs separately via CLI.
+name: ${COMPOSE_PROJECT_NAME:-weknora-agent-prototype}
+services:
+  weknora:
+    build:
+      context: ${WEKNORA_SOURCE_DIR:-../../..}
+      dockerfile: ${WEKNORA_DOCKERFILE:-examples/mcp-validation/deploy/Dockerfile.prototype-app}
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY:-}
+        WITH_ANYDOC: ${WITH_ANYDOC:-1}
+        WEKNORA_RELEASE_ARG: ${WEKNORA_VERSION:-v0.8.2}
+        APK_MIRROR_ARG: ${APK_MIRROR_ARG:-}
+        GOPROXY_ARG: ${GOPROXY_ARG:-}
+        GOSUMDB_ARG: ${GOSUMDB_ARG:-}
+        RUSTUP_DIST_SERVER_ARG: ${RUSTUP_DIST_SERVER_ARG:-}
+        RUSTUP_UPDATE_ROOT_ARG: ${RUSTUP_UPDATE_ROOT_ARG:-}
+        CARGO_REGISTRY_MIRROR_ARG: ${CARGO_REGISTRY_MIRROR_ARG:-}
+        VERSION_ARG: ${WEKNORA_VERSION:-v0.8.2}
+    image: ${PROTOTYPE_APP_IMAGE:-weknora-agent-app:local}
+    container_name: WeKnoraAgent-app
+    ports:
+    - 127.0.0.1:${PROTOTYPE_WEKNORA_PORT:-18082}:8080
+    environment:
+      TZ: ${TZ:-Asia/Shanghai}
+      GIN_MODE: ${GIN_MODE:-release}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      AUTO_MIGRATE: 'true'
+      AUTO_RECOVER_DIRTY: 'true'
+      DB_DRIVER: sqlite
+      DB_PATH: /data/files/weknora.db
+      STORAGE_TYPE: local
+      LOCAL_STORAGE_BASE_DIR: /data/files
+      RETRIEVE_DRIVER: sqlite
+      STREAM_MANAGER_TYPE: redis
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${PROTOTYPE_REDIS_PASSWORD:-}
+      REDIS_DB: '0'
+      REDIS_PREFIX: 'prototype:'
+      DOCREADER_ADDR: ''
+      NEO4J_ENABLE: ${NEO4J_ENABLE:-true}
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USERNAME: ${NEO4J_USERNAME:-neo4j}
+      NEO4J_PASSWORD: ${NEO4J_PASSWORD:-prototype-neo4j-password-change-me}
+      WEKNORA_MCP_STAGING_ROOT: /data/mcp-staging
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required - see deploy/.env.prototype}
+      SYSTEM_AES_KEY: ${SYSTEM_AES_KEY:?SYSTEM_AES_KEY is required - see deploy/.env.prototype}
+      SYSTEM_SIGNING_KEY: ${SYSTEM_SIGNING_KEY:-}
+      WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL: ${WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL:-}
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      CONCURRENCY_POOL_SIZE: ${CONCURRENCY_POOL_SIZE:-2}
+      WEKNORA_MODEL_MAX_CONCURRENCY: '2'
+      WEKNORA_ASYNQ_CORE_CONCURRENCY: '2'
+      WEKNORA_ASYNQ_POSTPROCESS_CONCURRENCY: '1'
+      WEKNORA_ASYNQ_ENRICHMENT_CONCURRENCY: '2'
+      WEKNORA_ASYNQ_MAINTENANCE_CONCURRENCY: '1'
+      WEKNORA_ASYNQ_SHARED_CONCURRENCY: '2'
+      WEKNORA_WIKI_ASYNQ_CONCURRENCY: '1'
+      SSRF_WHITELIST_EXTRA: ${SSRF_WHITELIST_EXTRA:-neo4j,redis,198.18.0.0/15}
+      DISABLE_REGISTRATION: ${DISABLE_REGISTRATION:-false}
+      WEKNORA_TENANT_ENABLE_RBAC: 'true'
+    volumes:
+    - prototype-files:/data/files
+    - prototype-staging:/data/mcp-staging
+    healthcheck:
+      test:
+      - CMD
+      - curl
+      - -fsS
+      - http://localhost:8080/health
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 40s
+    depends_on:
+      redis:
+        condition: service_healthy
+      neo4j:
+        condition: service_healthy
+    networks:
+    - weknora-agent-net
+    restart: unless-stopped
+  weknora-ui:
+    image: ${WEKNORA_UI_IMAGE:-wechatopenai/weknora-ui:${WEKNORA_VERSION:-v0.8.2}}
+    container_name: WeKnoraAgent-ui
+    ports:
+    - 127.0.0.1:${PROTOTYPE_WEKNORA_UI_PORT:-18180}:80
+    environment:
+      MAX_FILE_SIZE_MB: ${MAX_FILE_SIZE_MB:-50}
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-zh-CN}
+      APP_HOST: weknora
+      APP_PORT: '8080'
+      APP_SCHEME: http
+    depends_on:
+      weknora:
+        condition: service_healthy
+    networks:
+    - weknora-agent-net
+    restart: unless-stopped
+  redis:
+    image: redis:7.0-alpine
+    container_name: WeKnoraAgent-redis
+    command: 'redis-server --appendonly yes ${PROTOTYPE_REDIS_PASSWORD:+--requirepass ${PROTOTYPE_REDIS_PASSWORD}}
+
+      '
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - redis-cli ${PROTOTYPE_REDIS_PASSWORD:+-a ${PROTOTYPE_REDIS_PASSWORD}} ping | grep -q PONG
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+    - prototype-redis:/data
+    networks:
+    - weknora-agent-net
+    restart: unless-stopped
+  neo4j:
+    image: neo4j:2025.10.1
+    container_name: WeKnoraAgent-neo4j
+    environment:
+      NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-prototype-neo4j-password-change-me}
+      NEO4J_apoc_export_file_enabled: 'true'
+      NEO4J_apoc_import_file_enabled: 'true'
+      NEO4J_apoc_import_file_use__neo4j__config: 'true'
+      NEO4JLABS_PLUGINS: '["apoc"]'
+    volumes:
+    - prototype-neo4j:/data
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - wget -qO- http://localhost:7474/ >/dev/null 2>&1 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+    - weknora-agent-net
+    restart: unless-stopped
+  weknora-check:
+    build:
+      context: ${WEKNORA_SOURCE_DIR:-../../..}
+      dockerfile: ${WEKNORA_DOCKERFILE:-examples/mcp-validation/deploy/Dockerfile.prototype-app}
+      target: check
+      args:
+        BASE_REGISTRY: ${BASE_REGISTRY:-}
+        WITH_ANYDOC: ${WITH_ANYDOC:-1}
+        APK_MIRROR_ARG: ${APK_MIRROR_ARG:-}
+        GOPROXY_ARG: ${GOPROXY_ARG:-}
+        GOSUMDB_ARG: ${GOSUMDB_ARG:-}
+    image: ${PROTOTYPE_CHECK_IMAGE:-weknora-agent-check:local}
+    container_name: WeKnoraAgent-check
+    profiles:
+    - tools
+    environment:
+      WEKNORA_CHECK_TAGS: ${WEKNORA_CHECK_TAGS:-sqlite_fts5}
+      WEKNORA_CHECK_PKGS: ${WEKNORA_CHECK_PKGS:-}
+      WEKNORA_CHECK_EXTRA: ${WEKNORA_CHECK_EXTRA:-}
+    networks:
+    - weknora-agent-net
+networks:
+  weknora-agent-net:
+    name: WeKnoraAgent-network
+    driver: bridge
+volumes:
+  prototype-files:
+    name: WeKnoraAgent-prototype-files
+  prototype-staging:
+    name: WeKnoraAgent-prototype-staging
+  prototype-redis:
+    name: WeKnoraAgent-prototype-redis
+  prototype-neo4j:
+    name: WeKnoraAgent-prototype-neo4j

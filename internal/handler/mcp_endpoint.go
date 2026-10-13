@@ -25,13 +25,14 @@ func NewMCPEndpointHandler(svc interfaces.MCPEndpointService) *MCPEndpointHandle
 }
 
 type mcpEndpointRequest struct {
-	Name               *string   `json:"name"`
-	Description        *string   `json:"description"`
-	Enabled            *bool     `json:"enabled"`
-	KnowledgeBaseIDs   *[]string `json:"knowledge_base_ids"`
-	Tools              *[]string `json:"tools"`
-	DefaultAgentID     *string   `json:"default_agent_id"`
-	RateLimitPerMinute *int      `json:"rate_limit_per_minute"`
+	Name                *string   `json:"name"`
+	Description         *string   `json:"description"`
+	Enabled             *bool     `json:"enabled"`
+	KnowledgeBaseIDs    *[]string `json:"knowledge_base_ids"`
+	Tools               *[]string `json:"tools"`
+	DefaultAgentID      *string   `json:"default_agent_id"`
+	RateLimitPerMinute  *int      `json:"rate_limit_per_minute"`
+	RequireUserIdentity *bool     `json:"require_user_identity"`
 }
 
 func stringValue(p *string) string {
@@ -100,13 +101,14 @@ func (h *MCPEndpointHandler) CreateMCPEndpoint(c *gin.Context) {
 		rate = *req.RateLimitPerMinute
 	}
 	ep, token, err := h.svc.Create(c.Request.Context(), tenantID, &types.MCPEndpoint{
-		Name:               stringValue(req.Name),
-		Description:        stringValue(req.Description),
-		Enabled:            enabled,
-		KnowledgeBaseIDs:   types.StringArray(kbIDs),
-		Tools:              types.StringArray(tools),
-		DefaultAgentID:     stringValue(req.DefaultAgentID),
-		RateLimitPerMinute: rate,
+		Name:                stringValue(req.Name),
+		Description:         stringValue(req.Description),
+		Enabled:             enabled,
+		KnowledgeBaseIDs:    types.StringArray(kbIDs),
+		Tools:               types.StringArray(tools),
+		DefaultAgentID:      stringValue(req.DefaultAgentID),
+		RateLimitPerMinute:  rate,
+		RequireUserIdentity: req.RequireUserIdentity != nil && *req.RequireUserIdentity,
 	})
 	if err != nil {
 		writeMCPEndpointMgmtError(c, err)
@@ -183,13 +185,14 @@ func (h *MCPEndpointHandler) UpdateMCPEndpoint(c *gin.Context) {
 		return
 	}
 	ep, err := h.svc.Update(c.Request.Context(), tenantID, id, interfaces.MCPEndpointUpdate{
-		Name:               req.Name,
-		Description:        req.Description,
-		Enabled:            req.Enabled,
-		KnowledgeBaseIDs:   req.KnowledgeBaseIDs,
-		Tools:              req.Tools,
-		DefaultAgentID:     req.DefaultAgentID,
-		RateLimitPerMinute: req.RateLimitPerMinute,
+		Name:                req.Name,
+		Description:         req.Description,
+		Enabled:             req.Enabled,
+		KnowledgeBaseIDs:    req.KnowledgeBaseIDs,
+		Tools:               req.Tools,
+		DefaultAgentID:      req.DefaultAgentID,
+		RateLimitPerMinute:  req.RateLimitPerMinute,
+		RequireUserIdentity: req.RequireUserIdentity,
 	})
 	if err != nil {
 		writeMCPEndpointMgmtError(c, err)
@@ -252,6 +255,7 @@ func mcpEndpointResponse(ep *types.MCPEndpoint, token string) gin.H {
 		"name":                  ep.Name,
 		"description":           ep.Description,
 		"enabled":               ep.Enabled,
+		"require_user_identity": ep.RequireUserIdentity,
 		"token_hint":            ep.TokenHint,
 		"knowledge_base_ids":    []string(ep.KnowledgeBaseIDs),
 		"tools":                 []string(ep.Tools),

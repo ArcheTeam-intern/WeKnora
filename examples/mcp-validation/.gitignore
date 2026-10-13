@@ -1,0 +1,6 @@
+deploy/.env.prototype
+deploy/mcp-endpoints.json
+eval/reports/*
+!eval/reports/manual-review.template.json
+!eval/reports/baseline.md
+__pycache__/

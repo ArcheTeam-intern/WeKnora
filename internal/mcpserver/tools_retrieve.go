@@ -22,8 +22,9 @@ const (
 func listKnowledgeBasesTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolListKnowledgeBases,
 		mcp.WithDescription("List the knowledge bases this endpoint can access, with their id, name, description "+
-			"and which retrieval modes (semantic, keyword, wiki) each supports. Call this first to learn what is in "+
-			"scope; other tools accept either the id or the exact name."),
+			"and which retrieval or generation modes each supports: semantic and keyword retrieval, wiki, "+
+			"graph (extracted entity relations), faq. Call this first to learn what is in scope; other tools "+
+			"accept either the id or the exact name."),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
 }
@@ -92,6 +93,13 @@ type knowledgeBaseSummary struct {
 	Description  string   `json:"description,omitempty"`
 	Type         string   `json:"type"`
 	Capabilities []string `json:"capabilities"`
+	// CapabilityFlags is the additive structured form of Capabilities. The plan
+	// asks for a graph capability indicator; a map keeps the legacy list stable
+	// for existing clients while giving new ones something unambiguous to read.
+	CapabilityFlags map[string]bool `json:"capability_flags"`
+	// Indexing mirrors the knowledge base's own enable switches, so a client can
+	// tell "asked for but not generated yet" from "not configured".
+	Indexing map[string]bool `json:"indexing_enabled"`
 }
 
 func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
@@ -105,48 +113,79 @@ func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
 	if kb.IsWikiEnabled() {
 		caps = append(caps, "wiki")
 	}
+	if kb.IsGraphEnabled() {
+		caps = append(caps, "graph")
+	}
+	if kb.Type == types.KnowledgeBaseTypeFAQ {
+		caps = append(caps, "faq")
+	}
 	return knowledgeBaseSummary{
 		ID:           kb.ID,
 		Name:         kb.Name,
 		Description:  kb.Description,
 		Type:         kb.Type,
 		Capabilities: caps,
+		CapabilityFlags: map[string]bool{
+			"vector":  kb.IsVectorEnabled(),
+			"keyword": kb.IsKeywordEnabled(),
+			"wiki":    kb.IsWikiEnabled(),
+			"graph":   kb.IsGraphEnabled(),
+			"faq":     kb.Type == types.KnowledgeBaseTypeFAQ,
+		},
+		Indexing: map[string]bool{
+			"vector":  kb.IsVectorEnabled(),
+			"keyword": kb.IsKeywordEnabled(),
+			"wiki":    kb.IsWikiEnabled(),
+			"graph":   kb.IsGraphEnabled(),
+		},
 	}
 }
 
 func (s *Server) handleListKnowledgeBases(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
-		return mcp.NewToolResultError("unauthorized"), nil
+		return errorResult(&ToolError{Code: CodeUnauthorized, Message: "unauthorized"}), nil
 	}
-	kbs, err := s.allowedKnowledgeBases(ctx, ep)
+	// Discovery deliberately ignores the request selection: this is how a client
+	// learns which knowledge bases it may select in the first place. It is still
+	// bounded by the endpoint range and the caller's authorization.
+	kbs, err := s.endpointKnowledgeBases(ctx, ep)
 	if err != nil {
-		return mcp.NewToolResultErrorFromErr("failed to list knowledge bases", err), nil
+		return errorResult(err), nil
 	}
 	out := make([]knowledgeBaseSummary, 0, len(kbs))
 	for _, kb := range kbs {
 		out = append(out, summarizeKnowledgeBase(kb))
 	}
-	return jsonResult(map[string]any{"knowledge_bases": out, "total": len(out)})
+	scope := RequestScopeOf(ctx)
+	return jsonResult(map[string]any{
+		"knowledge_bases": out,
+		"total":           len(out),
+		"selection": map[string]any{
+			"present":       scope.Present,
+			"selected":      scope.SelectedIDs(),
+			"scope_version": scope.Version,
+		},
+	})
 }
 
 func (s *Server) handleSearchKnowledge(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
-		return mcp.NewToolResultError("unauthorized"), nil
+		return errorResult(&ToolError{Code: CodeUnauthorized, Message: "unauthorized"}), nil
 	}
 	query, err := req.RequireString("query")
 	if err != nil || strings.TrimSpace(query) == "" {
-		return mcp.NewToolResultError("query is required"), nil
+		return errorResult(invalidArgument("query is required")), nil
 	}
 	kbs, err := s.selectKnowledgeBases(ctx, ep, req.GetStringSlice("knowledge_base_ids", nil))
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	kbs = retrievableKnowledgeBases(kbs)
 	if len(kbs) == 0 {
-		return mcp.NewToolResultError(
-			"none of the selected knowledge bases supports semantic or keyword retrieval"), nil
+		return errorResult(invalidArgument(
+			"none of the selected knowledge bases supports semantic or keyword retrieval")), nil
 	}
 	return s.runSearchKnowledge(ctx, kbs, strings.TrimSpace(query),
 		req.GetString("mode", tools.SearchModeHybrid), req.GetInt("limit", 0))
@@ -185,25 +224,25 @@ func (s *Server) runSearchKnowledgeWithFilter(
 func (s *Server) handleGrepChunks(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
-		return mcp.NewToolResultError("unauthorized"), nil
+		return errorResult(&ToolError{Code: CodeUnauthorized, Message: "unauthorized"}), nil
 	}
 	query, err := req.RequireString("query")
 	if err != nil || strings.TrimSpace(query) == "" {
-		return mcp.NewToolResultError("query is required"), nil
+		return errorResult(invalidArgument("query is required")), nil
 	}
 	kbs, err := s.selectKnowledgeBases(ctx, ep, req.GetStringSlice("knowledge_base_ids", nil))
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	kbs = retrievableKnowledgeBases(kbs)
 	if len(kbs) == 0 {
-		return mcp.NewToolResultError(
-			"none of the selected knowledge bases has a chunk index (vector or keyword)"), nil
+		return errorResult(invalidArgument(
+			"none of the selected knowledge bases has a chunk index (vector or keyword)")), nil
 	}
 	pattern, terms := grepPatternAndTerms(strings.TrimSpace(query))
 	if terms == "" {
-		return mcp.NewToolResultError("the pattern contains no literal text to look up; include at least one " +
-			"word, identifier or phrase (for example \"timeout|deadline\" instead of \"^\\d+$\")"), nil
+		return errorResult(invalidArgument("the pattern contains no literal text to look up; include at least one " +
+			"word, identifier or phrase (for example \"timeout|deadline\" instead of \"^\\d+$\")")), nil
 	}
 	return s.runSearchKnowledgeWithFilter(
 		ctx, kbs, terms, tools.SearchModeKeyword, req.GetInt("limit", 0), pattern,
@@ -272,21 +311,21 @@ func summarizeKnowledge(k *types.Knowledge) documentSummary {
 func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
-		return mcp.NewToolResultError("unauthorized"), nil
+		return errorResult(&ToolError{Code: CodeUnauthorized, Message: "unauthorized"}), nil
 	}
 	selector, err := req.RequireString("knowledge_base_id")
 	if err != nil {
-		return mcp.NewToolResultError("knowledge_base_id is required"), nil
+		return errorResult(invalidArgument("knowledge_base_id is required")), nil
 	}
 	kbs, err := s.selectKnowledgeBases(ctx, ep, []string{selector})
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	kb := kbs[0]
 	// Documents live under the knowledge base owner; run the listing there.
 	ctx, err = s.scopedKBContext(ctx, kb, types.OrgRoleViewer)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	page := req.GetInt("page", 1)
 	if page < 1 {
@@ -305,7 +344,8 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
 		types.KnowledgeListFilter{Keyword: strings.TrimSpace(req.GetString("keyword", ""))},
 	)
 	if err != nil {
-		return mcp.NewToolResultErrorFromErr("failed to list documents", err), nil
+		return errorResult(&ToolError{Code: CodeInternal, Message: "failed to list documents",
+			Details: map[string]any{"cause": err.Error()}}), nil
 	}
 	docs := []documentSummary{}
 	if rows, ok := result.Data.([]*types.Knowledge); ok {
@@ -325,19 +365,19 @@ func (s *Server) handleListDocuments(ctx context.Context, req mcp.CallToolReques
 func (s *Server) handleReadDocument(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
-		return mcp.NewToolResultError("unauthorized"), nil
+		return errorResult(&ToolError{Code: CodeUnauthorized, Message: "unauthorized"}), nil
 	}
 	knowledgeID, err := req.RequireString("knowledge_id")
 	if err != nil {
-		return mcp.NewToolResultError("knowledge_id is required"), nil
+		return errorResult(invalidArgument("knowledge_id is required")), nil
 	}
 	k, kb, err := s.knowledgeInScope(ctx, ep, knowledgeID)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	ctx, err = s.scopedKBContext(ctx, kb, types.OrgRoleViewer)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return errorResult(err), nil
 	}
 	limit := req.GetInt("limit", defaultChunkLimit)
 	if limit < 1 {

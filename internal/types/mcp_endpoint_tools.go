@@ -19,18 +19,25 @@ const (
 // They intentionally differ from the agent-internal tool names where the
 // external contract is simpler (one query, server-side session handling).
 const (
-	MCPEndpointToolListKnowledgeBases = "list_knowledge_bases"
-	MCPEndpointToolSearchKnowledge    = "search_knowledge"
-	MCPEndpointToolGrepChunks         = "grep_chunks"
-	MCPEndpointToolListDocuments      = "list_documents"
-	MCPEndpointToolReadDocument       = "read_document"
-	MCPEndpointToolAsk                = "ask"
-	MCPEndpointToolWikiSearch         = "wiki_search"
-	MCPEndpointToolWikiReadPage       = "wiki_read_page"
-	MCPEndpointToolWikiIndex          = "wiki_index"
-	MCPEndpointToolAddDocument        = "add_document"
-	MCPEndpointToolUpdateDocument     = "update_document"
-	MCPEndpointToolDeleteDocument     = "delete_document"
+	MCPEndpointToolListKnowledgeBases  = "list_knowledge_bases"
+	MCPEndpointToolSearchKnowledge     = "search_knowledge"
+	MCPEndpointToolGrepChunks          = "grep_chunks"
+	MCPEndpointToolListDocuments       = "list_documents"
+	MCPEndpointToolReadDocument        = "read_document"
+	MCPEndpointToolAsk                 = "ask"
+	MCPEndpointToolWikiSearch          = "wiki_search"
+	MCPEndpointToolWikiReadPage        = "wiki_read_page"
+	MCPEndpointToolWikiIndex           = "wiki_index"
+	MCPEndpointToolWikiListPages       = "wiki_list_pages"
+	MCPEndpointToolWikiGraph           = "wiki_graph"
+	MCPEndpointToolQueryKnowledgeGraph = "query_knowledge_graph"
+	MCPEndpointToolGetDocumentStatus   = "get_document_status"
+	MCPEndpointToolGetKBStatus         = "get_knowledge_base_status"
+	MCPEndpointToolImportDocumentFile  = "import_document_file"
+	MCPEndpointToolGetUploadStatus     = "get_upload_status"
+	MCPEndpointToolAddDocument         = "add_document"
+	MCPEndpointToolUpdateDocument      = "update_document"
+	MCPEndpointToolDeleteDocument      = "delete_document"
 )
 
 // MCPEndpointToolDefinition is the settings-facing description of one tool.
@@ -51,10 +58,17 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolGrepChunks, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolListDocuments, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolReadDocument, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolQueryKnowledgeGraph, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolGetDocumentStatus, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolGetKBStatus, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolGetUploadStatus, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolAsk, Group: MCPEndpointToolGroupChat},
 	{Name: MCPEndpointToolWikiSearch, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiReadPage, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiIndex, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolWikiListPages, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolWikiGraph, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolImportDocumentFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolAddDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUpdateDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolDeleteDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
@@ -122,6 +136,10 @@ func NormalizeMCPEndpointTools(in []string) []string {
 
 // MCPEndpointCapabilitiesForTools derives the tenant API key capabilities an
 // endpoint needs so its calls pass the same scope checks as a scoped API key.
+//
+// Unknown tool names are dropped by NormalizeMCPEndpointTools before an
+// endpoint is stored, so they contribute no capability: the mapping is driven
+// purely by catalog groups, and a test asserts every catalog entry has one.
 func MCPEndpointCapabilitiesForTools(tools []string) []string {
 	groups := map[MCPEndpointToolGroup]bool{}
 	for _, name := range tools {
@@ -130,7 +148,8 @@ func MCPEndpointCapabilitiesForTools(tools []string) []string {
 		}
 	}
 	caps := []string{}
-	if groups[MCPEndpointToolGroupRetrieve] || groups[MCPEndpointToolGroupWiki] || groups[MCPEndpointToolGroupChat] {
+	if groups[MCPEndpointToolGroupRetrieve] || groups[MCPEndpointToolGroupWiki] ||
+		groups[MCPEndpointToolGroupChat] {
 		caps = append(caps, string(APIKeyCapabilityRetrieve))
 	}
 	if groups[MCPEndpointToolGroupChat] {

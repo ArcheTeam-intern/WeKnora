@@ -40,12 +40,19 @@ type MCPEndpoint struct {
 	Tools StringArray `json:"tools" gorm:"type:jsonb;not null;default:'[]'"`
 	// DefaultAgentID is the agent used by the ask tool when the caller does
 	// not name one. Empty falls back to the workspace's builtin agent.
-	DefaultAgentID     string         `json:"default_agent_id"      gorm:"type:varchar(36);not null;default:''"`
-	RateLimitPerMinute int            `json:"rate_limit_per_minute" gorm:"not null;default:60"`
-	LastUsedAt         *time.Time     `json:"last_used_at,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
-	UpdatedAt          time.Time      `json:"updated_at"`
-	DeletedAt          gorm.DeletedAt `json:"deleted_at" gorm:"index"`
+	DefaultAgentID string `json:"default_agent_id"      gorm:"type:varchar(36);not null;default:''"`
+	// RequireUserIdentity turns this endpoint into a user-scoped surface: the
+	// caller must additionally present a real WeKnora user JWT in
+	// X-WeKnora-User-Token and the request is authorized as that user rather
+	// than as the endpoint's machine identity. Endpoints created before this
+	// field exist keep the historical machine-identity behaviour (false), so
+	// existing MCP clients are unaffected.
+	RequireUserIdentity bool           `json:"require_user_identity" gorm:"not null;default:false"`
+	RateLimitPerMinute  int            `json:"rate_limit_per_minute" gorm:"not null;default:60"`
+	LastUsedAt          *time.Time     `json:"last_used_at,omitempty"`
+	CreatedAt           time.Time      `json:"created_at"`
+	UpdatedAt           time.Time      `json:"updated_at"`
+	DeletedAt           gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 }
 
 // TableName returns the storage table.

@@ -20,13 +20,14 @@ type MCPEndpointRepository interface {
 // MCPEndpointUpdate carries the optional fields of an endpoint update. Nil
 // means "leave unchanged" so a partial PUT does not reset a field.
 type MCPEndpointUpdate struct {
-	Name               *string
-	Description        *string
-	Enabled            *bool
-	KnowledgeBaseIDs   *[]string
-	Tools              *[]string
-	DefaultAgentID     *string
-	RateLimitPerMinute *int
+	Name                *string
+	Description         *string
+	Enabled             *bool
+	KnowledgeBaseIDs    *[]string
+	Tools               *[]string
+	DefaultAgentID      *string
+	RateLimitPerMinute  *int
+	RequireUserIdentity *bool
 }
 
 // MCPEndpointService manages the lifecycle of workspace MCP endpoints and

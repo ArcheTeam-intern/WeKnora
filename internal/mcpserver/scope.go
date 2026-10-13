@@ -13,10 +13,34 @@ import (
 )
 
 // allowedKnowledgeBases returns every knowledge base the endpoint may touch,
-// each one re-authorized for the calling principal through access.ResolveKB
-// so a stale or foreign ID in the allowlist is dropped rather than trusted.
-// An unrestricted endpoint sees the workspace's own knowledge bases.
-func (s *Server) allowedKnowledgeBases(ctx context.Context, ep *types.MCPEndpoint) ([]*types.KnowledgeBase, error) {
+// each one re-authorized for the calling principal through access.ResolveKB so a
+// stale or foreign ID in the allowlist is dropped rather than trusted. An
+// unrestricted endpoint sees the workspace's own knowledge bases.
+//
+// The result is then narrowed by the caller's per-request selection, so the
+// effective range is always
+//
+//	user authorization 鈭?endpoint range 鈭?request selection
+//
+// A selection naming an id outside that intersection is refused (not silently
+// dropped): answering from a different range than the caller asked for would be
+// a silent authorization change.
+func (s *Server) allowedKnowledgeBases(
+	ctx context.Context, ep *types.MCPEndpoint,
+) ([]*types.KnowledgeBase, error) {
+	allowed, err := s.endpointKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, err
+	}
+	return applySelection(allowed, RequestScopeOf(ctx))
+}
+
+// endpointKnowledgeBases is the endpoint-range, user-authorized set without the
+// request selection applied. Kept separate because list_knowledge_bases is the
+// discovery tool: it reports candidates before a selection exists.
+func (s *Server) endpointKnowledgeBases(
+	ctx context.Context, ep *types.MCPEndpoint,
+) ([]*types.KnowledgeBase, error) {
 	if !ep.RestrictsKnowledgeBases() {
 		return s.kbService.ListKnowledgeBases(ctx)
 	}
@@ -106,8 +130,9 @@ func (s *Server) authorizeKB(
 }
 
 // selectKnowledgeBases narrows the allowed set to the ones a caller named,
-// accepting either IDs or exact (case-insensitive) names. With no selector
-// every allowed knowledge base is returned.
+// accepting either IDs or exact (case-insensitive) names. With no selector the
+// frozen request selection (or the whole allowed set when none was sent) is
+// returned.
 func (s *Server) selectKnowledgeBases(
 	ctx context.Context, ep *types.MCPEndpoint, requested []string,
 ) ([]*types.KnowledgeBase, error) {
@@ -116,7 +141,10 @@ func (s *Server) selectKnowledgeBases(
 		return nil, err
 	}
 	if len(allowed) == 0 {
-		return nil, fmt.Errorf("no knowledge base is available on this endpoint")
+		return nil, &ToolError{
+			Code:    CodeKBOutOfScope,
+			Message: "no knowledge base is available to this caller on this endpoint",
+		}
 	}
 	cleaned := make([]string, 0, len(requested))
 	for _, r := range requested {
@@ -132,8 +160,12 @@ func (s *Server) selectKnowledgeBases(
 	for _, sel := range cleaned {
 		kb := matchKnowledgeBase(allowed, sel)
 		if kb == nil {
-			return nil, fmt.Errorf("knowledge base %q was not found or is outside this endpoint's scope; "+
-				"call list_knowledge_bases to see what is available", sel)
+			// Naming a knowledge base outside the frozen range is a scope
+			// violation, not a missing resource: the caller may well be able to
+			// see it elsewhere, but not on this request.
+			return nil, outOfScope(
+				"knowledge base %q is outside the selected range for this request; "+
+					"call list_knowledge_bases to see what is available", sel)
 		}
 		if _, dup := seen[kb.ID]; dup {
 			continue
@@ -207,20 +239,29 @@ func wikiScopesFor(kbs []*types.KnowledgeBase) []tools.WikiScope {
 	return tools.NewWikiScopesFromKBIDs(knowledgeBaseIDs(kbs))
 }
 
-// knowledgeInScope loads a document and confirms it belongs to a knowledge
-// base the endpoint may touch. The lookup is tenant-agnostic because a shared
-// knowledge base's documents live under the owner tenant; the document must
-// then match an allowed knowledge base and that knowledge base's tenant.
+// knowledgeInScope loads a document and confirms it belongs to a knowledge base
+// the endpoint may touch AND that is inside the frozen request selection. The
+// lookup is tenant-agnostic because a shared knowledge base's documents live
+// under the owner tenant; the document must then match an allowed knowledge base
+// and that knowledge base's tenant.
+//
+// This is the by-id re-check the plan requires: narrowing must not be bypassable
+// by naming a document directly instead of searching for it.
 func (s *Server) knowledgeInScope(
 	ctx context.Context, ep *types.MCPEndpoint, knowledgeID string,
 ) (*types.Knowledge, *types.KnowledgeBase, error) {
 	knowledgeID = strings.TrimSpace(knowledgeID)
 	if knowledgeID == "" {
-		return nil, nil, fmt.Errorf("knowledge_id is required")
+		return nil, nil, invalidArgument("knowledge_id is required")
 	}
 	k, err := s.knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
 	if err != nil || k == nil {
-		return nil, nil, fmt.Errorf("document %q was not found", knowledgeID)
+		return nil, nil, notFound("document %q was not found", knowledgeID)
+	}
+	if scope := RequestScopeOf(ctx); scope.Narrows() && !scope.Contains(k.KnowledgeBaseID) {
+		return nil, nil, outOfScope(
+			"document %q belongs to a knowledge base outside the selected range for this request",
+			knowledgeID)
 	}
 	allowed, err := s.allowedKnowledgeBases(ctx, ep)
 	if err != nil {
@@ -228,7 +269,26 @@ func (s *Server) knowledgeInScope(
 	}
 	kb := matchKnowledgeBase(allowed, k.KnowledgeBaseID)
 	if kb == nil || kb.TenantID != k.TenantID {
-		return nil, nil, fmt.Errorf("document %q is outside this endpoint's scope", knowledgeID)
+		return nil, nil, outOfScope("document %q is outside this endpoint's scope", knowledgeID)
 	}
 	return k, kb, nil
+}
+
+// knowledgeBaseInScope re-checks a knowledge base named directly (knowledge base
+// status, wiki tools) against the frozen selection before any expensive work.
+func (s *Server) knowledgeBaseInScope(
+	ctx context.Context, selector string,
+) (*types.KnowledgeBase, error) {
+	ep, err := endpointFromContext(ctx)
+	if err != nil {
+		return nil, &ToolError{Code: CodeUnauthorized, Message: "unauthorized"}
+	}
+	kbs, err := s.selectKnowledgeBases(ctx, ep, []string{selector})
+	if err != nil {
+		return nil, err
+	}
+	if len(kbs) == 0 {
+		return nil, outOfScope("knowledge base %q is outside the selected range", selector)
+	}
+	return kbs[0], nil
 }

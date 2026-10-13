@@ -32,6 +32,22 @@ func NewNeo4jRepository(driver neo4j.Driver) interfaces.RetrieveGraphRepository 
 	return &Neo4jRepository{driver: driver, nodePrefix: "ENTITY"}
 }
 
+// Ping reports whether the graph store can actually answer queries. It exists
+// because SearchNode returns (nil, nil) both when graph retrieval is disabled
+// and when an entity simply has no matches; status surfaces must be able to
+// tell those apart instead of reporting "no relations" for a dead service.
+//
+// It satisfies interfaces.GraphPinger.
+func (n *Neo4jRepository) Ping(ctx context.Context) error {
+	if n == nil || n.driver == nil {
+		return interfaces.ErrGraphUnavailable
+	}
+	if err := n.driver.VerifyConnectivity(ctx); err != nil {
+		return fmt.Errorf("%w: %v", interfaces.ErrGraphUnavailable, err)
+	}
+	return nil
+}
+
 // _remove_hyphen removes hyphens from a string
 func _remove_hyphen(s string) string {
 	return strings.ReplaceAll(s, "-", "_")

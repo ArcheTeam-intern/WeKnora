@@ -31,18 +31,28 @@ func RegisterMCPEndpointRoutes(r *gin.RouterGroup, h *handler.MCPEndpointHandler
 // RegisterMCPServerRoutes mounts the public MCP server surface at
 // /mcp/:endpoint_id. It carries its own bearer-token auth and is registered
 // before the global Auth middleware, like the embed public routes.
+//
+// The identity dependencies are optional so callers that never publish
+// user-scoped endpoints (and existing tests) keep working; when they are
+// omitted, only endpoints in machine mode can be used.
 func RegisterMCPServerRoutes(
 	r *gin.Engine,
 	srv *mcpserver.Server,
 	endpointService interfaces.MCPEndpointService,
 	tenantService interfaces.TenantService,
+	identity ...middleware.MCPIdentityDeps,
 ) {
 	if srv == nil || endpointService == nil {
 		return
 	}
 	h := gin.WrapH(srv.Handler())
-	auth := middleware.MCPEndpointAuth(endpointService, tenantService)
+	auth := middleware.MCPEndpointAuth(endpointService, tenantService, identity...)
 	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
 		r.Handle(method, handler.MCPEndpointPath+":endpoint_id", auth, h)
 	}
+	// The binary upload channel of the same integration service. It shares the
+	// MCP authentication (endpoint token + user identity + request scope) and is
+	// mounted here so both surfaces are reachable under one address. It only
+	// stages bytes: creating knowledge stays a MCP tool call.
+	r.POST(handler.MCPEndpointPath+":endpoint_id/uploads", auth, gin.WrapH(srv.HandleUpload()))
 }

@@ -1,0 +1,118 @@
+{
+  "_comment": [
+    "演示语料 manifest。'sha256' 固定源文件字节；'logical_doc_id' 是题库使用的逻辑 ID（doc01…），绝不是 WeKnora UUID；'weknora_document_id' 与它的别名'imported_document_id' 由 scripts/import_corpus.py 在上传后回填，评估报告据此追溯到本语料。"
+  ],
+  "generated_by": "scripts/make_corpus.py",
+  "documents": [
+    {
+      "logical_doc_id": "doc01",
+      "doc_id": "doc01",
+      "file_name": "doc01-product-overview.md",
+      "title": "云雀平台产品概述",
+      "sha256": "3b463bca0c0a07bcb79a8d7a0a080dfbbf324ea7ee0cecce00c484d0e82aae22",
+      "bytes": 1130,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc02",
+      "doc_id": "doc02",
+      "file_name": "doc02-project-timeline.md",
+      "title": "云雀平台 2025 年度项目计划",
+      "sha256": "6a48ce5a2f5ef1b14b4a0951fab4ebca26fbaf02c579cc5ea32b365c4628f06e",
+      "bytes": 982,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc03",
+      "doc_id": "doc03",
+      "file_name": "doc03-team-roster.md",
+      "title": "项目组人员与职责说明",
+      "sha256": "911390b7009452274566cb63b81c72e65e85a7378a72604af026c699ffb9e197",
+      "bytes": 895,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc04",
+      "doc_id": "doc04",
+      "file_name": "doc04-security-policy.md",
+      "title": "知识库数据安全与权限规范",
+      "sha256": "4da53bd691d86aac61b4b8c6c0acfab7e371a48b474e4a466f8143a9c3e63014",
+      "bytes": 1086,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc05",
+      "doc_id": "doc05",
+      "file_name": "doc05-release-notes-2.0.md",
+      "title": "云雀平台 2.0 版本发布说明",
+      "sha256": "e719d41d7369d15f7fd77fd90eb4dc7f8d5cf738c4e2b9457d3b0be8f956910b",
+      "bytes": 1116,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc06",
+      "doc_id": "doc06",
+      "file_name": "doc06-release-notes-2.1.md",
+      "title": "云雀平台 2.1 版本发布说明",
+      "sha256": "4933984374c9f556ea012cad9cab5e23b2c58cbcdce79aeb18b4d96f44935406",
+      "bytes": 897,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc07",
+      "doc_id": "doc07",
+      "file_name": "doc07-api-guide.md",
+      "title": "云雀平台 MCP 接口使用指南",
+      "sha256": "d2bb0bcf48a227c265a82a35e7d44405436935f923c80f0a4094f229732098fe",
+      "bytes": 1455,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc08",
+      "doc_id": "doc08",
+      "file_name": "doc08-evaluation-metrics.md",
+      "title": "检索与问答质量评估口径",
+      "sha256": "87f3d944411f40c8b33cbfdeab9fdbd3deec9f0b8a8889109f38871d318e681b",
+      "bytes": 1365,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc09",
+      "doc_id": "doc09",
+      "file_name": "doc09-change-management.md",
+      "title": "变更管理流程",
+      "sha256": "283cb6e4582748a1b6c219f48a67e1bbaa75a7a92e5504423fa74ca0110de9d6",
+      "bytes": 1061,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    },
+    {
+      "logical_doc_id": "doc10",
+      "doc_id": "doc10",
+      "file_name": "doc10-legacy-platform.md",
+      "title": "旧版知识库系统（已下线）",
+      "sha256": "0f19e22d152acd03e4c2cca53fa910bd64300eb74112439c0b1afe361b6311fb",
+      "bytes": 904,
+      "weknora_document_id": "",
+      "imported_document_id": "",
+      "scope": ""
+    }
+  ]
+}

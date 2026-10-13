@@ -237,6 +237,14 @@ type WikiPage struct {
 	// across the ingest pipeline, so retract / display code can split on `|`
 	// to recover the title. Document-level granularity.
 	SourceRefs StringArray `json:"source_refs" gorm:"type:json"`
+	// SourceRefsV2 is the structured, second-generation form of SourceRefs
+	// (one entry per underlying chunk/document, with KB context, chunk ids,
+	// optional quote, and a provenance status). It is populated by the
+	// wiki/graph call paths when they actually read source text back from
+	// the document store; kept alongside SourceRefs for backward
+	// compatibility with readers that haven't, so older code paths
+	// continue to work unchanged.
+	SourceRefsV2 []SourceRefV2 `json:"source_refs_v2,omitempty" gorm:"type:json"`
 	// ChunkRefs records the specific source-document chunks this page was
 	// built from — one UUID per cited chunk. Populated during ingest from
 	// the chunk-citation pass; refreshed wholesale whenever the page is
@@ -872,6 +880,90 @@ func WikiSourceKnowledgeID(ref string) string {
 func WikiSourceRefMatchesKnowledge(ref, knowledgeID string) bool {
 	knowledgeID = strings.TrimSpace(knowledgeID)
 	return knowledgeID != "" && WikiSourceKnowledgeID(ref) == knowledgeID
+}
+
+// SourceRefV2 is the second-generation source reference: structured per the
+// plan §6.4 contract — one entry per underlying chunk/document, with the
+// KB context, chunk ids, optional quote and a provenance status. Provenance
+// status is one of "verified" / "unverified_source" / "unknown" and is
+// decided by the call site (wiki tool or graph tool) based on whether the
+// source text was actually read back from the document store.
+type SourceRefV2 struct {
+	KnowledgeID      string   `json:"knowledge_id"`
+	KnowledgeBaseID  string   `json:"knowledge_base_id"`
+	ChunkIDs         []string `json:"chunk_ids,omitempty"`
+	Quote            string   `json:"quote,omitempty"`
+	ProvenanceStatus string   `json:"provenance_status"`
+}
+
+// WikiPageSourceRefsToV2 returns the V2 source-ref view of a WikiPage.
+//
+//   - If page.SourceRefsV2 is already populated, it is returned verbatim
+//     (V2 is authoritative when present — re-deriving from SourceRefs
+//     would risk dropping the quote / provenance info V2 was created to
+//     carry).
+//   - Otherwise the legacy SourceRefs entries (StringArray strings such as
+//     "knowledge_id" or "knowledge_id/chunk_id[/chunk_id...]") are parsed:
+//     the first "/"-separated segment is the knowledge_id, the rest are the
+//     chunk_ids, the page's own KnowledgeBaseID fills KnowledgeBaseID, the
+//     quote is empty (the legacy ID-only format doesn't carry one), and
+//     ProvenanceStatus defaults to "unknown" (parsing IDs is not evidence
+//     that the source text was actually read).
+//
+// One V2 entry is emitted per legacy ref — no collapsing — so callers see
+// the same source set the page was originally tagged with. A single ref
+// that fails to parse is dropped without affecting its siblings.
+func WikiPageSourceRefsToV2(page *WikiPage) []SourceRefV2 {
+	if page == nil {
+		return nil
+	}
+	if len(page.SourceRefsV2) > 0 {
+		return page.SourceRefsV2
+	}
+	if len(page.SourceRefs) == 0 {
+		return nil
+	}
+	out := make([]SourceRefV2, 0, len(page.SourceRefs))
+	for _, raw := range page.SourceRefs {
+		// Legacy entries may carry the optional "|title" suffix; strip it via
+		// ParseWikiSourceRef so the V2 knowledge_id stays free of titles.
+		knowledgeID, _ := ParseWikiSourceRef(raw)
+		knowledgeID = strings.TrimSpace(knowledgeID)
+		if knowledgeID == "" {
+			continue
+		}
+		// A "knowledge_id" is the whole token; a "knowledge_id/chunk_id[/...]"
+		// splits into the ID and one-or-more chunk ids. Anything else (no
+		// slash) is a document-level ref with no chunk_ids.
+		segments := strings.Split(knowledgeID, "/")
+		head := strings.TrimSpace(segments[0])
+		if head == "" {
+			continue
+		}
+		var chunkIDs []string
+		if len(segments) > 1 {
+			chunkIDs = make([]string, 0, len(segments)-1)
+			for _, seg := range segments[1:] {
+				if seg = strings.TrimSpace(seg); seg != "" {
+					chunkIDs = append(chunkIDs, seg)
+				}
+			}
+			if len(chunkIDs) == 0 {
+				chunkIDs = nil
+			}
+		}
+		out = append(out, SourceRefV2{
+			KnowledgeID:      head,
+			KnowledgeBaseID:  page.KnowledgeBaseID,
+			ChunkIDs:         chunkIDs,
+			Quote:            "",
+			ProvenanceStatus: "unknown",
+		})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // SourceKnowledgeIDs returns the document ids this page was built from.

@@ -1,0 +1,429 @@
+{
+  "_purpose": [
+    "人工复核模板（计划 §6.5、§7.4）。run_eval.py 会把它复制到 eval/reports/manual-review.json 并填入",
+    "本题的实际答案、实际引用与运行状态；复核人逐题、逐策略填写 claims 与判定。",
+    "自动评分只是辅助：12 道题的人工复核全部完成前，不得宣称准确性已评估。"
+  ],
+  "_how_to_use": [
+    "1. 打开 run_eval.py 生成的 eval/reports/manual-review.json（它是本模板的副本，已带答案与引用）。",
+    "2. 对每个 claim：只登记答案中真正可核验的断言；citation_ids 写答案里出现的 [E#]；",
+    "   citation_supports 表示被引用的原文片段是否真的支持该断言（不是「编号存在」）。",
+    "3. missed_necessary_facts 填写题目 required_evidence / expected_facts 中答案遗漏的必要事实。",
+    "4. version_confusion 表示是否把两个版本／两个同名实体的数字混用。",
+    "5. refusal_fabricated_content 仅对无答案题填写：拒答时是否仍给出了没有依据的事实。",
+    "6. metrics 三项按 _formulas 自行计算并填入；数据不足时按 _null_rule 记 null。"
+  ],
+  "_formulas": {
+    "事实准确率": "正确 claims 数 / 全部可核验 claims 数",
+    "事实完整率": "答案覆盖的标注必要事实数 / 标注必要事实总数",
+    "引用支持率": "被原文支持的被引用 claims 数 / 全部被引用 claims 数",
+    "无答案处理正确率": "同时满足「不是工具／服务失败」「明确说明证据不足」「没有给出无依据事实」的无答案题数 / 无答案题总数"
+  },
+  "_null_rule": "当一次运行没有任何可核验 claims，或没有任何引用时，对应指标必须记 null（JSON null），不得记为 100% 或 1；汇总时这些运行排除在该指标分母之外，并单独报告排除数量。",
+  "_status_vocabulary": {
+    "run_status": "ok / partial / failed / invalid_citation（与 run_eval.py 的 JSONL 一致）",
+    "strategy": "baseline（单次 search_knowledge(mode=hybrid,limit=10) 后一次生成） / react（文档＋Wiki＋图谱 ReAct）"
+  },
+  "questions": {
+    "q01": {
+      "category": "single_document",
+      "question": "云雀平台的混合检索是怎么执行的？",
+      "relevant_documents": ["doc01"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q02": {
+      "category": "single_document",
+      "question": "知识库分为哪几个级别？机密级知识库的导出需要满足什么条件？",
+      "relevant_documents": ["doc04"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q03": {
+      "category": "single_document",
+      "question": "生产环境的发布窗口是什么？发现权限泄露后必须怎么处理？",
+      "relevant_documents": ["doc09"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q04": {
+      "category": "cross_document",
+      "question": "2.1 版本的负责人是谁？为什么 2.1 的 Wiki 生成必须在 2.0 上线后开始？",
+      "relevant_documents": ["doc02", "doc03"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q05": {
+      "category": "cross_document",
+      "question": "语料里「文档召回率」出现了两个不同的数字：云雀平台的目标值是多少，旧版知识库系统的实际值是多少？为什么这两个数字不能混用？",
+      "relevant_documents": ["doc01", "doc10"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q06": {
+      "category": "cross_document",
+      "question": "知识图谱抽取准确率的验收门槛是多少，属于哪个版本？Wiki 页面事实支持率的验收目标是多少，属于哪个版本？",
+      "relevant_documents": ["doc02", "doc06"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q07": {
+      "category": "wiki_overview",
+      "question": "自动生成的 Wiki 包含哪几类页面？一个 Wiki 页面由多篇文档生成时，来源如何归属？",
+      "relevant_documents": ["doc06"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q08": {
+      "category": "wiki_overview",
+      "question": "通过 MCP 浏览 Wiki 时，wiki_graph 的 depth 与 limit 有什么限制？列表页大小上限是多少？",
+      "relevant_documents": ["doc07"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q09": {
+      "category": "entity_relation",
+      "question": "赵岚和吴桐分别负责什么？算法组为什么不能同时并行图谱抽取与重排模型调优？",
+      "relevant_documents": ["doc02", "doc03"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q10": {
+      "category": "entity_relation",
+      "question": "知识图谱抽取相关的线上问题由谁处理？生产环境一线值班如何轮换？",
+      "relevant_documents": ["doc03"],
+      "answerable": true,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        },
+        "react": {
+          "run_status": null,
+          "claims": [
+            {"claim": "", "correct": null, "citation_ids": [], "citation_supports": null, "note": ""}
+          ],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": ""
+        }
+      }
+    },
+    "q11": {
+      "category": "unanswerable",
+      "question": "云雀平台 3.0 版本计划在什么时间发布？该版本包含哪些功能？",
+      "relevant_documents": [],
+      "answerable": false,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": "正确拒答需同时满足：不是工具／服务失败、明确说明证据不足、没有给出无依据事实。"
+        },
+        "react": {
+          "run_status": null,
+          "claims": [],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": "正确拒答需同时满足：不是工具／服务失败、明确说明证据不足、没有给出无依据事实。"
+        }
+      }
+    },
+    "q12": {
+      "category": "unanswerable",
+      "question": "云雀平台 2025 年的研发预算和人力成本分别是多少？",
+      "relevant_documents": [],
+      "answerable": false,
+      "strategies": {
+        "baseline": {
+          "run_status": null,
+          "claims": [],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": "正确拒答需同时满足：不是工具／服务失败、明确说明证据不足、没有给出无依据事实。"
+        },
+        "react": {
+          "run_status": null,
+          "claims": [],
+          "missed_necessary_facts": [],
+          "version_confusion": null,
+          "refusal_fabricated_content": null,
+          "metrics": {"事实准确率": null, "事实完整率": null, "引用支持率": null},
+          "reviewer": "",
+          "reviewed_at": "",
+          "notes": "正确拒答需同时满足：不是工具／服务失败、明确说明证据不足、没有给出无依据事实。"
+        }
+      }
+    }
+  }
+}
