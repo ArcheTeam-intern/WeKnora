@@ -1,0 +1,633 @@
+{
+  "tools": {
+    "ask": {
+      "properties": {
+        "knowledge_base_ids": {
+          "description": "Optional knowledge base ids or names to retrieve from; defaults to the endpoint scope or the agent's own configuration",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "question": {
+          "description": "The question to answer",
+          "type": "string"
+        },
+        "session_id": {
+          "description": "Session id returned by a previous ask call, to continue that conversation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "question"
+      ],
+      "type": "object"
+    },
+    "get_document_status": {
+      "properties": {
+        "knowledge_id": {
+          "description": "Document id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_id"
+      ],
+      "type": "object"
+    },
+    "get_knowledge_base_status": {
+      "properties": {
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_base_id"
+      ],
+      "type": "object"
+    },
+    "get_upload_status": {
+      "properties": {
+        "upload_id": {
+          "description": "Upload id to look up",
+          "type": "string"
+        }
+      },
+      "required": [
+        "upload_id"
+      ],
+      "type": "object"
+    },
+    "grep_chunks": {
+      "properties": {
+        "knowledge_base_ids": {
+          "description": "Optional knowledge base ids or names to restrict the search",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Maximum passages to return, default 10, max 30",
+          "type": "number"
+        },
+        "query": {
+          "description": "Regular expression (POSIX, case-insensitive) to match against chunk text; text that is not a valid regular expression is matched literally",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "import_document_file": {
+      "properties": {
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        },
+        "upload_id": {
+          "description": "Upload id returned by POST /mcp/{endpoint_id}/uploads",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_base_id",
+        "upload_id"
+      ],
+      "type": "object"
+    },
+    "list_documents": {
+      "properties": {
+        "keyword": {
+          "description": "Optional substring to filter document titles",
+          "type": "string"
+        },
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        },
+        "page": {
+          "description": "1-based page number, default 1",
+          "type": "number"
+        },
+        "page_size": {
+          "description": "Documents per page, default 20, max 100",
+          "type": "number"
+        }
+      },
+      "required": [
+        "knowledge_base_id"
+      ],
+      "type": "object"
+    },
+    "list_knowledge_bases": {
+      "properties": {},
+      "required": [],
+      "type": "object"
+    },
+    "query_knowledge_graph": {
+      "properties": {
+        "knowledge_base_ids": {
+          "description": "Knowledge base ids or exact names to query, at most 10",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "query": {
+          "description": "Entity name or free-text query to match against entity names and relations",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_base_ids",
+        "query"
+      ],
+      "type": "object"
+    },
+    "read_document": {
+      "properties": {
+        "knowledge_id": {
+          "description": "Document id from search results or list_documents",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Number of chunks to return, default 20, max 100",
+          "type": "number"
+        },
+        "offset": {
+          "description": "Chunk offset to start from, default 0",
+          "type": "number"
+        },
+        "query": {
+          "description": "Optional case-insensitive phrase to find inside the document",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_id"
+      ],
+      "type": "object"
+    },
+    "search_knowledge": {
+      "properties": {
+        "knowledge_base_ids": {
+          "description": "Optional knowledge base ids or names to restrict the search; defaults to every knowledge base in scope",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Maximum passages to return, default 10, max 30",
+          "type": "number"
+        },
+        "mode": {
+          "description": "hybrid (default), semantic, or keyword",
+          "enum": [
+            "hybrid",
+            "semantic",
+            "keyword"
+          ],
+          "type": "string"
+        },
+        "query": {
+          "description": "A natural-language question, topic, or the exact terms to match",
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "wiki_graph": {
+      "properties": {
+        "center": {
+          "description": "Center page slug for a local (ego) graph; omit for an overview",
+          "type": "string"
+        },
+        "depth": {
+          "description": "Neighbourhood hops around the center, 1 or 2, default 1",
+          "type": "number"
+        },
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum nodes to return, default 100, max 200",
+          "type": "number"
+        },
+        "page_type": {
+          "description": "Only include pages of this type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_base_id"
+      ],
+      "type": "object"
+    },
+    "wiki_index": {
+      "properties": {
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        },
+        "limit": {
+          "description": "Maximum entries per page type, default 50, max 200",
+          "type": "number"
+        }
+      },
+      "required": [
+        "knowledge_base_id"
+      ],
+      "type": "object"
+    },
+    "wiki_list_pages": {
+      "properties": {
+        "knowledge_base_id": {
+          "description": "Knowledge base id or exact name",
+          "type": "string"
+        },
+        "page": {
+          "description": "Page number, 1-based, default 1",
+          "type": "number"
+        },
+        "page_size": {
+          "description": "Pages per page, default 20, max 100",
+          "type": "number"
+        },
+        "page_type": {
+          "description": "Only this page type: summary, entity, concept, index, synthesis or comparison",
+          "type": "string"
+        },
+        "query": {
+          "description": "Only pages matching this text in title, summary or content",
+          "type": "string"
+        },
+        "status": {
+          "description": "Only pages with this status: draft, published or archived",
+          "type": "string"
+        }
+      },
+      "required": [
+        "knowledge_base_id"
+      ],
+      "type": "object"
+    },
+    "wiki_read_page": {
+      "properties": {
+        "knowledge_base_id": {
+          "description": "Knowledge base id or name, required only when the same slug exists in several wikis",
+          "type": "string"
+        },
+        "slug": {
+          "description": "Page slug from wiki_search or wiki_index, e.g. concept/rag",
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "type": "object"
+    },
+    "wiki_search": {
+      "properties": {
+        "knowledge_base_ids": {
+          "description": "Optional knowledge base ids or names to restrict the search",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limit": {
+          "description": "Maximum pages to return, default 10, max 50",
+          "type": "number"
+        },
+        "query": {
+          "description": "Search terms or a regular expression (case-insensitive POSIX); text that is not a valid regular expression is matched literally",
+          "type": "string"
+        },
+        "regex": {
+          "description": "false forces a literal match; true requires a valid regular expression; omit for the default behaviour",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    }
+  },
+  "calls": [
+    {
+      "tool": "list_knowledge_bases",
+      "is_error": false,
+      "result": {
+        "_meta": null,
+        "content": [
+          {
+            "type": "text",
+            "text": "{\n  \"knowledge_bases\": [\n    {\n      \"id\": \"c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2\",\n      \"name\": \"MCP 验证语料\",\n      \"description\": \"MCP 导入/检索/Wiki/图谱验证十文档语料\",\n      \"type\": \"document\",\n      \"capabilities\": [\n        \"semantic\",\n        \"keyword\"\n      ],\n      \"capability_flags\": {\n        \"faq\": false,\n        \"graph\": false,\n        \"keyword\": true,\n        \"vector\": true,\n        \"wiki\": false\n      },\n      \"indexing_enabled\": {\n        \"graph\": false,\n        \"keyword\": true,\n        \"vector\": true,\n        \"wiki\": false\n      }\n    },\n    {\n      \"id\": \"f7b76103-bbb1-4213-829e-59ffd21100a0\",\n      \"name\": \"MCP 验证-图谱\",\n      \"description\": \"graph enabled KB for end-to-end verification\",\n      \"type\": \"document\",\n      \"capabilities\": [\n        \"semantic\",\n        \"keyword\"\n      ],\n      \"capability_flags\": {\n        \"faq\": false,\n        \"graph\": false,\n        \"keyword\": true,\n        \"vector\": true,\n        \"wiki\": false\n      },\n      \"indexing_enabled\": {\n        \"graph\": false,\n        \"keyword\": true,\n        \"vector\": true,\n        \"wiki\": false\n      }\n    }\n  ],\n  \"selection\": {\n    \"present\": true,\n    \"scope_version\": \"ead90ca9930ed843\",\n    \"selected\": [\n      \"c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2\",\n      \"f7b76103-bbb1-4213-829e-59ffd21100a0\"\n    ]\n  },\n  \"total\": 2\n}",
+            "annotations": null,
+            "_meta": null
+          }
+        ],
+        "structuredContent": {
+          "knowledge_bases": [
+            {
+              "id": "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2",
+              "name": "MCP 验证语料",
+              "description": "MCP 导入/检索/Wiki/图谱验证十文档语料",
+              "type": "document",
+              "capabilities": [
+                "semantic",
+                "keyword"
+              ],
+              "capability_flags": {
+                "faq": false,
+                "graph": false,
+                "keyword": true,
+                "vector": true,
+                "wiki": false
+              },
+              "indexing_enabled": {
+                "graph": false,
+                "keyword": true,
+                "vector": true,
+                "wiki": false
+              }
+            },
+            {
+              "id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "name": "MCP 验证-图谱",
+              "description": "graph enabled KB for end-to-end verification",
+              "type": "document",
+              "capabilities": [
+                "semantic",
+                "keyword"
+              ],
+              "capability_flags": {
+                "faq": false,
+                "graph": false,
+                "keyword": true,
+                "vector": true,
+                "wiki": false
+              },
+              "indexing_enabled": {
+                "graph": false,
+                "keyword": true,
+                "vector": true,
+                "wiki": false
+              }
+            }
+          ],
+          "selection": {
+            "present": true,
+            "scope_version": "ead90ca9930ed843",
+            "selected": [
+              "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2",
+              "f7b76103-bbb1-4213-829e-59ffd21100a0"
+            ]
+          },
+          "total": 2
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "search_knowledge",
+      "is_error": false,
+      "result": {
+        "_meta": null,
+        "content": [
+          {
+            "type": "text",
+            "text": "<search_results count=\"10\" mode=\"hybrid\">\n<query>云雀平台</query>\n<chunk rank=\"1\" chunk_id=\"07de0188-237d-482f-b425-2af08bfa7c5f\" chunk_index=\"0\" knowledge_id=\"df1656da-1450-4bc4-8965-325dc02f17b3\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc01-product-overview.md\" score=\"0.986\">\n<match_snippet>... # 云雀平台产品概述 云雀平台是公司面向企业客户的统一知识中台产品，2024 年 3 月发布 1.0 版本。 产品定位是把分散在文档、工单与内部 Wiki 中的知识收敛成一个可检索、可追溯的服务。 ## 核心能力 1. **统一接入**：支持 TXT、Markdown、DOCX 与文本型 PDF 的导入，导入后自动完成 分块、向量化与关键词索引。 2. **混合检索**：语义检索与关键词检索并 ...</match_snippet>\n<content># 云雀平台产品概述\n\n云雀平台是公司面向企业客户的统一知识中台产品，2024 年 3 月发布 1.0 版本。\n产品定位是把分散在文档、工单与内部 Wiki 中的知识收敛成一个可检索、可追溯的服务。\n\n## 核心能力\n\n1. **统一接入**：支持 TXT、Markdown、DOCX 与文本型 PDF 的导入，导入后自动完成\n   分块、向量化与关键词索引。\n2. **混合检索**：语义检索与关键词检索并行执行，再由重排模型合并结果。\n3. **溯源**：每条返回结果都带文档 ID 与分块 ID，可直接回到原文。\n4. **知识图谱**：从文档中抽取实体与关系，用于回答\"谁负责什么\"这类关系问题。\n\n## 关键指标\n\n- 单文档首次可检索时间：目标值 90 秒以内（P95）。\n- 混合检索的文档召回率目标：不低于 90%。\n- 每条答案的引用支持率目标：不低于 95%。\n\n## 部署形态\n\n云雀平台支持私有化部署与云端托管两种形态。私有化部署默认使用单机 SQLite 存储，\n云端托管使用集中式 PostgreSQL 与对象存储。\n</content>\n</chunk>\n<chunk rank=\"2\" chunk_id=\"f228e8c1-3402-44ea-ac68-740f85bd8644\" chunk_index=\"0\" knowledge_id=\"13a92953-2cf5-4519-a2a4-e48661aab61f\" knowledge_base_id=\"c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2\" knowledge_title=\"doc07-api-guide.md\" score=\"0.951\">\n<match_snippet>... # 云雀平台 MCP 接口使用指南 ## 认证 MCP 接口固定使用三个请求头： ```http Authorization: Bearer &lt;MCP端点令牌&gt; X-WeKnora-User-Token: &lt;用户 JWT&gt; X-Tenant-ID: &lt;业务空间 ID&gt; ``` 端点属性 `require_user_identity` 为真时，`X-WeKnora-User-Token` 必填且必须 ...</match_snippet>\n<content># 云雀平台 MCP 接口使用指南\n\n## 认证\n\nMCP 接口固定使用三个请求头：\n\n```http\nAuthorization: Bearer <MCP端点令牌>\nX-WeKnora-User-Token: <用户 JWT>\nX-Tenant-ID: <业务空间 ID>\n```\n\n端点属性 `require_user_identity` 为真时，`X-WeKnora-User-Token` 必填且必须有效。\n验证失败时不会降级为端点机器身份，而是直接拒绝。\n\n## 只读工具\n\n| 工具 | 用途 |\n| --- | --- |\n| `list_knowledge_bases` | 列出可访问的知识库及其能力 |\n| `search_knowledge` | 语义、关键词或混合检索 |\n| `grep_chunks` | 精确内容查找 |\n| `read_document` | 读取文档分块 |\n</content>\n</chunk>\n<chunk rank=\"3\" chunk_id=\"bf90aaec-5cf4-4616-90e4-b4f3002dec26\" chunk_index=\"0\" knowledge_id=\"8dc99533-bce2-4a04-a2f0-ca24bc7cc244\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc02-project-timeline.md\" score=\"0.944\">\n<match_snippet>... # 云雀平台 2025 年度项目计划 本文件描述云雀平台在 2025 年的版本节奏与责任人安排。 ## 版本节奏 | 版本 | 计划时间 | 主要内容 | 负责人 | | --- | --- | --- | --- | | 2.0 | 2025 年 4 月 | 知识图谱正式可用 | 林彦 | | 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 | | 2.2 | 20 ...</match_snippet>\n<content># 云雀平台 2025 年度项目计划\n\n本文件描述云雀平台在 2025 年的版本节奏与责任人安排。\n\n## 版本节奏\n\n| 版本 | 计划时间 | 主要内容 | 负责人 |\n| --- | --- | --- | --- |\n| 2.0 | 2025 年 4 月 | 知识图谱正式可用 | 林彦 |\n| 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 |\n| 2.2 | 2025 年 10 月 | 多模态图片检索 | 林彦 |\n| 2.3 | 2025 年 12 月 | 权限细分与审计 | 陈默 |\n\n## 里程碑约束\n\n- 2.0 的验收依赖图谱抽取的准确率不低于 85%，该指标由数据组在 3 月 20 日前给出。\n- 2.1 的 Wiki 生成必须在 2.0 上线后开始，因为两者共用同一套分块结果。\n- 全部版本的接口变更必须向后兼容一个版本。\n\n## 人力\n\n项目组共 11 人：后端 4 人、前端 2 人、算法 3 人、测试 1 人、产品 1 人。\n算法组同时支持图谱抽取与重排模型调优，因此排期上两者不能并行。\n</content>\n</chunk>\n<chunk rank=\"4\" chunk_id=\"efe31e08-1e4c-41a8-af86-eb1294717d84\" chunk_index=\"0\" knowledge_id=\"7688826d-7471-4b74-97c5-15560bbe078d\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc10-legacy-platform.md\" score=\"0.932\">\n<match_snippet>... # 旧版知识库系统（已下线） 本文描述 2023 年使用的旧版知识库系统，该系统已于 2024 年 6 月下线。 保留本文仅用于历史追溯，其中的数据不可作为当前云雀平台的行为依据。 ## 与云雀平台的差异 | 项目 | 旧版系统 | 云雀平台 | | --- | --- | --- | | 向量检索 | 不支持 | 支持 | | 关键词检索 | 使用 MySQL LIKE | 使用 FTS5 / 全文索引 | | 引用 | 只给文档标题 | 给出文档 ID 与分块 ID | | 图谱 | 无 | 支持实体关系抽取 | ## 旧版指标 - 旧版系统的文 ...</match_snippet>\n<content># 旧版知识库系统（已下线）\n\n本文描述 2023 年使用的旧版知识库系统，该系统已于 2024 年 6 月下线。\n保留本文仅用于历史追溯，其中的数据不可作为当前云雀平台的行为依据。\n\n## 与云雀平台的差异\n\n| 项目 | 旧版系统 | 云雀平台 |\n| --- | --- | --- |\n| 向量检索 | 不支持 | 支持 |\n| 关键词检索 | 使用 MySQL LIKE | 使用 FTS5 / 全文索引 |\n| 引用 | 只给文档标题 | 给出文档 ID 与分块 ID |\n| 图谱 | 无 | 支持实体关系抽取 |\n\n## 旧版指标\n\n- 旧版系统的文档召回率约为 61%。\n- 旧版系统没有引用支持率统计，也没有评估口径文档。\n\n## 迁移说明\n\n旧版系统的文档未迁移到云雀平台，需要重新导入。\n任何旧版系统的数字都不应出现在云雀平台的对外材料中，除非明确标注为历史数据。\n</content>\n</chunk>\n<chunk rank=\"5\" chunk_id=\"001200d9-04ba-41c7-867c-3fe657d4c3c4\" chunk_index=\"0\" knowledge_id=\"4e4368d6-9a80-4a3e-8188-f9cfa91f5a32\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc05-release-notes-2.0.md\" score=\"0.863\">\n<match_snippet>... # 云雀平台 2.0 版本发布说明 发布日期：2025 年 4 月 18 日 ## 新增 - **知识图谱**：从文档中抽取实体与关系，支持按实体名称查询关系及其来源分块。 - **文档状态查询**：新增接口返回文档的真实处理状态，包括排队、处理中、 生成中、完成、失败与取消。 - **生成状态查询**：返回知识库的文档数、分块数、正在处理的文档数， 以及 Wiki 的待处理任务数。 ## ...</match_snippet>\n<content># 云雀平台 2.0 版本发布说明\n\n发布日期：2025 年 4 月 18 日\n\n## 新增\n\n- **知识图谱**：从文档中抽取实体与关系，支持按实体名称查询关系及其来源分块。\n- **文档状态查询**：新增接口返回文档的真实处理状态，包括排队、处理中、\n  生成中、完成、失败与取消。\n- **生成状态查询**：返回知识库的文档数、分块数、正在处理的文档数，\n  以及 Wiki 的待处理任务数。\n\n## 变更\n\n- 检索结果新增 `match_type` 字段，取值 `graph`、`vector` 或 `keyword`，\n  便于前端区分命中来源。\n- 图表查询的返回结构保持兼容，新信息一律以附加字段提供。\n\n## 已知问题\n\n- 当图谱服务不可用时，关系查询会明确报错，但不会自动降级为文本检索结果。\n- 单次图谱查询最多返回 30 条关系；超出的部分会在响应的截断字段中报告。\n\n## 升级注意\n\n2.0 的图谱数据需要重新抽取。从 1.0 升级时，历史文档的图谱为空，\n必须在升级后重新触发一次生成任务。\n</content>\n</chunk>\n<chunk rank=\"6\" chunk_id=\"0b77dff6-4dfd-49c7-8181-10ae05b34e2a\" chunk_index=\"0\" knowledge_id=\"128870d8-75c6-42ff-8604-3dfb59bf977e\" knowledge_base_id=\"c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2\" knowledge_title=\"doc06-release-notes-2.1.md\" score=\"0.856\">\n<match_snippet>... # 云雀平台 2.1 版本发布说明 发布日期：2025 年 7 月 25 日 ## 新增 - **Wiki 自动生成**：文档完成索引后自动生成 Wiki 页面，包含摘要页、实体页与概念页。 - **页面链接图**：支持查看 Wiki 的整体链接图，或以某个页面为中心查看局部链接图。 - **分页浏览**：Wiki 页面支持分页浏览，单页最多 100 条。 ## 变更 - Wiki 页面的来源引 ...</match_snippet>\n<content># 云雀平台 2.1 版本发布说明\n\n发布日期：2025 年 7 月 25 日\n\n## 新增\n\n- **Wiki 自动生成**：文档完成索引后自动生成 Wiki 页面，包含摘要页、实体页与概念页。\n- **页面链接图**：支持查看 Wiki 的整体链接图，或以某个页面为中心查看局部链接图。\n- **分页浏览**：Wiki 页面支持分页浏览，单页最多 100 条。\n\n## 变更\n\n- Wiki 页面的来源引用格式统一为 `文档ID|文档标题`，可通过来源引用回到原文。\n- 一个 Wiki 页面可能由多篇文档生成，此时不提供单一文档归属。\n\n## 指标\n\n2.1 上线后，Wiki 页面的事实支持率验收目标为不低于 95%。\n页面链接图在节点超过 200 个时会截断，并在响应中标记 `truncated`。\n\n## 依赖\n\n2.1 依赖 2.0 的分块结果与图谱抽取，因此必须先升级到 2.0。\n</content>\n</chunk>\n<chunk rank=\"7\" chunk_id=\"03ad64a7-c2d8-4ed5-bc4a-9f1260e70424\" chunk_index=\"0\" knowledge_id=\"7ad39807-4f27-4261-bbe5-9592a724eb4d\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc09-change-management.md\" score=\"0.836\">\n<match_snippet>... # 变更管理流程 ## 适用范围 本文适用于云雀平台的生产环境变更，包括版本发布、配置修改与数据修复。 ## 流程 1. 提交变更申请，说明变更内容、影响范围与回滚方案。 2. 变更评审会每周二与周四各一次。 3. 高风险变更需要技术负责人与产品负责人同时批准。 4. 发布窗口为工作日 10:00 至 16:00，禁止在周五发布。 ## 回滚 - 每次发布必须准备回滚方案，且回滚时间不超过 30 分钟。 - 一旦发现权限泄露，必须立即回 ...</match_snippet>\n<content># 变更管理流程\n\n## 适用范围\n\n本文适用于云雀平台的生产环境变更，包括版本发布、配置修改与数据修复。\n\n## 流程\n\n1. 提交变更申请，说明变更内容、影响范围与回滚方案。\n2. 变更评审会每周二与周四各一次。\n3. 高风险变更需要技术负责人与产品负责人同时批准。\n4. 发布窗口为工作日 10:00 至 16:00，禁止在周五发布。\n\n## 回滚\n\n- 每次发布必须准备回滚方案，且回滚时间不超过 30 分钟。\n- 一旦发现权限泄露，必须立即回滚并按安全事件流程上报，不得先观察再决定。\n\n## 记录\n\n变更记录至少保留一年，包含审批人、执行人、时间与结果。\n\n## 常见问题\n\n- **问**：紧急修复能否跳过评审？\n  **答**：仅 P0 故障可以事后补评审，但仍需两名负责人当班批准。\n- **问**：数据库迁移能否与版本发布分开？\n  **答**：可以，但迁移必须先在副本上验证，且不得修改原有生成与检索逻辑。\n</content>\n</chunk>\n<chunk rank=\"8\" chunk_id=\"5078e96d-7e76-417f-a621-83230da8d624\" chunk_index=\"0\" knowledge_id=\"9b878821-318b-4813-8c0d-218653462036\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc03-team-roster.md\" score=\"0.831\">\n<match_snippet>... 。 - **赵岚**：算法工程师，负责重排模型与实体抽取质量。 - **吴桐**：算法工程师，负责向量化与分块策略。 - **郑一**：测试工程师，负责端到端验收。 ## 值班安排 - 生产环境问题的一线值班由后端组轮值，每两周轮换一次。 - 图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列。 ## 汇报关系 项目组向技术中台部门汇报。技术中台部门负责人是**沈立**。 沈立同时是云雀平台的产品委员会成员。 ...</match_snippet>\n<content># 项目组人员与职责说明\n\n## 角色分工\n\n- **林彦**：技术负责人，负责检索链路与知识图谱。同时是 2.0 与 2.2 版本的负责人。\n- **周颖**：负责 Wiki 生成与前端展示，是 2.1 版本的负责人。\n- **陈默**：负责权限、审计与部署交付，是 2.3 版本的负责人。\n- **赵岚**：算法工程师，负责重排模型与实体抽取质量。\n- **吴桐**：算法工程师，负责向量化与分块策略。\n- **郑一**：测试工程师，负责端到端验收。\n\n## 值班安排\n\n- 生产环境问题的一线值班由后端组轮值，每两周轮换一次。\n- 图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列。\n\n## 汇报关系\n\n项目组向技术中台部门汇报。技术中台部门负责人是**沈立**。\n沈立同时是云雀平台的产品委员会成员。\n</content>\n</chunk>\n<chunk rank=\"9\" chunk_id=\"48e222f6-1fae-4522-9ebb-e8f75cafd0ab\" chunk_index=\"1\" knowledge_id=\"ea03e902-3e0d-4a73-9364-005c124cdd59\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc08-evaluation-metrics.md\" score=\"0.555\">\n<match_snippet>| 指标 | 目标 |\n| --- | --- |\n| 引用支持率 | ≥ 95% |\n| 无答案处理正确率 | ≥ 90% |\n| 权限泄露 | 0 |\n\n首期不以大规模指标达标作为阻止演示的条件，但权限泄露、伪造工具结果与无效来源必须修复。</match_snippet>\n<content>| 指标 | 目标 |\n| --- | --- |\n| 引用支持率 | ≥ 95% |\n| 无答案处理正确率 | ≥ 90% |\n| 权限泄露 | 0 |\n\n首期不以大规模指标达标作为阻止演示的条件，但权限泄露、伪造工具结果与无效来源必须修复。\n</content>\n</chunk>\n<chunk rank=\"10\" chunk_id=\"7c7b35e0-f237-4b69-90df-86e4cbd59a26\" chunk_index=\"2\" knowledge_id=\"d713a402-d7aa-4214-8835-746fdd38570c\" knowledge_base_id=\"f7b76103-bbb1-4213-829e-59ffd21100a0\" knowledge_title=\"doc07-api-guide.md\" score=\"0.527\">\n<match_snippet>payload\n    metadata.json\n```\n\n服务端拒绝越界路径与符号链接，并校验文件类型、大小与 SHA-256。\n\n## 限制\n\n- 列表页大小最大 100。\n- `wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200。\n- 单次请求最多查询 10 个知识库。</match_snippet>\n<content>    payload\n    metadata.json\n```\n\n服务端拒绝越界路径与符号链接，并校验文件类型、大小与 SHA-256。\n\n## 限制\n\n- 列表页大小最大 100。\n- `wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200。\n- 单次请求最多查询 10 个知识库。\n</content>\n</chunk>\n</search_results>",
+            "annotations": null,
+            "_meta": null
+          }
+        ],
+        "structuredContent": {
+          "count": 10,
+          "display_type": "search_results",
+          "kb_counts": {
+            "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2": 2,
+            "f7b76103-bbb1-4213-829e-59ffd21100a0": 8
+          },
+          "knowledge_base_ids": [
+            "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2",
+            "f7b76103-bbb1-4213-829e-59ffd21100a0"
+          ],
+          "mode": "hybrid",
+          "queries": [
+            "云雀平台"
+          ],
+          "query": "云雀平台",
+          "requested_limit": 10,
+          "requested_mode": "hybrid",
+          "results": [
+            {
+              "chunk_id": "07de0188-237d-482f-b425-2af08bfa7c5f",
+              "chunk_index": 0,
+              "content": "# 云雀平台产品概述\n\n云雀平台是公司面向企业客户的统一知识中台产品，2024 年 3 月发布 1.0 版本。\n产品定位是把分散在文档、工单与内部 Wiki 中的知识收敛成一个可检索、可追溯的服务。\n\n## 核心能力\n\n1. **统一接入**：支持 TXT、Markdown、DOCX 与文本型 PDF 的导入，导入后自动完成\n   分块、向量化与关键词索引。\n2. **混合检索**：语义检索与关键词检索并行执行，再由重排模型合并结果。\n3. **溯源**：每条返回结果都带文档 ID 与分块 ID，可直接回到原文。\n4. **知识图谱**：从文档中抽取实体与关系，用于回答\"谁负责什么\"这类关系问题。\n\n## 关键指标\n\n- 单文档首次可检索时间：目标值 90 秒以内（P95）。\n- 混合检索的文档召回率目标：不低于 90%。\n- 每条答案的引用支持率目标：不低于 95%。\n\n## 部署形态\n\n云雀平台支持私有化部署与云端托管两种形态。私有化部署默认使用单机 SQLite 存储，\n云端托管使用集中式 PostgreSQL 与对象存储。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "df1656da-1450-4bc4-8965-325dc02f17b3",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc01-product-overview.md",
+              "match_snippet": "... # 云雀平台产品概述 云雀平台是公司面向企业客户的统一知识中台产品，2024 年 3 月发布 1.0 版本。 产品定位是把分散在文档、工单与内部 Wiki 中的知识收敛成一个可检索、可追溯的服务。 ## 核心能力 1. **统一接入**：支持 TXT、Markdown、DOCX 与文本型 PDF 的导入，导入后自动完成 分块、向量化与关键词索引。 2. **混合检索**：语义检索与关键词检索并 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 1,
+              "score": 0.9859374999999999,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "f228e8c1-3402-44ea-ac68-740f85bd8644",
+              "chunk_index": 0,
+              "content": "# 云雀平台 MCP 接口使用指南\n\n## 认证\n\nMCP 接口固定使用三个请求头：\n\n```http\nAuthorization: Bearer <MCP端点令牌>\nX-WeKnora-User-Token: <用户 JWT>\nX-Tenant-ID: <业务空间 ID>\n```\n\n端点属性 `require_user_identity` 为真时，`X-WeKnora-User-Token` 必填且必须有效。\n验证失败时不会降级为端点机器身份，而是直接拒绝。\n\n## 只读工具\n\n| 工具 | 用途 |\n| --- | --- |\n| `list_knowledge_bases` | 列出可访问的知识库及其能力 |\n| `search_knowledge` | 语义、关键词或混合检索 |\n| `grep_chunks` | 精确内容查找 |\n| `read_document` | 读取文档分块 |\n",
+              "knowledge_base_id": "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2",
+              "knowledge_base_type": "document",
+              "knowledge_id": "13a92953-2cf5-4519-a2a4-e48661aab61f",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc07-api-guide.md",
+              "match_snippet": "... # 云雀平台 MCP 接口使用指南 ## 认证 MCP 接口固定使用三个请求头： ```http Authorization: Bearer <MCP端点令牌> X-WeKnora-User-Token: <用户 JWT> X-Tenant-ID: <业务空间 ID> ``` 端点属性 `require_user_identity` 为真时，`X-WeKnora-User-Token` 必填且必须 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 2,
+              "score": 0.9509121061359866,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "bf90aaec-5cf4-4616-90e4-b4f3002dec26",
+              "chunk_index": 0,
+              "content": "# 云雀平台 2025 年度项目计划\n\n本文件描述云雀平台在 2025 年的版本节奏与责任人安排。\n\n## 版本节奏\n\n| 版本 | 计划时间 | 主要内容 | 负责人 |\n| --- | --- | --- | --- |\n| 2.0 | 2025 年 4 月 | 知识图谱正式可用 | 林彦 |\n| 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 |\n| 2.2 | 2025 年 10 月 | 多模态图片检索 | 林彦 |\n| 2.3 | 2025 年 12 月 | 权限细分与审计 | 陈默 |\n\n## 里程碑约束\n\n- 2.0 的验收依赖图谱抽取的准确率不低于 85%，该指标由数据组在 3 月 20 日前给出。\n- 2.1 的 Wiki 生成必须在 2.0 上线后开始，因为两者共用同一套分块结果。\n- 全部版本的接口变更必须向后兼容一个版本。\n\n## 人力\n\n项目组共 11 人：后端 4 人、前端 2 人、算法 3 人、测试 1 人、产品 1 人。\n算法组同时支持图谱抽取与重排模型调优，因此排期上两者不能并行。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "8dc99533-bce2-4a04-a2f0-ca24bc7cc244",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc02-project-timeline.md",
+              "match_snippet": "... # 云雀平台 2025 年度项目计划 本文件描述云雀平台在 2025 年的版本节奏与责任人安排。 ## 版本节奏 | 版本 | 计划时间 | 主要内容 | 负责人 | | --- | --- | --- | --- | | 2.0 | 2025 年 4 月 | 知识图谱正式可用 | 林彦 | | 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 | | 2.2 | 20 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 3,
+              "score": 0.9444602272727272,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "efe31e08-1e4c-41a8-af86-eb1294717d84",
+              "chunk_index": 0,
+              "content": "# 旧版知识库系统（已下线）\n\n本文描述 2023 年使用的旧版知识库系统，该系统已于 2024 年 6 月下线。\n保留本文仅用于历史追溯，其中的数据不可作为当前云雀平台的行为依据。\n\n## 与云雀平台的差异\n\n| 项目 | 旧版系统 | 云雀平台 |\n| --- | --- | --- |\n| 向量检索 | 不支持 | 支持 |\n| 关键词检索 | 使用 MySQL LIKE | 使用 FTS5 / 全文索引 |\n| 引用 | 只给文档标题 | 给出文档 ID 与分块 ID |\n| 图谱 | 无 | 支持实体关系抽取 |\n\n## 旧版指标\n\n- 旧版系统的文档召回率约为 61%。\n- 旧版系统没有引用支持率统计，也没有评估口径文档。\n\n## 迁移说明\n\n旧版系统的文档未迁移到云雀平台，需要重新导入。\n任何旧版系统的数字都不应出现在云雀平台的对外材料中，除非明确标注为历史数据。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "7688826d-7471-4b74-97c5-15560bbe078d",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc10-legacy-platform.md",
+              "match_snippet": "... # 旧版知识库系统（已下线） 本文描述 2023 年使用的旧版知识库系统，该系统已于 2024 年 6 月下线。 保留本文仅用于历史追溯，其中的数据不可作为当前云雀平台的行为依据。 ## 与云雀平台的差异 | 项目 | 旧版系统 | 云雀平台 | | --- | --- | --- | | 向量检索 | 不支持 | 支持 | | 关键词检索 | 使用 MySQL LIKE | 使用 FTS5 / 全文索引 | | 引用 | 只给文档标题 | 给出文档 ID 与分块 ID | | 图谱 | 无 | 支持实体关系抽取 | ## 旧版指标 - 旧版系统的文 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 4,
+              "score": 0.9324747231584014,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "001200d9-04ba-41c7-867c-3fe657d4c3c4",
+              "chunk_index": 0,
+              "content": "# 云雀平台 2.0 版本发布说明\n\n发布日期：2025 年 4 月 18 日\n\n## 新增\n\n- **知识图谱**：从文档中抽取实体与关系，支持按实体名称查询关系及其来源分块。\n- **文档状态查询**：新增接口返回文档的真实处理状态，包括排队、处理中、\n  生成中、完成、失败与取消。\n- **生成状态查询**：返回知识库的文档数、分块数、正在处理的文档数，\n  以及 Wiki 的待处理任务数。\n\n## 变更\n\n- 检索结果新增 `match_type` 字段，取值 `graph`、`vector` 或 `keyword`，\n  便于前端区分命中来源。\n- 图表查询的返回结构保持兼容，新信息一律以附加字段提供。\n\n## 已知问题\n\n- 当图谱服务不可用时，关系查询会明确报错，但不会自动降级为文本检索结果。\n- 单次图谱查询最多返回 30 条关系；超出的部分会在响应的截断字段中报告。\n\n## 升级注意\n\n2.0 的图谱数据需要重新抽取。从 1.0 升级时，历史文档的图谱为空，\n必须在升级后重新触发一次生成任务。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "4e4368d6-9a80-4a3e-8188-f9cfa91f5a32",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc05-release-notes-2.0.md",
+              "match_snippet": "... # 云雀平台 2.0 版本发布说明 发布日期：2025 年 4 月 18 日 ## 新增 - **知识图谱**：从文档中抽取实体与关系，支持按实体名称查询关系及其来源分块。 - **文档状态查询**：新增接口返回文档的真实处理状态，包括排队、处理中、 生成中、完成、失败与取消。 - **生成状态查询**：返回知识库的文档数、分块数、正在处理的文档数， 以及 Wiki 的待处理任务数。 ## ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 5,
+              "score": 0.8628405797101448,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "0b77dff6-4dfd-49c7-8181-10ae05b34e2a",
+              "chunk_index": 0,
+              "content": "# 云雀平台 2.1 版本发布说明\n\n发布日期：2025 年 7 月 25 日\n\n## 新增\n\n- **Wiki 自动生成**：文档完成索引后自动生成 Wiki 页面，包含摘要页、实体页与概念页。\n- **页面链接图**：支持查看 Wiki 的整体链接图，或以某个页面为中心查看局部链接图。\n- **分页浏览**：Wiki 页面支持分页浏览，单页最多 100 条。\n\n## 变更\n\n- Wiki 页面的来源引用格式统一为 `文档ID|文档标题`，可通过来源引用回到原文。\n- 一个 Wiki 页面可能由多篇文档生成，此时不提供单一文档归属。\n\n## 指标\n\n2.1 上线后，Wiki 页面的事实支持率验收目标为不低于 95%。\n页面链接图在节点超过 200 个时会截断，并在响应中标记 `truncated`。\n\n## 依赖\n\n2.1 依赖 2.0 的分块结果与图谱抽取，因此必须先升级到 2.0。\n",
+              "knowledge_base_id": "c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2",
+              "knowledge_base_type": "document",
+              "knowledge_id": "128870d8-75c6-42ff-8604-3dfb59bf977e",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc06-release-notes-2.1.md",
+              "match_snippet": "... # 云雀平台 2.1 版本发布说明 发布日期：2025 年 7 月 25 日 ## 新增 - **Wiki 自动生成**：文档完成索引后自动生成 Wiki 页面，包含摘要页、实体页与概念页。 - **页面链接图**：支持查看 Wiki 的整体链接图，或以某个页面为中心查看局部链接图。 - **分页浏览**：Wiki 页面支持分页浏览，单页最多 100 条。 ## 变更 - Wiki 页面的来源引 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 6,
+              "score": 0.855575117370892,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "03ad64a7-c2d8-4ed5-bc4a-9f1260e70424",
+              "chunk_index": 0,
+              "content": "# 变更管理流程\n\n## 适用范围\n\n本文适用于云雀平台的生产环境变更，包括版本发布、配置修改与数据修复。\n\n## 流程\n\n1. 提交变更申请，说明变更内容、影响范围与回滚方案。\n2. 变更评审会每周二与周四各一次。\n3. 高风险变更需要技术负责人与产品负责人同时批准。\n4. 发布窗口为工作日 10:00 至 16:00，禁止在周五发布。\n\n## 回滚\n\n- 每次发布必须准备回滚方案，且回滚时间不超过 30 分钟。\n- 一旦发现权限泄露，必须立即回滚并按安全事件流程上报，不得先观察再决定。\n\n## 记录\n\n变更记录至少保留一年，包含审批人、执行人、时间与结果。\n\n## 常见问题\n\n- **问**：紧急修复能否跳过评审？\n  **答**：仅 P0 故障可以事后补评审，但仍需两名负责人当班批准。\n- **问**：数据库迁移能否与版本发布分开？\n  **答**：可以，但迁移必须先在副本上验证，且不得修改原有生成与检索逻辑。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "7ad39807-4f27-4261-bbe5-9592a724eb4d",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc09-change-management.md",
+              "match_snippet": "... # 变更管理流程 ## 适用范围 本文适用于云雀平台的生产环境变更，包括版本发布、配置修改与数据修复。 ## 流程 1. 提交变更申请，说明变更内容、影响范围与回滚方案。 2. 变更评审会每周二与周四各一次。 3. 高风险变更需要技术负责人与产品负责人同时批准。 4. 发布窗口为工作日 10:00 至 16:00，禁止在周五发布。 ## 回滚 - 每次发布必须准备回滚方案，且回滚时间不超过 30 分钟。 - 一旦发现权限泄露，必须立即回 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 7,
+              "score": 0.8356164383561643,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "5078e96d-7e76-417f-a621-83230da8d624",
+              "chunk_index": 0,
+              "content": "# 项目组人员与职责说明\n\n## 角色分工\n\n- **林彦**：技术负责人，负责检索链路与知识图谱。同时是 2.0 与 2.2 版本的负责人。\n- **周颖**：负责 Wiki 生成与前端展示，是 2.1 版本的负责人。\n- **陈默**：负责权限、审计与部署交付，是 2.3 版本的负责人。\n- **赵岚**：算法工程师，负责重排模型与实体抽取质量。\n- **吴桐**：算法工程师，负责向量化与分块策略。\n- **郑一**：测试工程师，负责端到端验收。\n\n## 值班安排\n\n- 生产环境问题的一线值班由后端组轮值，每两周轮换一次。\n- 图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列。\n\n## 汇报关系\n\n项目组向技术中台部门汇报。技术中台部门负责人是**沈立**。\n沈立同时是云雀平台的产品委员会成员。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "9b878821-318b-4813-8c0d-218653462036",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc03-team-roster.md",
+              "match_snippet": "... 。 - **赵岚**：算法工程师，负责重排模型与实体抽取质量。 - **吴桐**：算法工程师，负责向量化与分块策略。 - **郑一**：测试工程师，负责端到端验收。 ## 值班安排 - 生产环境问题的一线值班由后端组轮值，每两周轮换一次。 - 图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列。 ## 汇报关系 项目组向技术中台部门汇报。技术中台部门负责人是**沈立**。 沈立同时是云雀平台的产品委员会成员。 ...",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 8,
+              "score": 0.8307619047619046,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "48e222f6-1fae-4522-9ebb-e8f75cafd0ab",
+              "chunk_index": 1,
+              "content": "| 指标 | 目标 |\n| --- | --- |\n| 引用支持率 | ≥ 95% |\n| 无答案处理正确率 | ≥ 90% |\n| 权限泄露 | 0 |\n\n首期不以大规模指标达标作为阻止演示的条件，但权限泄露、伪造工具结果与无效来源必须修复。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "ea03e902-3e0d-4a73-9364-005c124cdd59",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc08-evaluation-metrics.md",
+              "match_snippet": "| 指标 | 目标 |\n| --- | --- |\n| 引用支持率 | ≥ 95% |\n| 无答案处理正确率 | ≥ 90% |\n| 权限泄露 | 0 |\n\n首期不以大规模指标达标作为阻止演示的条件，但权限泄露、伪造工具结果与无效来源必须修复。",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 9,
+              "score": 0.5545454545454545,
+              "source_query": "云雀平台"
+            },
+            {
+              "chunk_id": "7c7b35e0-f237-4b69-90df-86e4cbd59a26",
+              "chunk_index": 2,
+              "content": "    payload\n    metadata.json\n```\n\n服务端拒绝越界路径与符号链接，并校验文件类型、大小与 SHA-256。\n\n## 限制\n\n- 列表页大小最大 100。\n- `wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200。\n- 单次请求最多查询 10 个知识库。\n",
+              "knowledge_base_id": "f7b76103-bbb1-4213-829e-59ffd21100a0",
+              "knowledge_base_type": "document",
+              "knowledge_id": "d713a402-d7aa-4214-8835-746fdd38570c",
+              "knowledge_metadata": "",
+              "knowledge_title": "doc07-api-guide.md",
+              "match_snippet": "payload\n    metadata.json\n```\n\n服务端拒绝越界路径与符号链接，并校验文件类型、大小与 SHA-256。\n\n## 限制\n\n- 列表页大小最大 100。\n- `wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200。\n- 单次请求最多查询 10 个知识库。",
+              "match_type": 0,
+              "query_type": "hybrid",
+              "result_index": 10,
+              "score": 0.5271604938271605,
+              "source_query": "云雀平台"
+            }
+          ],
+          "truncated": true
+        },
+        "isError": false
+      }
+    },
+    {
+      "tool": "query_knowledge_graph",
+      "is_error": true,
+      "structured": {
+        "error": {
+          "code": "GRAPH_EXTRACTION_NOT_CONFIGURED",
+          "message": "none of the selected knowledge bases has the knowledge graph enabled; call list_knowledge_bases and pick one whose capabilities include \"graph\"",
+          "retryable": false
+        }
+      }
+    }
+  ],
+  "available_tools": [
+    "ask",
+    "get_document_status",
+    "get_knowledge_base_status",
+    "get_upload_status",
+    "grep_chunks",
+    "import_document_file",
+    "list_documents",
+    "list_knowledge_bases",
+    "query_knowledge_graph",
+    "read_document",
+    "search_knowledge",
+    "wiki_graph",
+    "wiki_index",
+    "wiki_list_pages",
+    "wiki_read_page",
+    "wiki_search"
+  ],
+  "missing_required_tools": [],
+  "failed_required_call": "query_knowledge_graph"
+}

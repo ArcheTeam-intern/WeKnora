@@ -1,0 +1,576 @@
+{
+  "_purpose": [
+    "人工复核模板（计划 §6.5、§7.4）。run_eval.py 会把它复制到 eval/reports/manual-review.json 并填入",
+    "本题的实际答案、实际引用与运行状态；复核人逐题、逐策略填写 claims 与判定。",
+    "自动评分只是辅助：12 道题的人工复核全部完成前，不得宣称准确性已评估。"
+  ],
+  "_how_to_use": [
+    "1. 打开 run_eval.py 生成的 eval/reports/manual-review.json（它是本模板的副本，已带答案与引用）。",
+    "2. 对每个 claim：只登记答案中真正可核验的断言；citation_ids 写答案里出现的 [E#]；",
+    "   citation_supports 表示被引用的原文片段是否真的支持该断言（不是「编号存在」）。",
+    "3. missed_necessary_facts 填写题目 required_evidence / expected_facts 中答案遗漏的必要事实。",
+    "4. version_confusion 表示是否把两个版本／两个同名实体的数字混用。",
+    "5. refusal_fabricated_content 仅对无答案题填写：拒答时是否仍给出了没有依据的事实。",
+    "6. metrics 三项按 _formulas 自行计算并填入；数据不足时按 _null_rule 记 null。"
+  ],
+  "_formulas": {
+    "事实准确率": "正确 claims 数 / 全部可核验 claims 数",
+    "事实完整率": "答案覆盖的标注必要事实数 / 标注必要事实总数",
+    "引用支持率": "被原文支持的被引用 claims 数 / 全部被引用 claims 数",
+    "无答案处理正确率": "同时满足「不是工具／服务失败」「明确说明证据不足」「没有给出无依据事实」的无答案题数 / 无答案题总数"
+  },
+  "_null_rule": "当一次运行没有任何可核验 claims，或没有任何引用时，对应指标必须记 null（JSON null），不得记为 100% 或 1；汇总时这些运行排除在该指标分母之外，并单独报告排除数量。",
+  "questions": {
+    "q01": {
+      "category": "single_document",
+      "answerable": true,
+      "question": "云雀平台的混合检索是怎么执行的？",
+      "required_documents": [
+        "doc01"
+      ],
+      "required_evidence": [
+        "语义检索与关键词检索并行执行，再由重排模型合并结果"
+      ],
+      "expected_facts": [
+        "并行执行",
+        "重排模型合并结果"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "list_documents",
+        "list_documents",
+        "grep_chunks",
+        "grep_chunks",
+        "read_document",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc01",
+        "doc02",
+        "doc03",
+        "doc05",
+        "doc07",
+        "doc08",
+        "doc10"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论（依据语料）\n\n云雀平台的混合检索机制，在本语料中只有一处明确的一手描述，核心是「**并行 + 重排合并**」：\n\n> **混合检索：语义检索与关键词检索并行执行，再由重排模型合并结果。**\n> — 《云雀平台产品概述》doc01-product-overview.md，chunk_id `c8d1c610-d83a-47aa-990b-897b78140582`（knowledge_id `bd06b97c-58b3-4377-8459-0709315515f8`，KB「MCP 验证语料」`c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2`）\n\n同一段还给出检索执行链路的前置条件与相关指标：\n\n- **索引前置**：导入后自动完成「分块、向量化与关键词索引」，两条检索通道各自有对应索引（同上 chunk）。\n- **结果可溯源**：每条返回结果都带文档 ID 与分块 ID（同 chunk）。\n- **质量目标**：混合检索的文档召回率目标 ≥ 90%，引用支持率目标 ≥ 95%（同 chunk）；评估口径见 doc08-evaluation-metrics.md，chunk_id `87cdbb1f-789c-41b1-a3e6-0b72cec02a7d`。\n\n## 调用与结果侧的补充事实\n\n1. **入口**：MCP 工具 `search_knowledge` 支持「语义、关键词或混合」三种模式（doc07-api-guide.md，chunk_id `f228e8c1-3402-44ea-ac68-740f85bd8644`）。\n2. **命中来源可区分**：2.0 起检索结果新增 `match_type` 字段，取值 `graph`、`vector` 或 `keyword`，用于前端区分命中来源（doc05-release-notes-2.0.md，chunk_id `a6f4cb66-08be-4849-9d1e-7c7cd2bf66bf`）。这说明同一结果集里可能同时混合三种来源的命中。\n3. **重排模型归属**：重排模型由算法组负责（赵岚负责重排模型与实体抽取质量；算法组同时支持图谱抽取与重排调优，故排期上两者不能并行）——doc03-team-roster.md，chunk_id `8e0f7ae2-32c3-4582-a147-4b86da40e2ce`；doc02-project-timeline.md，chunk_id `f4ddbefc-9ef1-41e8-9ff6-d2386704973f`。这是组织/排期信息，不是检索算法细节。\n\n## 需要区分的历史资料（不要当作当前行为）\n\n- **doc10-legacy-platform.md**（chunk_id `dcad9df2-6c5e-4b72-833a-638893a99784`）描述的是 2023 年、已于 2024 年 6 月下线的旧版系统，文中自述「其中的数据不可作为当前云雀平台的行为依据」。其中可用于对照的一行是：旧版关键词检索用 MySQL LIKE、不支持向量检索，而云雀平台使用 FTS5 / 全文索引并支持向量检索。即：**云雀平台的关键词通道是全文索引（FTS5 类）而非 LIKE**，但该行出自历史文档，建议只作旁证。\n- 旧版召回率约 61% 属历史数据，不应与当前 ≥90% 的目标混用（同 doc10）。\n\n## 资料不足的部分（明确说明）\n\n语料中**没有**记载混合检索的实现细节，以下问题无法据此回答，不宜推测：\n\n- 两路检索各自的 top-k / 候选数量；\n- 重排模型的类型（是否为 cross-encoder）、打分与融合权重、去重与截断规则；\n- 是否存在检索阶段的失败降级策略（仅有 doc05 提到「图谱服务不可用时关系查询会报错、不降级为文本检索」，那是图谱查询，不是混合检索）；\n- 各阶段延迟指标（只有「单文档首次可检索时间 P95 ≤ 90 秒」这一索引侧指标）。\n\n## 检索完整性说明\n\n- 本次已覆盖范围内两个知识库：「MCP 验证语料」`c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2` 与「MCP 验证-图谱」`f7b76103-bbb1-4213-829e-59ffd21100a0`，各 10 篇文档，均已 `parse_status: completed`。\n- 两个库内容基本重复（例如 doc01 在第二库中为 knowledge_id `df1656da-1450-4bc4-8965-325dc02f17b3`，chunk_id `07de0188-237d-482f-b425-2af08bfa7c5f`，正文与首库一致）。\n- 已用语义检索、关键词检索（`混合`、`重排|rerank|FTS5|并行`、`match_type|语义检索|向量化` 等）与逐文档读取交叉核对，关于混合检索执行方式的记载**全部集中在 doc01 的一句核心描述**，不存在第二个更详细的实现文档。若需实现级细节，需补充其他语料。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q02": {
+      "category": "single_document",
+      "answerable": true,
+      "question": "知识库分为哪几个级别？机密级知识库的导出需要满足什么条件？",
+      "required_documents": [
+        "doc04"
+      ],
+      "required_evidence": [
+        "**公开级**：所有员工可读",
+        "**机密级**：需业务空间管理员单独授权，且禁止导出原文",
+        "机密级知识库的导出需要部门负责人与安全负责人双签"
+      ],
+      "expected_facts": [
+        "公开级、内部级、机密级",
+        "禁止导出原文",
+        "双签"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "read_document",
+        "list_documents",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc04"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 知识库级别\n\n依据《知识库数据安全与权限规范》，知识库分为**三级**：\n\n| 级别 | 访问范围 | 说明 |\n|---|---|---|\n| **公开级** | 所有员工可读 | — |\n| **内部级** | 仅业务空间成员可读 | **默认级别** |\n| **机密级** | 需业务空间管理员单独授权 | 且禁止导出原文 |\n\n## 机密级知识库的导出条件\n\n文档中关于\"导出\"有两处表述，需要一并说明：\n\n1. **分级条目**：机密级\"需业务空间管理员单独授权，**且禁止导出原文**\"。\n2. **\"例外\"章节**：\"机密级知识库的导出需要**部门负责人与安全负责人双签**，任何单一角色不得自行导出。\"\n\n因此，按\"例外\"条款，导出机密级知识库需满足：**部门负责人 + 安全负责人双签**，任何单一角色不得自行导出。\n\n> ⚠️ **需要指出的资料内部张力**：同一文档的分级条目写\"禁止导出原文\"，而\"例外\"章节又给出双签即可导出的路径。两者从字面上相互冲突（是\"一律禁止\"还是\"双签例外\"），文档未说明哪一个优先，也未界定\"原文\"与\"导出\"的区别。建议以发布方的最新口径为准，不要单方面按其中一条执行。\n\n## 来源\n\n- 文档：`doc04-security-policy.md`（《知识库数据安全与权限规范》），标题一致的两份副本：\n  - knowledge_id `81adb682-6e97-4a44-8fa2-e3511dba2339`（知识库 f7b76103-bbb1-4213-829e-59ffd21100a0），chunk_id `1cfbf755-9328-4efb-99fd-3fc6d7215cb7`\n  - knowledge_id `fca421d8-728e-4465-a57c-d386753f4d91`（知识库 c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2），chunk_id `f9733be9-570a-47bb-afc8-61eba91b82cf`\n- 两份副本内容完全相同，无版本差异。\n\n补充说明：本次检索覆盖了当前范围内的全部两个知识库（共 20 个文档），两者均**未启用 wiki 与图谱**（capability_flags 中 wiki/graph 均为 false），因此该结论仅基于文档检索，无 wiki 页面或实体关系可交叉验证。若还有其他未在范围内的知识库（如更细的权限规范文档），上述\"三级\"划分可能不完整。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 3,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q03": {
+      "category": "single_document",
+      "answerable": true,
+      "question": "生产环境的发布窗口是什么？发现权限泄露后必须怎么处理？",
+      "required_documents": [
+        "doc09"
+      ],
+      "required_evidence": [
+        "发布窗口为工作日 10:00 至 16:00，禁止在周五发布",
+        "一旦发现权限泄露，必须立即回滚并按安全事件流程上报"
+      ],
+      "expected_facts": [
+        "禁止在周五发布",
+        "立即回滚"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "search_knowledge",
+        "grep_chunks",
+        "list_documents",
+        "list_documents",
+        "read_document"
+      ],
+      "cited_documents": [
+        "doc04",
+        "doc08",
+        "doc09"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 一、生产环境发布窗口\n\n依据《变更管理流程》（doc09-change-management.md）：\n\n- **发布窗口：工作日 10:00 至 16:00，禁止在周五发布。**\n- 该窗口适用于云雀平台的**生产环境变更**，包括版本发布、配置修改与数据修复。\n\n配套的变更流程要点（同一文档）：\n\n1. 提交变更申请，说明变更内容、影响范围与回滚方案；\n2. 变更评审会**每周二与周四各一次**；\n3. 高风险变更需**技术负责人与产品负责人同时批准**；\n4. 每次发布必须准备回滚方案，**回滚时间不超过 30 分钟**；\n5. 紧急修复问答：**仅 P0 故障可以事后补评审，但仍需两名负责人当班批准**。\n\n来源：`doc09-change-management.md`（knowledge_id `7ad39807-4f27-4261-bbe5-9592a724eb4d`，chunk_id `03ad64a7-c2d8-4ed5-bc4a-9f1260e70424`，知识库「MCP 验证-图谱」`f7b76103-...`；同一文档在知识库「MCP 验证语料」`c7a0a897-...` 中的副本为 knowledge_id `b6f48a0e-0300-4029-ba2f-1fc59aba5b50`，内容一致）。\n\n## 二、发现权限泄露后的处理\n\n- **必须立即回滚，并按安全事件流程上报，不得\"先观察再决定\"。** 这一条写在 doc09 的「回滚」章节中，是强制要求（同上 chunk `03ad64a7`）。\n- 另一份口径文件也把权限泄露列为**必须修复**项：验收目标中「权限泄露」目标为 **0**，且明确\"首期不以大规模指标达标作为阻止演示的条件，但**权限泄露、伪造工具结果与无效来源必须修复**\"。\n  来源：`doc08-evaluation-metrics.md`（knowledge_id `2bd66c9c-2d0f-4f25-b391-537a97c2302a`，chunk_id `80a95fc7-e647-498c-b3ea-56e9162cafd0`，知识库 `c7a0a897-...`；副本 knowledge_id `ea03e902-3e0d-4a73-9364-005c124cdd59`，知识库 `f7b76103-...`）。\n\n## 三、证据边界说明\n\n- 语料中**没有给出\"安全事件流程\"的具体步骤、上报对象或时限**，doc09 只是指向该流程。`doc04-security-policy.md` 规定的是知识库分级（公开/内部/机密）、访问控制（必须携带用户身份、权限取交集、只读用户不得导入/更新/删除）、审计日志保留 180 天、数据留存清理以及机密级导出需双签，**未包含权限泄露事件的响应流程**。因此\"上报给谁、多久内上报\"这一点在现有资料中证据不足，不能据此推断。\n- 两个知识库各含同一套 10 篇文档（互为副本），本次检索覆盖了两库全部文档，未发现冲突或互相矛盾的发布窗口规定。两库的 wiki 与图谱能力均未启用（`capability_flags`: wiki=false, graph=false），故无 wiki/graph 证据可用。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q04": {
+      "category": "cross_document",
+      "answerable": true,
+      "question": "2.1 版本的负责人是谁？为什么 2.1 的 Wiki 生成必须在 2.0 上线后开始？",
+      "required_documents": [
+        "doc02",
+        "doc03"
+      ],
+      "required_evidence": [
+        "负责 Wiki 生成与前端展示，是 2.1 版本的负责人",
+        "2.1 的 Wiki 生成必须在 2.0 上线后开始，因为两者共用同一套分块结果"
+      ],
+      "expected_facts": [
+        "周颖",
+        "共用同一套分块结果"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "search_knowledge",
+        "grep_chunks",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc02",
+        "doc03",
+        "doc06",
+        "doc10"
+      ],
+      "cited_chunks": [],
+      "final_answer": "**结论**\n\n- **2.1 版本负责人：周颖。** 她负责 Wiki 生成与前端展示，也是 2.1 版本的负责人。\n- **为什么 2.1 的 Wiki 生成必须在 2.0 上线后开始：因为 2.1 与 2.0 共用同一套分块结果**（2.1 依赖 2.0 的分块结果与图谱抽取），所以必须先升级到 2.0 才能开始 Wiki 生成。\n\n**证据**\n\n1. `doc03-team-roster.md`（chunk_id `5078e96d-7e76-417f-a621-83230da8d624`，knowledge_id `9b878821-318b-4813-8c0d-218653462036`，KB `f7b76103-bbb1-4213-829e-59ffd21100a0`；另有副本 chunk_id `8e0f7ae2-32c3-4582-a147-4b86da40e2ce`，knowledge_id `132b9be6-f93d-4877-9a22-0a80dbbd5c65`，KB `c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2`）：\n   > **周颖**：负责 Wiki 生成与前端展示，是 2.1 版本的负责人。\n\n2. `doc02-project-timeline.md`（chunk_id `bf90aaec-5cf4-4616-90e4-b4f3002dec26`，knowledge_id `8dc99533-bce2-4a04-a2f0-ca24bc7cc244`，KB `f7b76103-...`；副本 chunk_id `f4ddbefc-9ef1-41e8-9ff6-d2386704973f`，knowledge_id `be861116-a1d3-470e-8496-cec33c2637f3`，KB `c7a0a897-...`）：\n   - 版本节奏表：`| 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 |`\n   - 里程碑约束：「2.1 的 Wiki 生成必须在 2.0 上线后开始，**因为两者共用同一套分块结果**。」\n\n3. `doc06-release-notes-2.1.md`（chunk_id `b63de7c2-331b-43e6-87a6-2165e312ca23`，knowledge_id `3344ae9b-7210-43be-abe3-fc030437f6a5`，KB `f7b76103-...`；副本 chunk_id `0b77dff6-4dfd-49c7-8181-10ae05b34e2a`，knowledge_id `128870d8-75c6-42ff-8604-3dfb59bf977e`，KB `c7a0a897-...`）的「依赖」小节独立印证：\n   > 2.1 依赖 2.0 的分块结果与图谱抽取，因此必须先升级到 2.0。\n\n**一致性说明**：以上三处陈述互相一致，未发现冲突版本（例如没有其他文档把 2.1 归属给林彦或陈默——林彦是 2.0 与 2.2 负责人，陈默是 2.3 负责人）。全部为项目计划类文档，非历史遗留资料（`doc10-legacy-platform.md` 已声明为 2024 年 6 月下线的旧系统，不含此信息）。\n\n**工具侧限制提示**：本次范围内两个知识库（`MCP 验证语料`、`MCP 验证-图谱`）的能力标记中 `wiki` 与 `graph` 均为 `false`，因此没有可查询的 Wiki 页面或实体关系图可用；上述答案完全来自文档分块检索，非 Wiki/图谱生成内容。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q05": {
+      "category": "cross_document",
+      "answerable": true,
+      "question": "语料里「文档召回率」出现了两个不同的数字：云雀平台的目标值是多少，旧版知识库系统的实际值是多少？为什么这两个数字不能混用？",
+      "required_documents": [
+        "doc01",
+        "doc10"
+      ],
+      "required_evidence": [
+        "混合检索的文档召回率目标：不低于 90%",
+        "旧版系统的文档召回率约为 61%",
+        "该系统已于 2024 年 6 月下线"
+      ],
+      "expected_facts": [
+        "不低于 90%",
+        "约为 61%",
+        "已于 2024 年 6 月下线"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "grep_chunks",
+        "search_knowledge",
+        "grep_chunks",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc01",
+        "doc08",
+        "doc10"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论\n\n语料里确实有两个「文档召回率」数字，它们分属不同对象、性质也不同：\n\n| 对象 | 数字 | 性质 | 来源 |\n| --- | --- | --- | --- |\n| 云雀平台 | **≥ 90%** | 目标值／验收阈值（下限） | `doc01-product-overview.md`、`doc08-evaluation-metrics.md` |\n| 旧版知识库系统（已下线） | **约 61%** | 历史实测值（约数） | `doc10-legacy-platform.md` |\n\n### 云雀平台目标值：≥ 90%\n\n- `doc01-product-overview.md`「关键指标」原文：「混合检索的文档召回率目标：不低于 90%。」\n  - document_id `bd06b97c-58b3-4377-8459-0709315515f8`（KB「MCP 验证语料」），chunk_id `c8d1c610-d83a-47aa-990b-897b78140582`\n  - 同一文档在 KB「MCP 验证-图谱」也有副本：document_id `df1656da-1450-4bc4-8965-325dc02f17b3`，chunk_id `07de0188-237d-482f-b425-2af08bfa7c5f`\n- `doc08-evaluation-metrics.md` 的「验收目标」表同样写「文档召回率 ≥ 90%」，并给出该指标的口径定义：「本次实际取得证据的来源文档中，覆盖了多少标注的相关文档」。\n  - document_id `2bd66c9c-2d0f-4f25-b391-537a97c2302a`，chunk_id `87cdbb1f-789c-41b1-a3e6-0b72cec02a7d`（该文另一文档 ID 为 `ea03e902-3e0d-4a73-9364-005c124cdd59`）\n\n### 旧版知识库系统实际值：约 61%\n\n- `doc10-legacy-platform.md`「旧版指标」原文：「旧版系统的文档召回率约为 61%。」\n  - document_id `d7e683b7-7cea-49f3-bec6-e0005b501f85`，chunk_id `dcad9df2-6c5e-4b72-833a-638893a99784`（KB「MCP 验证语料」）\n  - 副本：document_id `7688826d-7471-4b74-97c5-15560bbe078d`，chunk_id `efe31e08-1e4c-41a8-af86-eb1294717d84`（KB「MCP 验证-图谱」）\n\n## 为什么不能混用\n\n1. **两者性质不同**：90% 是云雀平台的**目标/验收下限**（\"不低于 90%\"），不是已经达到实测值；61% 是旧版系统的**历史实测约数**。把目标当成绩、或把旧实测当现状，都会读错。\n2. **系统不同且旧系统已下线**：`doc10` 明确写「本文描述 2023 年使用的旧版知识库系统，该系统已于 2024 年 6 月下线。保留本文仅用于历史追溯，其中的数据不可作为当前云雀平台的行为依据。」\n3. **数据不迁移、口径也不可比**：同一文档指出「旧版系统的文档未迁移到云雀平台，需要重新导入」，且旧版「没有引用支持率统计，也没有评估口径文档」；两者在检索方式（旧版关键词用 MySQL LIKE、无向量检索、无图谱）、引用粒度（旧版只给文档标题）上都不同，因此数字不构成同一口径下的对比。\n4. **有明确的引用红线**：`doc10` 规定「任何旧版系统的数字都不应出现在云雀平台的对外材料中，除非明确标注为历史数据。」\n\n## 证据完整性说明\n\n两个知识库（`MCP 验证语料` c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2、`MCP 验证-图谱` f7b76103-bbb1-4213-829e-59ffd21100a0）均无 wiki、无图谱能力，只能做语义/关键词检索，因此本次结论完全基于文本分块。对「召回率」的关键词检索只返回 3 条去重后的匹配（另加副本），已核查：语料中除上述 90%（云雀目标）与 61%（旧版实测）外，没有出现第三个「文档召回率」数值；其他 ≥90%/≥95% 的数字分别属于「全文档找齐率/必要证据覆盖率/事实准确率/引用支持率」等**不同指标**（见 `doc08`），不应与文档召回率混淆。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 3,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q06": {
+      "category": "cross_document",
+      "answerable": true,
+      "question": "知识图谱抽取准确率的验收门槛是多少，属于哪个版本？Wiki 页面事实支持率的验收目标是多少，属于哪个版本？",
+      "required_documents": [
+        "doc02",
+        "doc06"
+      ],
+      "required_evidence": [
+        "2.0 的验收依赖图谱抽取的准确率不低于 85%",
+        "Wiki 页面的事实支持率验收目标为不低于 95%"
+      ],
+      "expected_facts": [
+        "图谱抽取的准确率不低于 85%",
+        "事实支持率验收目标为不低于 95%"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "search_knowledge",
+        "grep_chunks",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc01",
+        "doc02",
+        "doc05",
+        "doc06",
+        "doc08"
+      ],
+      "cited_chunks": [],
+      "final_answer": "两个门槛都找到了，且各自在语料中只出现一次，没有冲突数字。\n\n## 1. 知识图谱抽取准确率\n\n- **门槛：≥ 85%**（原文表述为\"不低于 85%\"）\n- **归属版本：2.0**——\"2.0 的验收依赖图谱抽取的准确率不低于 85%，该指标由数据组在 3 月 20 日前给出。\"\n- 来源：`doc02-project-timeline.md`（文档 id `be861116-a1d3-470e-8496-cec33c2637f3`，KB「MCP 验证语料」；同一文档在 KB「MCP 验证-图谱」中也有副本，id `8dc99533-bce2-4a04-a2f0-ca24bc7cc244`），chunk_id `f4ddbefc-9ef1-41e8-9ff6-d2386704973f` / `bf90aaec-5cf4-4616-90e4-b4f3002dec26`。\n- 补充：2.0 是\"知识图谱正式可用\"的版本（2025 年 4 月，负责人林彦），图谱抽取准确率正是它的验收依赖项。注意 `doc05-release-notes-2.0.md`（id `a5c9ca33-25a8-410f-bc60-ed7eed7280fa`）本身没有写这个数字，数字只在项目计划文档里。\n\n## 2. Wiki 页面事实支持率\n\n- **验收目标：≥ 95%**（原文为\"不低于 95%\"）\n- **归属版本：2.1**——\"2.1 上线后，Wiki 页面的事实支持率验收目标为不低于 95%。\"\n- 来源：`doc06-release-notes-2.1.md`（文档 id `3344ae9b-7210-43be-abe3-fc030437f6a5`，KB「MCP 验证-图谱」），chunk_id `b63de7c2-331b-43e6-87a6-2165e312ca23`。\n- 补充：2.1 是\"Wiki 自动生成与页面链接图\"的版本（2025 年 7 月，负责人周颖）。\n\n## 说明与边界\n\n- 检索范围为当前两个知识库：`c7a0a897-…`（MCP 验证语料）和 `f7b76103-…`（MCP 验证-图谱）。两者 capability_flags 均显示 `graph: false`、`wiki: false`，即当前没有可用的 Wiki 页面或实体关系图谱，因此以上结论全部来自文本文档分块，未使用 wiki/graph 资料。\n- 我用精确 grep 复核了\"事实支持率\"和\"图谱抽取的准确率\"，各自全库仅命中 1 处，不存在同一指标给出不同数值的冲突。\n- 易混淆项提示：`doc08-evaluation-metrics.md` 的验收表（文档召回率 ≥90%、全文档找齐率 ≥80%、必要证据覆盖率 ≥90%、事实准确率 ≥90%）是检索/问答质量口径，其中\"事实准确率\"**不是** Wiki 页面事实支持率，也未标注版本；另有\"引用支持率 ≥95%\"这一指标（见 `doc01-product-overview.md`），数值与 Wiki 事实支持率同为 95%，别混淆。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q07": {
+      "category": "wiki_overview",
+      "answerable": true,
+      "question": "自动生成的 Wiki 包含哪几类页面？一个 Wiki 页面由多篇文档生成时，来源如何归属？",
+      "required_documents": [
+        "doc06"
+      ],
+      "required_evidence": [
+        "包含摘要页、实体页与概念页",
+        "一个 Wiki 页面可能由多篇文档生成，此时不提供单一文档归属"
+      ],
+      "expected_facts": [
+        "摘要页、实体页与概念页",
+        "不提供单一文档归属"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "grep_chunks",
+        "grep_chunks",
+        "list_documents",
+        "list_documents",
+        "grep_chunks",
+        "grep_chunks",
+        "read_document",
+        "get_knowledge_base_status",
+        "wiki_search"
+      ],
+      "cited_documents": [
+        "doc02",
+        "doc03",
+        "doc06",
+        "doc07",
+        "doc08"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论\n\n### 1. 自动生成的 Wiki 包含哪几类页面\n\n**三类页**：**摘要页、实体页、概念页**。\n\n来源：`doc06-release-notes-2.1.md`（\"云雀平台 2.1 版本发布说明\"，发布日期 2025-07-25）\n\n> **Wiki 自动生成**：文档完成索引后自动生成 Wiki 页面，包含摘要页、实体页与概念页。\n\n- document_id：`128870d8-75c6-42ff-8604-3dfb59bf977e`（知识库「MCP 验证语料」`c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2`），chunk_id `0b77dff6-4dfd-49c7-8181-10ae05b34e2a`\n- 同一文档在知识库「MCP 验证-图谱」`f7b76103-bbb1-4213-829e-59ffd21100a0` 有同源副本：document_id `3344ae9b-7210-43be-abe3-fc030437f6a5`，chunk_id `b63de7c2-331b-43e6-87a6-2165e312ca23`（内容一致，可作交叉印证）\n\n触发时机：文档**完成索引后**自动生成（不属于人工编辑流程）。相关版本信息：2.1 由周颖负责（`doc02-project-timeline.md`、`doc03-team-roster.md`）。\n\n### 2. 一个 Wiki 页面由多篇文档生成时，来源如何归属\n\n**不提供单一文档归属**，即以引用列表形式列出多个来源，而非把页面归到某一篇文档名下。\n\n同一文档「变更」节原文：\n\n> - Wiki 页面的来源引用格式统一为 `文档ID|文档标题`，可通过来源引用回到原文。\n> - 一个 Wiki 页面可能由多篇文档生成，此时不提供单一文档归属。\n\n（同上 chunk_id `0b77dff6-4dfd-49c7-8181-10ae05b34e2a` / `b63de7c2-331b-43e6-87a6-2165e312ca23`）\n\n即每处事实都带 `文档ID|文档标题` 形式的引用、可回跳原文；页面级别则没有\"唯一起源文档\"这一字段。\n\n**配套的计数口径**（`doc08-evaluation-metrics.md`，计数规则第 2 条）：\n\n> Wiki 页面或图谱关系与其来源文档来自同一原文时，按同一来源计一次。\n\n- document_id：`2bd66c9c-2d0f-4f25-b391-537a97c2302a`（KB `c7a0a897-…`），chunk_id `87cdbb1f-789c-41b1-a3e6-0b72cec02a7d`；另一副本 document_id `ea03e902-3e0d-4a73-9364-005c124cdd59`，chunk_id `7579bc96-abfa-408c-b535-b5fab9c15ab0`\n\n这意味着评估文档召回时，Wiki 页与其来源文档不会重复计为两个来源。\n\n### 相关限制（同源文档，可一并参考）\n\n- Wiki 页面支持分页浏览，**单页最多 100 条**（`doc07-api-guide.md` 亦记「列表页大小最大 100」）。\n- 页面链接图：节点超过 **200** 个时截断，响应中标记 `truncated`；`wiki_graph` 的 `depth` 限制 1~2、`limit` 最大 200。\n- 2.1 上线后 Wiki 页面的**事实支持率**验收目标 ≥ 95%。\n- 2.1 依赖 2.0 的分块结果与图谱抽取，必须先升级到 2.0。\n\n## 证据完整性与不确定处（请务必注意）\n\n1. **资料范围有限**：我用 `grep_chunks` 对两个知识库全量检索了 `Wiki`、`摘要页|实体页|概念页|综合页|对比页`、`来源引用|单一文档归属|多篇文档`，**只有 `doc06-release-notes-2.1.md` 一处**描述了页面类型与来源归属规则。语料中**没有**独立的 Wiki 功能规格文档，因此无法补充页面类型的更细定义（例如各类型的字段、去重规则）。\n2. **未发现其他页面类型的证据**：检索工具本身支持 summary / entity / concept / index / synthesis / comparison 等页面类型，但本语料**仅记载摘要页、实体页、概念页三类**。index/synthesis/comparison 在本知识库范围内**无任何文档支持**，我不能据此断言平台自动生成这些页面类型——只能说语料未覆盖。\n3. **无法用实际生成的 Wiki 交叉验证**：两个知识库的能力标记均为 `wiki: false`（`c7a0a897-…` 与 `f7b76103-…`），`wiki_search` 返回 \"none of the selected knowledge bases has a wiki\"，因此上述结论**完全来自发布说明文本**，未经真实 Wiki 页面核对。同时 `get_knowledge_base_status` 对 `c7a0a897-…` 返回 `documents: 0, chunks: 0`，与其 `list_documents` 显示 10 篇已完成文档的状态不一致，该状态接口在此环境下不可信，我没有依赖它下结论。\n4. 未做分页以外的补充检索——但两库各仅 10 篇文档且已全部枚举（`list_documents` total=10），`grep_chunks` 返回的 8 条均为全文命中，故遗漏全文相关段落的可能性很低；不过关键词索引对极短文档之外的内容不作保证，如需绝对确认可逐篇 `read_document` 复核。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q08": {
+      "category": "wiki_overview",
+      "answerable": true,
+      "question": "通过 MCP 浏览 Wiki 时，wiki_graph 的 depth 与 limit 有什么限制？列表页大小上限是多少？",
+      "required_documents": [
+        "doc07"
+      ],
+      "required_evidence": [
+        "`wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200",
+        "列表页大小最大 100"
+      ],
+      "expected_facts": [
+        "depth",
+        "limit 最大 200",
+        "列表页大小最大 100"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "read_document",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc06",
+        "doc07"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论\n\n**`wiki_graph` 的参数上限**\n- `depth`：限制为 **1~2**（只支持一跳或两跳邻域）\n- `limit`：**最大 200**（节点数）\n- 另有一条与之呼应的行为约定：页面链接图在**节点超过 200 个时会截断**，并在响应中标记 `truncated`。\n\n**列表页大小**\n- **最大 100**（Wiki 页面分页浏览\"单页最多 100 条\"）。\n\n## 证据\n\n- 《云雀平台 MCP 接口使用指南》\"限制\"一节（文档 doc07-api-guide.md，knowledge_id `d713a402-d7aa-4214-8835-746fdd38570c`，chunk_id `7c7b35e0-f237-4b69-90df-86e4cbd59a26`，第 3 块）：\"列表页大小最大 100。 `wiki_graph` 的 `depth` 限制为 1~2，`limit` 最大 200。 单次请求最多查询 10 个知识库。\"（同一文档在知识库 c7a0a897… 下也有镜像，chunk_id `42bbc721-…`/同名文档）\n- 《云雀平台 2.1 版本发布说明》（文档 doc06-release-notes-2.1.md，knowledge_id `3344ae9b-7210-43be-abe3-fc030437f6a5`，chunk_id `b63de7c2-331b-43e6-87a6-2165e312ca23`）：\"**分页浏览**：Wiki 页面支持分页浏览，单页最多 100 条\"；\"页面链接图在节点超过 200 个时会截断，并在响应中标记 `truncated`。\"\n\n两处来源一致，无冲突。\n\n## 交叉核对（工具接口本身）\n\n与工具签名一致：`wiki_graph` 的 `depth` 仅接受 1 或 2（默认 1），`limit` 默认 100、上限 200；`wiki_list_pages` 的 `page_size` 默认 20、上限 100（`list_documents` 的 `page_size` 同为上限 100）。注意 `wiki_index` 是例外，其 `limit` 上限为 200（按条目数而非页面数），这一点在语料文档中没有写明，只有工具接口可依。\n\n## 说明与限制\n\n本次检索的两个知识库（\"MCP 验证语料\" `c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2`、\"MCP 验证-图谱\" `f7b76103-bbb1-4213-829e-59ffd21100a0`）的能力标记中 **wiki 均为 false、graph 均为 false**，因此上述数字来自语料中的接口文档与发布说明，而不是我实际调用 `wiki_graph`/`wiki_list_pages` 观测到的运行时行为；如需以真实分页与截断行为复核，需要在一个已启用 Wiki 的知识库上验证。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 3,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q09": {
+      "category": "entity_relation",
+      "answerable": true,
+      "question": "赵岚和吴桐分别负责什么？算法组为什么不能同时并行图谱抽取与重排模型调优？",
+      "required_documents": [
+        "doc02",
+        "doc03"
+      ],
+      "required_evidence": [
+        "负责重排模型与实体抽取质量",
+        "负责向量化与分块策略",
+        "算法组同时支持图谱抽取与重排模型调优，因此排期上两者不能并行"
+      ],
+      "expected_facts": [
+        "重排模型与实体抽取质量",
+        "向量化与分块策略",
+        "两者不能并行"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "grep_chunks"
+      ],
+      "cited_documents": [
+        "doc02",
+        "doc03"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 赵岚与吴桐的分工\n\n两人都是算法工程师，职责见《项目组人员与职责说明》（`doc03-team-roster.md`）：\n\n- **赵岚**：算法工程师，**负责重排模型与实体抽取质量**。\n- **吴桐**：算法工程师，**负责向量化与分块策略**。\n\n同一份文档里其余角色作为对照：林彦（技术负责人，负责检索链路与知识图谱，兼 2.0/2.2 负责人）、周颖（Wiki 生成与前端展示，2.1 负责人）、陈默（权限、审计与部署交付，2.3 负责人）、郑一（测试工程师，端到端验收）。另外，**图谱抽取相关的线上问题直接转给算法组**，不进入一线值班队列。\n\n来源：\n- `doc03-team-roster.md`，chunk_id `5078e96d-7e76-417f-a621-83230da8d624`（知识库 f7b76103-bbb1-4213-829e-59ffd21100a0）与 chunk_id `8e0f7ae2-32c3-4582-a147-4b86da40e2ce`（知识库 c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2，同一文档在两库各有一份），knowledge_id 分别为 `9b878821-318b-4813-8c0d-218653462036` 和 `132b9be6-f93d-4877-9a22-0a80dbbd5c65`。\n\n## 算法组为什么不能并行做图谱抽取与重排调优\n\n原因是**人力约束**，见《云雀平台 2025 年度项目计划》（`doc02-project-timeline.md`）的人力一节：\n\n> 项目组共 11 人：后端 4 人、前端 2 人、算法 3 人、测试 1 人、产品 1 人。\n> **算法组同时支持图谱抽取与重排模型调优，因此排期上两者不能并行。**\n\n即：算法组只有 3 人，要同时承担图谱抽取和重排模型调优两条工作线，人手不足，所以在排期上这两件事必须串行、不能并行。这一点与赵岚\"重排模型 + 实体抽取质量\"的职责相呼应，但文档给出的直接理由就是这条人力约束，并未提到技术依赖（如同用分块结果之类）作为原因——顺带一提，文档中\"共用同一套分块结果\"是解释 **2.1 的 Wiki 生成必须在 2.0 上线后开始**，属于另一条约束。\n\n来源：`doc02-project-timeline.md`，chunk_id `f4ddbefc-9ef1-41e8-9ff6-d2386704973f`，knowledge_id `be861116-a1d3-470e-8496-cec33c2637f3`，知识库 c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2。\n\n## 检索范围说明\n\n本次只对两个知识库（`MCP 验证语料`、`MCP 验证-图谱`）做了关键词与混合检索，两条证据均来自文档分块；这两个库的 `wiki` 和 `graph` 能力标志均为 false（图谱库虽名为\"图谱\"，`capability_flags.graph` 仍为 false），因此没有 Wiki 页面或图谱关系可作交叉验证，结论仅基于上述原文分块。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 3,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q10": {
+      "category": "entity_relation",
+      "answerable": true,
+      "question": "知识图谱抽取相关的线上问题由谁处理？生产环境一线值班如何轮换？",
+      "required_documents": [
+        "doc03"
+      ],
+      "required_evidence": [
+        "图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列",
+        "一线值班由后端组轮值，每两周轮换一次"
+      ],
+      "expected_facts": [
+        "直接转给算法组，不进入一线值班队列",
+        "每两周轮换一次"
+      ],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "grep_chunks",
+        "read_document"
+      ],
+      "cited_documents": [
+        "doc02",
+        "doc03"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论\n\n**1. 图谱抽取相关的线上问题：由算法组处理（不进入一线值班队列）**\n\ndoc03-team-roster.md《项目组人员与职责说明》的「值班安排」明确写着：\n\n> - 图谱抽取相关的线上问题直接转给算法组，不进入一线值班队列。\n\n- 来源：`knowledge_id = 9b878821-318b-4813-8c0d-218653462036`（标题 doc03-team-roster.md，KB `f7b76103-bbb1-4213-829e-59ffd21100a0`），`chunk_id = 5078e96d-7e76-417f-a621-83230da8d624`；同一文件在 KB `c7a0a897-...`（MCP 验证语料）中为 `knowledge_id = 132b9be6-f93d-4877-9a22-0a80dbbd5c65`，`chunk_id = 8e0f7ae2-32c3-4582-a147-4b86da40e2ce`。两份检索结果内容一致，无冲突。\n- 同一文档给出的算法组成员与职责：**赵岚**（重排模型与实体抽取质量）、**吴桐**（向量化与分块策略）；算法组共 3 人（doc02-project-timeline.md，`knowledge_id = be861116-a1d3-470e-8496-cec33c2637f3`）。**文档只把这条线上问题归属到「算法组」这一组级，没有点名具体个人。**\n- 注意区分：**林彦**是技术负责人，负责检索链路与知识图谱，也是 2.0 / 2.2 版本负责人——这是建设与版本责任，不等于「图档抽取线上问题的受理人」；受理规则明确指向算法组。\n\n**2. 生产环境一线值班：由后端组轮值，每两周轮换一次**\n\n同一文档原文：\n\n> - 生产环境问题的一线值班由后端组轮值，每两周轮换一次。\n\n即：一线值班不是个人固定值守，而是「后端组」组内轮值，轮换周期 2 周；图谱抽取类问题被排除在该队列之外，直接转算法组。\n\n## 证据充分性说明\n\n- 我用关键词检索（`值班|轮值|轮换|一线`）在两个知识库中全量匹配，**只命中该一条 chunk**，说明这一规则是唯一出处，不存在其他版本或其他文档对轮换周期、受理人给出不同说法。\n- 未检索到更细的排班表（具体谁在哪两周值班）或算法组的内部受理机制文档，此部分资料中确实没有，无法回答到个人或工单流程层面。\n- 两个知识库实际上是同一套十文档语料的两份副本（一个为 graph 未启用的验证语料，一个为「MCP 验证-图谱」），因此答案不构成交叉印证，只是同一出处的重复出现。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 2,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q11": {
+      "category": "unanswerable",
+      "answerable": false,
+      "question": "云雀平台 3.0 版本计划在什么时间发布？该版本包含哪些功能？",
+      "required_documents": [],
+      "required_evidence": [],
+      "expected_facts": [],
+      "tool_call_names": [
+        "search_knowledge",
+        "grep_chunks",
+        "grep_chunks",
+        "list_knowledge_bases",
+        "wiki_search",
+        "list_documents",
+        "list_documents",
+        "grep_chunks",
+        "grep_chunks",
+        "search_knowledge",
+        "get_knowledge_base_status",
+        "get_knowledge_base_status"
+      ],
+      "cited_documents": [
+        "doc01",
+        "doc02",
+        "doc05",
+        "doc06",
+        "doc10"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论：资料中没有“云雀平台 3.0”的任何信息\n\n我在两个知识库（均为当前全部可用范围）中做了多轮检索，**未找到任何关于 3.0 版本的发布计划或功能清单**。因此无法回答“3.0 计划何时发布、包含哪些功能”——这属于资料未覆盖的内容，而不是“查到了但为空”。\n\n### 检索过程与范围\n- 检索范围：`MCP 验证语料`（c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2）与 `MCP 验证-图谱`（f7b76103-bbb1-4213-829e-59ffd21100a0），两库各含 10 篇文档（doc01–doc10），已全部列出、无分页遗漏。\n- 语义 + 混合检索（“云雀平台 3.0 版本发布计划/功能”）+ 关键词精确匹配 `3.0`、`2026|路线图|roadmap|规划`：均无命中 3.0。\n- 两个知识库的 `capability_flags` 均为 `wiki: false`、`graph: false`，即**没有 Wiki、没有实体关系图谱**可作补充来源；`wiki_search` 亦返回“所选知识库均无 wiki”。所以不存在“另有 Wiki/图谱资料未查”的情况。\n- 唯一提到版本节奏的是 `doc02-project-timeline.md`，其标题即限定为“**2025 年度**项目计划”。\n\n### 资料实际能提供的版本节奏（供参照）\n来自 `doc02-project-timeline.md`（knowledge_id `8dc99533-bce2-4a04-a2f0-ca24bc7cc244`，KB f7b76103…；同文另见 c7a0a897… 的 `be861116-a1d3-470e-8496-cec33c2637f3`）：\n\n| 版本 | 计划时间 | 主要内容 | 负责人 |\n| --- | --- | --- | --- |\n| 1.0 | 2024 年 3 月（`doc01-product-overview.md`） | 首次发布 | — |\n| 2.0 | 2025 年 4 月 | 知识图谱正式可用 | 林彦 |\n| 2.1 | 2025 年 7 月 | Wiki 自动生成与页面链接图 | 周颖 |\n| 2.2 | 2025 年 10 月 | 多模态图片检索 | 林彦 |\n| 2.3 | 2025 年 12 月 | 权限细分与审计 | 陈默 |\n\n其中 2.0 与 2.1 已有正式发布说明（`doc05-release-notes-2.0.md`：2025-04-18；`doc06-release-notes-2.1.md`：2025-07-25），**2.2、2.3 之后没有任何后续版本（包括 3.0）的记载**。\n\n### 需要提醒的两点\n1. **前提不成立**：问题假定了“3.0 版本计划”的存在，但现有语料只规划到 2025 年底的 2.3。若“3.0”来自语料之外的渠道，本知识库无法核实，请勿据本回答推断 3.0 的时间或功能。\n2. **工具返回值存在一处不一致**：`get_knowledge_base_status` 对两个库都报告 `documents: 0, chunks: 0`，而 `list_documents` 返回各 10 篇且 `parse_status` 全为 `completed`，检索也确实命中了这些分块。该计数差异不影响上述检索结论（检索本身有返回结果），但作为工具状态一致性问题是真实存在的，不能当作“库为空”。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 0,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    },
+    "q12": {
+      "category": "unanswerable",
+      "answerable": false,
+      "question": "云雀平台 2025 年的研发预算和人力成本分别是多少？",
+      "required_documents": [],
+      "required_evidence": [],
+      "expected_facts": [],
+      "tool_call_names": [
+        "list_knowledge_bases",
+        "search_knowledge",
+        "grep_chunks",
+        "list_documents",
+        "list_documents",
+        "grep_chunks",
+        "grep_chunks",
+        "grep_chunks",
+        "search_knowledge",
+        "read_document",
+        "get_knowledge_base_status",
+        "get_knowledge_base_status"
+      ],
+      "cited_documents": [
+        "doc01",
+        "doc02",
+        "doc03",
+        "doc09",
+        "doc10"
+      ],
+      "cited_chunks": [],
+      "final_answer": "## 结论：知识库中没有这两项数据，无法回答\n\n在两个可访问的知识库中**均未检索到任何\"研发预算\"或\"人力成本\"的金额数据**。这不是检索方式的问题，而是语料本身不含此类内容。\n\n### 检索过程与证据\n\n1. **全库范围确认**：可访问的知识库只有两个——`c7a0a897-7a3a-40e3-8c2b-5d3b6f17e5f2`（MCP 验证语料）与 `f7b76103-bbb1-4213-829e-59ffd21100a0`（MCP 验证-图谱）。两者各含 **10 篇文档**（doc01–doc10），且内容基本重复，没有任何财务/预算类文档（`list_documents`，两个库 total=10）。\n2. **关键词穷举命中为空**：对 `预算`、`成本`、`研发|投入|费用|金额` 等词做正则全文检索，返回均为 \"No matching chunks\"（无任何分块包含这些词）。\n3. **语义检索仅为弱相关**：以\"研发预算金额 人力成本 投入多少钱\"做语义检索，最高分仅 0.305，命中的是人员名单与变更流程文档（如 `doc03-team-roster.md`、`doc09-change-management.md`），并没有金额信息——属于语义漂移，不构成预算证据。\n4. **相关文档已读原文**：`doc02-project-timeline.md`（knowledge_id `be861116-a1d3-470e-8496-cec33c2637f3`，chunk `f4ddbefc-9ef1-41e8-9ff6-d2386704973f`）只给出 2025 年版本节奏（2.0/2.1/2.2/2.3）与里程碑约束；`doc03-team-roster.md`（knowledge_id `132b9be6-f93d-4877-9a22-0a80dbbd5c65`，单分块 `8e0f7ae2-32c3-4582-a147-4b86da40e2ce`）只有角色分工、值班与汇报关系，都无金额。\n5. **无 Wiki / 图谱可补充**：两个知识库的能力标记均为 `wiki: false`、`graph: false`，因此不存在 Wiki 页或实体关系可提供额外的预算线索（也可能因此图谱写不进去）。\n\n### 能提供的、最接近的资料（非金额）\n\n- **2025 年研发人力规模**：项目组共 **11 人**——后端 4 人、前端 2 人、算法 3 人、测试 1 人、产品 1 人；算法组同时支持图谱抽取与重排模型调优，排期上两者不能并行。\n  - 来源：`doc02-project-timeline.md`，knowledge_id `be861116-a1d3-470e-8496-cec33c2637f3`，chunk_id `f4ddbefc-9ef1-41e8-9ff6-d2386704973f`（KB `c7a0a897…`；同文档在 KB `f7b76103…` 的副本为 knowledge_id `8dc99533-bce2-4a04-a2f0-ca24bc7cc244`）。\n- **具体人员与职责**：林彦（技术负责人）、周颖、陈默、赵岚、吴桐、郑一；项目组向技术中台汇报，部门负责人沈立。来源：`doc03-team-roster.md`，chunk_id `8e0f7ae2-32c3-4582-a147-4b86da40e2ce`。\n- **需要注意的历史数据禁区**：`doc10-legacy-platform.md`（knowledge_id `7688826d-7471-4b74-97c5-15560bbe078d`）明确说明旧版系统数字\"不可作为当前云雀平台的行为依据\"，不得出现在对外材料中——即使要引用旧数据也必须标注为历史数据。该文也没有任何预算/成本数据。\n\n因此：**人力成本金额**与**研发预算**必须来自语料之外的财务系统或预算文档；用现有 11 人编制和版本计划无法推导出金额（且不应凭空估算）。\n\n### 一处工具结果冲突（需说明）\n\n`get_knowledge_base_status` 对两个库都返回 `documents: 0, chunks: 0, processing_documents: 0`，这与 `list_documents`（各 10 篇、`parse_status: completed`）以及实际检索到分块的结果**相互矛盾**。我据此不把\"0 篇\"当作\"知识库为空\"的证据；但要说明：若确实还有未纳入当前统计范围的文档或另一个未授权知识库存放财务资料，本次检索无法覆盖，需要你补充确认数据源后再查。",
+      "human_review": {
+        "reviewed": false,
+        "verifiable_claims": 0,
+        "correct_claims": 0,
+        "necessary_facts_total": 0,
+        "covered_facts": 0,
+        "supported_cited_claims": 0,
+        "total_cited_claims": 0,
+        "metric_fact_accuracy": null,
+        "metric_fact_completeness": null,
+        "metric_citation_support": null,
+        "metric_no_answer_handled": null,
+        "notes": ""
+      }
+    }
+  }
+}

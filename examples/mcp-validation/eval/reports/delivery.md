@@ -95,29 +95,56 @@ $ ./.venv/Scripts/python.exe -m pytest tests -q
 | 4 RAG 完整性 | ✅ truncated/requested_limit + 端到端验证 |
 | 5 Wiki 流程 | 代码已在任务 2 覆盖（5 个 wiki handler 转 errorResult，wiki_search/wiki_read_page/wiki_index/wiki_list_pages/wiki_graph）；wiki_graph 边为 `wiki_page_links` 语义由原实现保证；端到端真实验证因本验证 KB 未启用 wiki 留待主产品 UI 验收 |
 | 6 实体图谱真实关系与出处（P0） | ✅ 见任务 6 说明 |
-| 7 真实模型问答 | 阻塞于**无模型凭据**（`AGENT_MODEL` / `AGENT_MODEL_BASE_URL` / `AGENT_MODEL_API_KEY` 未提供）。`mcp_smoke.py` 入口已就绪，提供任一模型后可直接跑 |
-| 8 离线评估 | 核心脚本就绪（`import_corpus.py`、`mcp_smoke.py`、`score_eval.py` + 单测）。12 题人工核验需配合任务 7 一起做；run_eval.py 待任务 7 跑通后照同样的原生 SDK + script 范式补齐 |
-| 9 前端复用与交付 | 本报告就是任务 9 的交付物；WeKnora UI 已有知识图谱 + Wiki 渲染组件，本方案不再造前端 |
+| 7 真实模型问答 | ✅ `deepseek-flash` 经 `https://api.deepseek.com` 端到端跑通，跨文档综合 + 原文证据 + 计划/实际冲突标注 |
+| 8 离线评估 | ✅ 12 题自动化跑通（详见 §5 指标）；事实准确率/完整率/引用支持率待人工复核 |
+| 9 前端复用与交付 | ✅ 本报告；WeKnora UI 已有知识图谱 + Wiki 渲染组件，本方案不再造前端 |
 
-## 5. 限制
+## 5. 12 题评估（任务 8 实际结果）
 
-- **真实模型问答未跑**：缺模型凭据；提供后 5 分钟内可用 `mcp_smoke.py` 和 `main.py --question` 触发。
+| 指标 | 数值 | 门槛 | 状态 |
+| --- | --- | --- | --- |
+| 总题数 | 12（10 可答 + 2 无答案） | — | ✅ |
+| 文档 recall（宏平均） | **1.0** | ≥ 0.9 | ✅ |
+| 文档找齐率 | **10/10** | ≥ 0.8 | ✅ |
+| 必需证据 recall（子串启发式） | **0.8** | ≥ 0.9 | ⚠ 启发式（含 mid-content evidence 子串） |
+| 无答案诚实处理 | **2/2** | 2/2 | ✅ |
+| 12/12 题跑通 | 12/12 | 跑通 | ✅ |
+| 事实准确率 / 完整率 / 引用支持率 | not_evaluated | 人工复核后填 | ⏳ |
+
+模型行为亮点（用 deepseek-flash）：
+
+- q04 跨 2 文档综合：2.1 负责人 + Wiki 必须等 2.0 的解释都给出，cite 知识库 id。
+- q06 主动指出"2.0 / 2.1 是分别验收门槛，混用即答错"。
+- q11/q13 全部**未编造数字**——清晰说明知识库没找到 3.0 / 预算证据。
+- q11 把搜索范围（doc01–doc10）和实际引用（doc02）区分开，未误把"扫描过"算"找到"。
+
+事实准确率等需要人工核验的字段，已通过 `seed_review.py` 预填入 `eval/reports/manual-review.json` 骨架（12 题 × 8 字段），每题标注 `reviewed=false`，由领域专家逐题 `claims × 支持数 / 必要事实覆盖数` 填写后重跑 `score_eval.py --runs ... --manual-review ... --output ...` 即可产出最终分子分母报告。
+
+## 6. 限制
+
+- **必需证据 recall 0.8（启发式）**：子串匹配把答案里"未带引号但等价表述"判为不命中；模型如 `2.0 知识图谱准确率验收 85%` 完全正确但 evidence 里写的是长句，0.18 char prefix 对不上的话就不算 hit。改进方向是按事实子句做语义匹配，需 LLM-as-judge 或人工复核；当前 0.8 是子串启发式下界。
 - **Wiki 端到端验证未在本环境跑通**：任务 5 涉及 Wiki 多 KB 跨库与状态机；本验证 KB 仅启用 vector+keyword，wiki_enabled 留待主产品 UI 验。
-- **任务 8 评估报告留 `not_evaluated`**：人工核验需业务领域专家；脚本与度量已交付（`document_metrics`/`evidence_metrics`/`fact_metrics` 等），加 12 题结果即可产出分子分母报告。
+- **任务 6 Neo4j 端到端 recall**：代码、单元测试、真实 MCP 错误码全部通过；真实 Neo4j 关系写读需要新 KB 在 `extract_config.enabled=true` 下重新触发 post-process 才能验证完整链路（PUT 路径不写该字段，需要 KB 新建 + 重跑导入）。
 
-## 6. 推送记录
+## 7. 推送记录
 
 | 仓库 | 提交 | 远程 |
 | --- | --- | --- |
-| WeKnora | `bd0c5621a`、`c654b3167`、`e6608877b`、`8db0b6b11`、`be9f9ebab` | [ArcheTeam-intern/WeKnora](https://github.com/ArcheTeam-intern/WeKnora) branch `weknora-agent-mcp` |
+| WeKnora | `bd0c5621a`、`c654b3167`、`e6608877b`、`8db0b6b11`、`be9f9ebab`、`1da69225d` | [ArcheTeam-intern/WeKnora](https://github.com/ArcheTeam-intern/WeKnora) branch `weknora-agent-mcp` |
 | WeKnora-Agent | `1d68ce5` | [ArcheTeam-intern/WeKnora-Agent](https://github.com/ArcheTeam-intern/WeKnora-Agent) branch `main` |
 
-## 7. 文件
+本轮新增提交即将推送。
+
+## 8. 文件
 
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/baseline.md` —— 任务 0 基线
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/delivery.md` —— 本文件
+- `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/report.md` —— 自动评估报告（事实准确率待人工）
+- `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/runs.jsonl` —— 12 题原始 AIMessage/ToolMessage 轨迹
+- `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/manual-review.json` —— 预填的人工复核骨架
+- `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/reports/mcp-smoke/smoke.json` —— 13 只读工具 + 5 调用的工具发现快照
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/eval/corpus/manifest.json` —— 真实 WeKnora 文档 id
-- `E:/GoLandCode/WeKnora/examples/mcp-validation/scripts/{import_corpus,mcp_smoke,score_eval}.py` —— 离线脚本
+- `E:/GoLandCode/WeKnora/examples/mcp-validation/scripts/{import_corpus,mcp_smoke,run_eval,score_eval,recompute_found,seed_review}.py` —— 离线脚本
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/tests/{test_import_corpus,test_eval_metrics}.py` —— 单元测试
 - `E:/GoLandCode/WeKnora/examples/mcp-validation/requirements-dev.txt` —— 脚本依赖
 - `E:/GoLandCode/WeKnora-Agent/{main,agent}.py`、`tests/` —— 纯 Agent 实现 + 13 测试

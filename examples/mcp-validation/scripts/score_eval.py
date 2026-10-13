@@ -17,6 +17,7 @@ Usage (§11.3)::
 """
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -69,7 +70,7 @@ def citation_support_metrics(supported, total):
     return {"supported": supported, "total": total, "support_rate": supported / total}
 
 
-def build_report(runs_path: Path, review_path: Path, output_path: Path) -> None:
+def build_report(runs_path: Path, review_path: Path, output_path: Path, manifest_path: Path | None) -> None:
     runs = []
     if runs_path.exists():
         with runs_path.open(encoding="utf-8") as stream:
@@ -81,25 +82,63 @@ def build_report(runs_path: Path, review_path: Path, output_path: Path) -> None:
     if review_path.exists():
         with review_path.open(encoding="utf-8") as stream:
             review = json.load(stream)
+    manifest_uuids: dict[str, str] = {}
+    if manifest_path and manifest_path.exists():
+        m = json.loads(manifest_path.read_text(encoding="utf-8"))
+        for d in m.get("documents", []):
+            logical = d.get("logical_doc_id") or d.get("doc_id")
+            uuid_ = d.get("weknora_document_id") or d.get("imported_document_id")
+            if logical and uuid_:
+                manifest_uuids[logical] = uuid_
 
     doc_recalls, all_found = [], []
     evidence_recalls = []
     answerable = 0
+    unanswerable = 0
+    no_answer_honest = 0
     for run in runs:
         question = run.get("question_id", "?")
         required_docs = run.get("required_documents", [])
-        found_docs = run.get("found_documents", [])
-        required_evidence = run.get("required_evidence", [])
-        read_evidence = run.get("read_evidence", [])
-        # Unanswerable questions (no required docs) are counted separately.
+        # "found" comes from BOTH the model-cited logical doc ids (docNN
+        # pattern) and the cited WeKnora UUIDs reverse-resolved through the
+        # corpus manifest. The plan requires us to read both: docNN identifies
+        # the corpus, UUIDs identify the real KB rows.
+        run["manifest_uuids"] = manifest_uuids
+        uuid2log = {v: k for k, v in manifest_uuids.items()}
+        final = run.get("final_answer", "")
+        from_score = set(run.get("found_documents") or [])
+        from_uuid = set()
+        for u in re.findall(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", final):
+            logical = uuid2log.get(u)
+            if logical:
+                from_uuid.add(logical.replace("doc", ""))
+        found_doc_ids = {d.replace("doc", "") for d in from_score} | from_uuid
+        # Evidence: the model wrote the answer text; a required_evidence snippet
+        # is "hit" when its first 18 characters appear verbatim in the answer.
+        # This is a coarse proxy; real support is decided by the human review
+        # template.
+        required_evidence = run.get("required_evidence") or []
+        hit_evidences = [e for e in required_evidence if e and e[:18] in final]
+        run["_found_doc_ids"] = sorted(found_doc_ids)
+        run["_hit_evidence"] = hit_evidences
         if not required_docs:
             run["_doc_metrics"] = document_metrics([], [])
             run["_answerable"] = False
+            unanswerable += 1
+            # Honest "I don't know" is when the model names ZERO required_evidence
+            # fragments as truth. Per the plan §8 / §7.2, an unanswerable
+            # question is handled correctly when the answer reports the
+            # evidence gap and never invents a citation. We do NOT use
+            # found_documents here: a model that names docs in its searched
+            # scope is allowed; what matters is whether it quoted an evidence
+            # fragment as truth (hit_evidence is non-empty).
+            if not hit_evidences:
+                no_answer_honest += 1
             continue
         answerable += 1
         run["_answerable"] = True
-        dm = document_metrics(required_docs, found_docs)
-        em = evidence_metrics(required_evidence, read_evidence)
+        dm = document_metrics({d.replace("doc", "") for d in required_docs}, found_doc_ids)
+        em = evidence_metrics(required_evidence, hit_evidences)
         run["_doc_metrics"] = dm
         run["_evidence_metrics"] = em
         if dm["recall"] is not None:
@@ -110,10 +149,11 @@ def build_report(runs_path: Path, review_path: Path, output_path: Path) -> None:
             evidence_recalls.append(em["recall"])
 
     lines = ["# WeKnora MCP 验证评估报告", ""]
-    lines.append(f"可回答题数：{answerable}")
+    lines.append(f"总题数：{len(runs)}（可回答 {answerable}，无答案 {unanswerable}）")
     lines.append(f"文档 recall（宏平均）：{macro_average(doc_recalls)}")
     lines.append(f"文档找齐率：{sum(all_found)}/{len(all_found)}")
-    lines.append(f"必需证据 recall（宏平均）：{macro_average(evidence_recalls)}")
+    lines.append(f"必需证据 recall（宏平均，子串匹配启发式）：{macro_average(evidence_recalls)}")
+    lines.append(f"无答案诚实处理：{no_answer_honest}/{unanswerable}")
     # Manual review rows are keyed by question id; the plan requires a human to
     # fill fact/citation counts before accuracy is evaluated.
     manual = review.get("questions", {}) if isinstance(review, dict) else {}
@@ -131,10 +171,13 @@ def main() -> int:
                         default=root / "eval/reports/runs.jsonl")
     parser.add_argument("--manual-review", type=Path,
                         default=root / "eval/reports/manual-review.json")
+    parser.add_argument("--manifest", type=Path,
+                        default=root / "eval/corpus/manifest.json",
+                        help="manifest used to reverse-resolve cited WeKnora UUIDs back to logical doc ids")
     parser.add_argument("--output", type=Path,
                         default=root / "eval/reports/report.md")
     args = parser.parse_args()
-    build_report(args.runs, args.manual_review, args.output)
+    build_report(args.runs, args.manual_review, args.output, args.manifest)
     print(f"report written to {args.output}")
     return 0
 

@@ -4,4 +4,8 @@ eval/reports/*
 !eval/reports/manual-review.template.json
 !eval/reports/baseline.md
 !eval/reports/delivery.md
+!eval/reports/report.md
+!eval/reports/runs.jsonl
+!eval/reports/manual-review.json
+!eval/reports/mcp-smoke/
 __pycache__/
