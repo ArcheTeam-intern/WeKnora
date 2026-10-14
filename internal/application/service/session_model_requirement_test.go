@@ -202,6 +202,35 @@ func TestResolveChatModelIDWikiFixerFallsBackToAvailableModel(t *testing.T) {
 	assert.Equal(t, "system-chat", modelID)
 }
 
+// A builtin agent template ships without a model_id (config/builtin_agents
+// .yaml), and the MCP ask tool's default agent is exactly that template
+// ("builtin-quick-answer"); the call must resolve through the same KB/system
+// fallback the wiki fixer uses instead of failing with "please set model_id".
+func TestResolveChatModelIDBuiltinAgentFallsBackToAvailableModel(t *testing.T) {
+	svc := &sessionService{
+		modelService: &stubModelService{
+			availableModels: []*types.Model{
+				{
+					ID:   "system-chat",
+					Type: types.ModelTypeKnowledgeQA,
+				},
+			},
+		},
+	}
+	req := &types.QARequest{
+		Session: &types.Session{},
+		CustomAgent: &types.CustomAgent{
+			ID:        types.BuiltinQuickAnswerID,
+			IsBuiltin: true,
+		},
+	}
+
+	modelID, err := svc.resolveChatModelID(context.Background(), req, nil, nil)
+
+	require.NoError(t, err)
+	assert.Equal(t, "system-chat", modelID)
+}
+
 // A shared agent executes in its owner's workspace; the override would pick
 // any of the owner's models there, so the configured model is used instead.
 func TestResolveChatModelIDIgnoresOverrideForSharedAgents(t *testing.T) {

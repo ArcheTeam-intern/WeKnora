@@ -181,7 +181,19 @@ func (s *Server) resolveAskKnowledgeBases(
 func (s *Server) resolveAskSession(
 	ctx context.Context, ep *types.MCPEndpoint, sessionID, question string,
 ) (*types.Session, error) {
-	ownerID := types.MCPEndpointPrincipal(ep.TenantID, ep.ID).StorageID()
+	// The owner must be the CALLER's session-scoped identity, not
+	// unconditionally the endpoint's machine principal. runQA's
+	// CreateMessage resolves the session through
+	// types.SessionOwnerIDFromContext(ctx): in machine mode that is the
+	// endpoint principal (matching the fallback below), but in user mode
+	// it is the real user's id — binding the endpoint principal there made
+	// every user-mode ask fail with "failed to create user message: session
+	// not found", the same mismatch types.SessionOwnerIDFromContext
+	// documents for the machine-mode half of this bug.
+	ownerID := types.SessionOwnerIDFromContext(ctx)
+	if ownerID == "" {
+		ownerID = types.MCPEndpointPrincipal(ep.TenantID, ep.ID).StorageID()
+	}
 	if sessionID = strings.TrimSpace(sessionID); sessionID != "" {
 		session, err := s.sessionService.GetSessionByID(ctx, ep.TenantID, sessionID)
 		if err != nil || session == nil || session.UserID != ownerID {

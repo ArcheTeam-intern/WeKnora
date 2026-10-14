@@ -128,10 +128,14 @@ func (s *sessionService) restrictTagScopesToAgentScope(
 // resolveChatModelID resolves the effective chat model ID for a QA request.
 //
 // When a user-configured agent is selected, its model configuration must be
-// complete and valid. The internal wiki fixer is the one exception: it is not
-// exposed in the agent UI, so an empty model_id falls back to KB/system model
-// selection. A request-level override may choose another valid model for this
-// request, but it must not make an unconfigured or stale agent appear usable.
+// complete and valid. Built-in agents are the exception: config/builtin_agents
+// .yaml ships them without a model_id by design (the tenant's model is picked
+// when the agent is configured in the UI, and a saved override arrives here
+// with a non-empty model), so an empty model on a builtin falls back to
+// KB/system model selection — the same rule the internal wiki fixer needs,
+// which is itself a builtin. A request-level override may choose another valid
+// model for this request, but it must not make an unconfigured *custom* agent
+// appear usable.
 //
 // Without an agent, the legacy KB / session / system fallback remains
 // available for non-agent callers.
@@ -154,7 +158,14 @@ func (s *sessionService) resolveChatModelID(
 
 	if customAgent != nil {
 		configuredAgentModelID = strings.TrimSpace(customAgent.Config.ModelID)
-		if configuredAgentModelID == "" && customAgent.ID != types.BuiltinWikiFixerID {
+		// Builtin agents (the wiki fixer, the builtin quick-answer default
+		// the MCP ask tool falls back to, ...) ship without a model_id and
+		// resolve through the KB/system chain below. The explicit wiki-fixer
+		// constant keeps that exemption working in unit tests where the
+		// builtin registry has not been loaded from config/builtin_agents.yaml.
+		if configuredAgentModelID == "" &&
+			customAgent.ID != types.BuiltinWikiFixerID &&
+			!types.IsBuiltinAgentID(customAgent.ID) && !customAgent.IsBuiltin {
 			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
 		if configuredAgentModelID != "" {
@@ -163,11 +174,11 @@ func (s *sessionService) resolveChatModelID(
 				return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID)
 			}
 		} else {
-			// The wiki fixer is an internal agent and is intentionally omitted
-			// from the agent-management list. It therefore cannot receive a
-			// user-configured model_id; resolve it from the current Wiki KB or
-			// the normal system KnowledgeQA fallback below instead.
-			logger.Infof(ctx, "No model_id configured for internal wiki fixer %s, using KB/system fallback", customAgent.ID)
+			// No model on a builtin agent (the wiki fixer, the builtin
+			// quick-answer default the MCP ask tool falls back to, ...):
+			// resolve it from the KB / session / system KnowledgeQA chain
+			// below instead of failing the request.
+			logger.Infof(ctx, "No model_id configured for builtin agent %s, using KB/system fallback", customAgent.ID)
 		}
 	}
 

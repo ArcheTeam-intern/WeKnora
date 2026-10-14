@@ -472,6 +472,65 @@ func (s *knowledgeService) DeleteKnowledgeList(ctx context.Context, ids []string
 	return s.executeKnowledgeDelete(plan, false)
 }
 
+// markKnowledgeDeleting flips one document to `deleting` through the transfer
+// CAS and returns the status the row had before the flip.
+//
+// The delete plan reads its rows up front, and the CAS then matches on
+// (parse_status, updated_at). A document whose parse is still running has its
+// row updated continuously by the worker, so the CAS misses even though
+// nothing actually conflicts — and the plan deliberately supports deleting
+// pending/processing documents (it dequeues their tasks right after marking).
+// Re-read the row and retry a bounded number of times so that case succeeds.
+//
+// The retry must never widen the delete: a row that moved to another
+// knowledge base, or vanished, between the plan and the checkpoint is
+// rejected outright (the teardown targets the planned KB and its resource
+// bindings, which no longer describe this row) — TestDeleteCheckpointRejects
+// ChangedOrDeletedDocument pins that contract. Only an in-place change of a
+// row that still belongs to the planned KB is retried.
+func (s *knowledgeService) markKnowledgeDeleting(
+	ctx context.Context, knowledge *types.Knowledge,
+) (string, error) {
+	const attempts = 4
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		rows, err := s.repo.GetKnowledgeBatch(ctx, knowledge.TenantID, []string{knowledge.ID})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var current *types.Knowledge
+		for _, row := range rows {
+			if row != nil && row.ID == knowledge.ID && row.TenantID == knowledge.TenantID {
+				current = row
+				break
+			}
+		}
+		if current == nil {
+			return "", fmt.Errorf(
+				"knowledge changed during transfer: %s no longer exists", knowledge.ID)
+		}
+		if current.KnowledgeBaseID != knowledge.KnowledgeBaseID {
+			return "", fmt.Errorf(
+				"knowledge changed during transfer: %s moved from %s to %s",
+				knowledge.ID, knowledge.KnowledgeBaseID, current.KnowledgeBaseID)
+		}
+		prev := current.ParseStatus
+		before := *current
+		current.ParseStatus = types.ParseStatusDeleting
+		if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, current); err != nil {
+			lastErr = err
+			continue
+		}
+		*knowledge = *current
+		return prev, nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("knowledge changed during transfer")
+	}
+	return "", lastErr
+}
+
 func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, single bool) error {
 	if len(plan.ids) == 0 {
 		return nil
@@ -485,10 +544,8 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 	// so we can dequeue them in one pass after marking.
 	var inFlightIDs []string
 	for _, knowledge := range knowledgeList {
-		prev := knowledge.ParseStatus
-		before := *knowledge
-		knowledge.ParseStatus = types.ParseStatusDeleting
-		if err := s.repo.UpdateKnowledgeForTransfer(ctx, &before, knowledge); err != nil {
+		prev, err := s.markKnowledgeDeleting(ctx, knowledge)
+		if err != nil {
 			logger.GetLogger(ctx).WithField("error", err).WithField("knowledge_id", knowledge.ID).
 				Errorf("DeleteKnowledgeList failed to mark as deleting")
 			return err
