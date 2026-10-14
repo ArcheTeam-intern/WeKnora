@@ -1,0 +1,48 @@
+# =============================================================================
+# 演示栈补充：启用 docreader（OCR 文档解析）。
+#
+# 背景：compose.prototype.yml 按「低内存」原则不启 docreader（DOCREADER_ADDR 为
+# 空），文本层 PDF/Office 走内置 anydoc 即可；但扫描版 PDF（无文字层）只有
+# docreader 的 builtin 引擎能做页面分类 + OCR。上传扫描件解析报
+# "Cannot connect to the document parsing service" 时，用本文件补齐：
+#
+#   docker compose -f compose.prototype.yml -f compose.prototype.docreader.yml \
+#     --env-file .env.prototype up -d weknora docreader
+#
+# 说明：
+#   1) docreader 只在 compose 网络内可达（50051 不发布到宿主机），与主栈一致。
+#   2) weknora 服务叠加 DOCREADER_ADDR=docreader:50051 并只读共享
+#      docreader-tmp 卷（解析出的图片回传给 app 展示）。
+#   3) 内存注意：docreader 含 LibreOffice/JDK/Playwright，实测常驻约 1–2GB。
+# =============================================================================
+services:
+  docreader:
+    image: wechatopenai/weknora-docreader:v0.8.2
+    container_name: WeKnoraAgent-docreader
+    expose:
+      - "50051"
+    volumes:
+      - prototype-docreader-tmp:/tmp/docreader
+    environment:
+      TZ: Asia/Shanghai
+      LOG_LEVEL: info
+      DOCREADER_IMAGE_OUTPUT_DIR: /tmp/docreader
+      MAX_FILE_SIZE_MB: "50"
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "timeout 3 bash -c '</dev/tcp/127.0.0.1/50051' 2>/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    networks:
+      - weknora-agent-net
+
+  weknora:
+    environment:
+      DOCREADER_ADDR: docreader:50051
+      DOCREADER_TRANSPORT: grpc
+    volumes:
+      - prototype-docreader-tmp:/tmp/docreader:ro
+
+volumes:
+  prototype-docreader-tmp:
