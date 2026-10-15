@@ -18,7 +18,7 @@
 services:
   docreader:
     image: wechatopenai/weknora-docreader:v0.8.2
-    container_name: WeKnoraAgent-docreader
+    container_name: WeKnoraMCP-docreader
     expose:
       - "50051"
     volumes:

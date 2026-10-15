@@ -9,3 +9,4 @@ eval/reports/*
 !eval/reports/manual-review.json
 !eval/reports/mcp-smoke/
 __pycache__/
+*.local.json

@@ -1,4 +1,7 @@
-# WeKnora knowledge service only. Agent runs separately via CLI.
+# WeKnora services only: API/UI/SQLite storage/Redis/Neo4j. The Agent workbench
+# runs separately and communicates with these services only through MCP.
+# Keep the historical compose project/network/volume IDs to preserve data;
+# running container names use WeKnoraMCP to make service ownership clear.
 name: ${COMPOSE_PROJECT_NAME:-weknora-agent-prototype}
 services:
   weknora:
@@ -17,7 +20,7 @@ services:
         CARGO_REGISTRY_MIRROR_ARG: ${CARGO_REGISTRY_MIRROR_ARG:-}
         VERSION_ARG: ${WEKNORA_VERSION:-v0.8.2}
     image: ${PROTOTYPE_APP_IMAGE:-weknora-agent-app:local}
-    container_name: WeKnoraAgent-app
+    container_name: WeKnoraMCP-app
     ports:
     - 127.0.0.1:${PROTOTYPE_WEKNORA_PORT:-18082}:8080
     environment:
@@ -81,7 +84,7 @@ services:
     restart: unless-stopped
   weknora-ui:
     image: ${WEKNORA_UI_IMAGE:-wechatopenai/weknora-ui:${WEKNORA_VERSION:-v0.8.2}}
-    container_name: WeKnoraAgent-ui
+    container_name: WeKnoraMCP-ui
     ports:
     - 127.0.0.1:${PROTOTYPE_WEKNORA_UI_PORT:-18180}:80
     environment:
@@ -98,7 +101,7 @@ services:
     restart: unless-stopped
   redis:
     image: redis:7.0-alpine
-    container_name: WeKnoraAgent-redis
+    container_name: WeKnoraMCP-redis
     command: 'redis-server --appendonly yes ${PROTOTYPE_REDIS_PASSWORD:+--requirepass ${PROTOTYPE_REDIS_PASSWORD}}
 
       '
@@ -116,7 +119,7 @@ services:
     restart: unless-stopped
   neo4j:
     image: neo4j:2025.10.1
-    container_name: WeKnoraAgent-neo4j
+    container_name: WeKnoraMCP-neo4j
     environment:
       NEO4J_AUTH: ${NEO4J_USERNAME:-neo4j}/${NEO4J_PASSWORD:-prototype-neo4j-password-change-me}
       NEO4J_apoc_export_file_enabled: 'true'
