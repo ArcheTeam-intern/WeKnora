@@ -237,10 +237,12 @@ func (s *Server) filterTools(ctx context.Context, all []mcp.Tool) []mcp.Tool {
 var scopeOptionalTools = map[string]struct{}{
 	types.MCPEndpointToolListParserEngines:  {},
 	types.MCPEndpointToolListKnowledgeBases: {},
-	types.MCPEndpointToolGetDocumentStatus:  {},
-	types.MCPEndpointToolGetKBStatus:        {},
-	types.MCPEndpointToolGetUploadStatus:    {},
-	types.MCPEndpointToolImportDocumentFile: {},
+	// Creating a knowledge base is how a caller gets something to select.
+	types.MCPEndpointToolCreateKnowledgeBase: {},
+	types.MCPEndpointToolGetDocumentStatus:   {},
+	types.MCPEndpointToolGetKBStatus:         {},
+	types.MCPEndpointToolGetUploadStatus:     {},
+	types.MCPEndpointToolImportDocumentFile:  {},
 }
 
 // guardTool enforces the allowlist, the request scope and the rate limit on
@@ -306,6 +308,7 @@ func (s *Server) touchLastUsed(ctx context.Context, endpointID string) {
 func (s *Server) toolCatalog() []server.ServerTool {
 	return []server.ServerTool{
 		{Tool: listKnowledgeBasesTool(), Handler: s.handleListKnowledgeBases},
+		{Tool: createKnowledgeBaseTool(), Handler: s.handleCreateKnowledgeBase},
 		{Tool: listParserEnginesTool(), Handler: s.handleListParserEngines},
 		{Tool: searchKnowledgeTool(), Handler: s.handleSearchKnowledge},
 		{Tool: grepChunksTool(), Handler: s.handleGrepChunks},

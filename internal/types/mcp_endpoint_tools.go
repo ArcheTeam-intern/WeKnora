@@ -20,6 +20,7 @@ const (
 // external contract is simpler (one query, server-side session handling).
 const (
 	MCPEndpointToolListKnowledgeBases  = "list_knowledge_bases"
+	MCPEndpointToolCreateKnowledgeBase = "create_knowledge_base"
 	MCPEndpointToolListParserEngines   = "list_parser_engines"
 	MCPEndpointToolSearchKnowledge     = "search_knowledge"
 	MCPEndpointToolGrepChunks          = "grep_chunks"
@@ -71,6 +72,7 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolWikiIndex, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiListPages, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiGraph, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolCreateKnowledgeBase, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUploadFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolImportDocumentFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolAddDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},

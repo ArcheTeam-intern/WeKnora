@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -15,6 +16,23 @@ type stubKBService struct {
 	interfaces.KnowledgeBaseService
 	kbs     map[string]*types.KnowledgeBase
 	lookups int
+	// created records every CreateKnowledgeBase call so tests can assert on
+	// what the tool handed the service, and createdFor records the caller the
+	// request context carried (the real service stamps tenant and creator from
+	// that same context).
+	created    []*types.KnowledgeBase
+	createdFor []string
+}
+
+func (s *stubKBService) CreateKnowledgeBase(ctx context.Context, kb *types.KnowledgeBase) (*types.KnowledgeBase, error) {
+	if kb.ID == "" {
+		kb.ID = "kb-created-" + strconv.Itoa(len(s.created)+1)
+	}
+	userID, _ := types.UserIDFromContext(ctx)
+	s.createdFor = append(s.createdFor, userID)
+	s.created = append(s.created, kb)
+	s.kbs[kb.ID] = kb
+	return kb, nil
 }
 
 func (s *stubKBService) GetKnowledgeBaseByIDOnly(_ context.Context, id string) (*types.KnowledgeBase, error) {
