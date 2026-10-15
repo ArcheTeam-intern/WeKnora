@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,6 +34,10 @@ func askTool() mcp.Tool {
 		mcp.WithString("question", mcp.Required(), mcp.Description("The question to answer")),
 		mcp.WithString("session_id",
 			mcp.Description("Session id returned by a previous ask call, to continue that conversation")),
+		mcp.WithString("mode",
+			mcp.Description("Optional native QA mode: quick-answer = RAG with citations; "+
+				"smart-reasoning = multi-step reasoning. Omit to use the agent configured on this endpoint."),
+			mcp.WithStringEnumItems([]string{"quick-answer", "smart-reasoning"})),
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to retrieve from; defaults to the "+
 				"endpoint scope or the agent's own configuration")),
@@ -70,7 +75,11 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	}
 	question = strings.TrimSpace(question)
 
-	agent, err := s.resolveAskAgent(ctx, ep)
+	mode, _, err := resolveAskMode(req.GetString("mode", ""))
+	if err != nil {
+		return errorResult(&ToolError{Code: CodeInvalidArgument, Message: err.Error()}), nil
+	}
+	agent, err := s.resolveAskAgent(ctx, ep, mode)
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
@@ -88,12 +97,17 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		return mcp.NewToolResultErrorFromErr("failed to answer", err), nil
 	}
 	structured := map[string]any{
-		"answer":     answer,
-		"session_id": session.ID,
-		"agent_id":   agent.ID,
-		"references": refs,
+		"answer":             answer,
+		"session_id":         session.ID,
+		"agent_id":           agent.ID,
+		"mode":               resolvedModeLabel(mode),
+		"knowledge_base_ids": kbIDs,
+		"references":         refs,
 	}
 	var text string
+	if mode != "" {
+		text = fmt.Sprintf("QA mode: %s\n\n", mode)
+	}
 	if len(refs) > 0 {
 		var b strings.Builder
 		b.WriteString(answer)
@@ -118,14 +132,58 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	return mcp.NewToolResultStructured(structured, text), nil
 }
 
+// askModeAgents maps the client-facing native QA modes onto the builtin agents
+// that implement them. Only these two names are reachable through `ask`: the
+// endpoint's configured agent remains the default when no mode is passed, and
+// a client still cannot name an arbitrary (or internal write-capable) agent id.
+var askModeAgents = map[string]string{
+	"quick-answer":    types.BuiltinQuickAnswerID,
+	"smart-reasoning": types.BuiltinSmartReasoningID,
+}
+
+// resolveAskMode validates the optional native mode and maps it to the builtin
+// agent that implements it. An empty mode keeps the endpoint default.
+func resolveAskMode(mode string) (string, string, error) {
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode == "" {
+		return "", "", nil
+	}
+	if agentID, ok := askModeAgents[mode]; ok {
+		return mode, agentID, nil
+	}
+	names := make([]string, 0, len(askModeAgents))
+	for name := range askModeAgents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return "", "", fmt.Errorf("mode %q is not one of the native QA modes: %s", mode, strings.Join(names, ", "))
+}
+
+// resolvedModeLabel reports the mode the server actually applied, for the
+// response payload the acceptance matrix records.
+func resolvedModeLabel(requested string) string {
+	if requested == "" {
+		return "endpoint-default"
+	}
+	return requested
+}
+
 // resolveAskAgent picks the agent configured on the endpoint. Callers cannot
 // name an agent: letting a client choose any tenant agent (or an internal
 // builtin such as the wiki fixer or skill installer, which carry write and
-// shell tools) would bypass the endpoint's tool allowlist.
-func (s *Server) resolveAskAgent(ctx context.Context, ep *types.MCPEndpoint) (*types.CustomAgent, error) {
-	agentID := strings.TrimSpace(ep.DefaultAgentID)
+// shell tools) would bypass the endpoint's tool allowlist. A requested native
+// mode pins the builtin agent that implements it.
+func (s *Server) resolveAskAgent(ctx context.Context, ep *types.MCPEndpoint, mode string) (*types.CustomAgent, error) {
+	_, modeAgentID, modeErr := resolveAskMode(mode)
+	if modeErr != nil {
+		return nil, modeErr
+	}
+	agentID := modeAgentID
 	if agentID == "" {
-		agentID = types.BuiltinQuickAnswerID
+		agentID = strings.TrimSpace(ep.DefaultAgentID)
+		if agentID == "" {
+			agentID = types.BuiltinQuickAnswerID
+		}
 	}
 	agent, err := s.agentService.GetAgentByID(ctx, agentID)
 	if err != nil || agent == nil {
