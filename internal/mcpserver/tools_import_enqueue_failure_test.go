@@ -77,7 +77,7 @@ func enqueueFailureServer(t *testing.T) (*Server, *fakeReceiptRepo, UploadStagin
 	// NewServer initializes the MCP server and its Streamable HTTP handler;
 	// constructing &Server{} directly would leave s.handler nil and panic when
 	// the transport is mounted. The fakes are swapped in over the nil defaults.
-	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
 	srv.kbService = &stubKBService{kbs: map[string]*types.KnowledgeBase{kb.ID: kb}}
 	srv.kbShareService = &stubKBShareService{shared: map[string]types.OrgMemberRole{}}
 	srv.tenantService = &stubTenantService{tenants: map[uint64]*types.Tenant{7: {ID: 7, Name: "Caller"}}}

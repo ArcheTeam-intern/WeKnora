@@ -250,18 +250,18 @@ func TestResolveAskAgentUsesEndpointAgentOnly(t *testing.T) {
 	}}
 	srv := &Server{agentService: agents}
 
-	got, err := srv.resolveAskAgent(context.Background(), &types.MCPEndpoint{ID: "ep", TenantID: 1})
+	got, err := srv.resolveAskAgent(context.Background(), &types.MCPEndpoint{ID: "ep", TenantID: 1}, "")
 	if err != nil || got.ID != types.BuiltinQuickAnswerID {
 		t.Fatalf("empty default must fall back to quick answer: %v %v", got, err)
 	}
 	got, err = srv.resolveAskAgent(context.Background(),
-		&types.MCPEndpoint{ID: "ep", TenantID: 1, DefaultAgentID: "agent-own"})
+		&types.MCPEndpoint{ID: "ep", TenantID: 1, DefaultAgentID: "agent-own"}, "")
 	if err != nil || got.ID != "agent-own" {
 		t.Fatalf("configured tenant agent must be used: %v %v", got, err)
 	}
 	for _, bad := range []string{types.BuiltinWikiFixerID, "agent-foreign", "agent-missing"} {
 		_, err := srv.resolveAskAgent(context.Background(),
-			&types.MCPEndpoint{ID: "ep", TenantID: 1, DefaultAgentID: bad})
+			&types.MCPEndpoint{ID: "ep", TenantID: 1, DefaultAgentID: bad}, "")
 		if err == nil {
 			t.Fatalf("agent %q must be refused", bad)
 		}

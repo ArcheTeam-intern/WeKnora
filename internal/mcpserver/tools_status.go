@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -41,6 +42,14 @@ type documentStatusReport struct {
 	FileSize             int64  `json:"file_size,omitempty"`
 	Channel              string `json:"channel,omitempty"`
 	Note                 string `json:"note,omitempty"`
+	// RequestedParserEngineRules is the parser configuration the caller asked
+	// for at import (from the document's stored process overrides). Empty for
+	// documents imported with the knowledge base default.
+	RequestedParserEngineRules []types.ParserEngineRule `json:"requested_parser_engine_rules,omitempty"`
+	// AppliedParserEngine is the engine the parse pipeline actually resolved.
+	// "default" means built-in type routing; empty means the document has not
+	// been parsed yet.
+	AppliedParserEngine string `json:"applied_parser_engine,omitempty"`
 }
 
 var knownParseStatuses = map[string]struct{}{
@@ -79,6 +88,10 @@ func describeKnowledgeStatus(k *types.Knowledge) documentStatusReport {
 		FileType:             k.FileType,
 		FileSize:             k.FileSize,
 		Channel:              k.Channel,
+		AppliedParserEngine:  k.AppliedParserEngine(),
+	}
+	if overrides, err := k.ProcessOverrides(); err == nil && overrides != nil {
+		report.RequestedParserEngineRules = overrides.ParserEngineRules
 	}
 	_, report.ParseStatusKnown = knownParseStatuses[k.ParseStatus]
 	switch {
@@ -96,7 +109,11 @@ func describeKnowledgeStatus(k *types.Knowledge) documentStatusReport {
 	default:
 		report.IndexStatus = k.ParseStatus
 	}
-	if !k.ProcessedAt.IsZero() {
+	// ProcessedAt is *time.Time and may be nil for documents that never
+	// reached the terminal pipeline state; deref without a guard and the status
+	// tool panics. Report nothing for the missing side rather than letting the
+	// recovery middleware surface a JSON-RPC 500.
+	if k.ProcessedAt != nil && !k.ProcessedAt.IsZero() {
 		report.ProcessedAt = k.ProcessedAt.Format("2006-01-02T15:04:05Z07:00")
 	}
 	if !k.UpdatedAt.IsZero() {
@@ -237,30 +254,43 @@ func (s *Server) handleGetKnowledgeBaseStatus(ctx context.Context, req mcp.CallT
 	// fields that the read path does not fill, so their Go zero value (0) must
 	// never be mistaken for a real "zero documents" count. A count that cannot
 	// be obtained is reported unknown, so "could not count" and "zero documents"
-	// stay distinguishable.
-	countsKnown := false
-	if s.knowledgeService != nil {
+	// stay distinguishable. All three queries (documents, processing, chunks)
+	// must succeed for counts_known to be true: a zero in a sub-query that
+	// silently failed would still read as "no documents" to a client.
+	countsKnown := true
+	notes := []string{}
+	if s.knowledgeService == nil {
+		countsKnown = false
+		notes = append(notes, "document counters are unavailable: the knowledge service is not configured")
+	} else {
 		if docs, err := s.knowledgeService.GetRepository().CountKnowledgeByKnowledgeBaseID(
 			ctx, kb.TenantID, kb.ID); err == nil {
 			report.Documents = docs
-			countsKnown = true
+		} else {
+			countsKnown = false
+			notes = append(notes, fmt.Sprintf("document counter failed: %v", err))
 		}
 		if processing, err := s.knowledgeService.GetRepository().CountKnowledgeByStatus(ctx, kb.TenantID, kb.ID,
 			[]string{types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing}); err == nil {
 			report.Processing = processing
-		}
-	}
-	if s.chunkService != nil {
-		if chunks, err := s.chunkService.GetRepository().CountChunksByKnowledgeBaseID(
-			ctx, kb.TenantID, kb.ID); err == nil {
-			report.Chunks = chunks
 		} else {
 			countsKnown = false
+			notes = append(notes, fmt.Sprintf("processing counter failed: %v", err))
 		}
+	}
+	if s.chunkService == nil {
+		countsKnown = false
+		notes = append(notes, "chunk counter is unavailable: the chunk service is not configured")
+	} else if chunks, err := s.chunkService.GetRepository().CountChunksByKnowledgeBaseID(
+		ctx, kb.TenantID, kb.ID); err == nil {
+		report.Chunks = chunks
+	} else {
+		countsKnown = false
+		notes = append(notes, fmt.Sprintf("chunk counter failed: %v", err))
 	}
 	report.CountsKnown = countsKnown
 	if !countsKnown {
-		report.Note = "document counters are unavailable; treat the counts as unknown"
+		report.Note = strings.Join(notes, "; ")
 	}
 	report.IsProcessing = kb.IsProcessing || report.Processing > 0
 

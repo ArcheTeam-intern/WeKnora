@@ -487,6 +487,49 @@ func (p ManualKnowledgePayload) IsDraft() bool {
 
 const metadataKeyProcessOverrides = "process_overrides"
 
+// metadataKeyAppliedParserEngine records the engine the parse pipeline actually
+// asked the reader for, so a caller can verify a requested parser choice
+// against what ran instead of trusting the dropdown.
+const metadataKeyAppliedParserEngine = "parser_engine_applied"
+
+// AppliedParserEngine returns the engine the pipeline actually used, or "".
+func (k *Knowledge) AppliedParserEngine() string {
+	if k == nil || len(k.Metadata) == 0 {
+		return ""
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return ""
+	}
+	value, _ := metadataMap[metadataKeyAppliedParserEngine].(string)
+	return value
+}
+
+// SetAppliedParserEngine records the engine the parse pipeline resolved for
+// this document. An empty name (built-in type routing) is recorded as
+// "default" so the field is never ambiguous between "not parsed yet" and
+// "no explicit engine".
+func (k *Knowledge) SetAppliedParserEngine(name string) error {
+	if k == nil {
+		return nil
+	}
+	metadataMap, err := k.Metadata.Map()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(name) == "" {
+		metadataMap[metadataKeyAppliedParserEngine] = "default"
+	} else {
+		metadataMap[metadataKeyAppliedParserEngine] = name
+	}
+	bytes, err := json.Marshal(metadataMap)
+	if err != nil {
+		return err
+	}
+	k.Metadata = JSON(bytes)
+	return nil
+}
+
 // ProcessOverrides parses process config overrides from knowledge metadata.
 func (k *Knowledge) ProcessOverrides() (*KnowledgeProcessOverrides, error) {
 	if k == nil || len(k.Metadata) == 0 {

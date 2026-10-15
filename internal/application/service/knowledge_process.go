@@ -4216,6 +4216,13 @@ func (s *knowledgeService) convert(
 
 	logger.Infof(ctx, "[convert] kb=%s fileType=%s isURL=%v engine=%q rules=%+v",
 		kb.ID, fileType, isURL, parserEngine, eff.ChunkingConfig.ParserEngineRules)
+	// Record what the pipeline actually resolved, so a caller can verify a
+	// requested parser choice against what ran instead of trusting the UI.
+	if setErr := knowledge.SetAppliedParserEngine(parserEngine); setErr == nil {
+		_ = s.repo.UpdateKnowledge(ctx, knowledge)
+	} else {
+		logger.Warnf(ctx, "[convert] could not record the applied parser engine for %s: %v", knowledge.ID, setErr)
+	}
 
 	var reader interfaces.DocReader = s.resolveDocReader(ctx, parserEngine, fileType, isURL, mergedOverrides)
 	if reader == nil {

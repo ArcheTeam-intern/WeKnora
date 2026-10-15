@@ -20,6 +20,7 @@ const (
 // external contract is simpler (one query, server-side session handling).
 const (
 	MCPEndpointToolListKnowledgeBases  = "list_knowledge_bases"
+	MCPEndpointToolListParserEngines   = "list_parser_engines"
 	MCPEndpointToolSearchKnowledge     = "search_knowledge"
 	MCPEndpointToolGrepChunks          = "grep_chunks"
 	MCPEndpointToolListDocuments       = "list_documents"
@@ -35,6 +36,7 @@ const (
 	MCPEndpointToolGetKBStatus         = "get_knowledge_base_status"
 	MCPEndpointToolImportDocumentFile  = "import_document_file"
 	MCPEndpointToolGetUploadStatus     = "get_upload_status"
+	MCPEndpointToolUploadFile          = "upload_file"
 	MCPEndpointToolAddDocument         = "add_document"
 	MCPEndpointToolUpdateDocument      = "update_document"
 	MCPEndpointToolDeleteDocument      = "delete_document"
@@ -54,6 +56,7 @@ type MCPEndpointToolDefinition struct {
 // mcpEndpointToolCatalog is the ordered catalog. Order is the display order.
 var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolListKnowledgeBases, Group: MCPEndpointToolGroupRetrieve},
+	{Name: MCPEndpointToolListParserEngines, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolSearchKnowledge, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolGrepChunks, Group: MCPEndpointToolGroupRetrieve},
 	{Name: MCPEndpointToolListDocuments, Group: MCPEndpointToolGroupRetrieve},
@@ -68,6 +71,7 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolWikiIndex, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiListPages, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiGraph, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolUploadFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolImportDocumentFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolAddDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUpdateDocument, Group: MCPEndpointToolGroupIngest, Destructive: true},

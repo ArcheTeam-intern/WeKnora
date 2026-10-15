@@ -62,10 +62,14 @@ type Server struct {
 	// graphRepo backs query_knowledge_graph. It is nil when the deployment has
 	// no graph store wired at all; the graph tools then report the capability
 	// as unavailable instead of returning an empty result.
-	graphRepo    interfaces.RetrieveGraphRepository
-	endpointRepo interfaces.MCPEndpointRepository
-	db           *gorm.DB
-	cfg          *config.Config
+	graphRepo interfaces.RetrieveGraphRepository
+	// documentReader backs list_parser_engines. It is nil when docreader is
+	// not wired; the engine tool then reports only the always-available
+	// built-in engines instead of the remote catalog.
+	documentReader interfaces.DocumentReader
+	endpointRepo   interfaces.MCPEndpointRepository
+	db             *gorm.DB
+	cfg            *config.Config
 	// stagingDir is the upload staging root. WeKnora owns this directory: the
 	// upload transport writes the bytes itself and removes them once the import
 	// receipt is persisted. There is no external writer and no shared volume.
@@ -102,6 +106,7 @@ func NewServer(
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
 	graphRepo interfaces.RetrieveGraphRepository,
+	documentReader interfaces.DocumentReader,
 ) *Server {
 	s := &Server{
 		kbService:        kbService,
@@ -120,6 +125,7 @@ func NewServer(
 		fileService:      fileService,
 		storageResolver:  storageResolver,
 		graphRepo:        graphRepo,
+		documentReader:   documentReader,
 		stagingDir:       strings.TrimSpace(os.Getenv(StagingEnvVar)),
 		limiter:          ratelimit.New(redisClient, rateLimitKeyPrefix, time.Minute, ""),
 	}
@@ -229,6 +235,7 @@ func (s *Server) filterTools(ctx context.Context, all []mcp.Tool) []mcp.Tool {
 // content and therefore requires an explicit selection whenever the caller sent
 // the selection header.
 var scopeOptionalTools = map[string]struct{}{
+	types.MCPEndpointToolListParserEngines:  {},
 	types.MCPEndpointToolListKnowledgeBases: {},
 	types.MCPEndpointToolGetDocumentStatus:  {},
 	types.MCPEndpointToolGetKBStatus:        {},
@@ -299,6 +306,7 @@ func (s *Server) touchLastUsed(ctx context.Context, endpointID string) {
 func (s *Server) toolCatalog() []server.ServerTool {
 	return []server.ServerTool{
 		{Tool: listKnowledgeBasesTool(), Handler: s.handleListKnowledgeBases},
+		{Tool: listParserEnginesTool(), Handler: s.handleListParserEngines},
 		{Tool: searchKnowledgeTool(), Handler: s.handleSearchKnowledge},
 		{Tool: grepChunksTool(), Handler: s.handleGrepChunks},
 		{Tool: listDocumentsTool(), Handler: s.handleListDocuments},
@@ -313,6 +321,7 @@ func (s *Server) toolCatalog() []server.ServerTool {
 		{Tool: getDocumentStatusTool(), Handler: s.handleGetDocumentStatus},
 		{Tool: getKnowledgeBaseStatusTool(), Handler: s.handleGetKnowledgeBaseStatus},
 		{Tool: getUploadStatusTool(), Handler: s.handleGetUploadStatus},
+		{Tool: uploadFileTool(), Handler: s.handleUploadFile},
 		{Tool: importDocumentFileTool(), Handler: s.handleImportDocumentFile},
 		{Tool: addDocumentTool(), Handler: s.handleAddDocument},
 		{Tool: updateDocumentTool(), Handler: s.handleUpdateDocument},

@@ -1,9 +1,12 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -60,6 +63,12 @@ func importDocumentFileTool() mcp.Tool {
 		mcp.WithString("knowledge_base_id", mcp.Required(), mcp.Description("Knowledge base id or exact name")),
 		mcp.WithString("upload_id", mcp.Required(),
 			mcp.Description("Upload id returned by POST /mcp/{endpoint_id}/uploads")),
+		mcp.WithObject("process_config",
+			mcp.Description("Optional parse configuration for THIS import. The only supported key is "+
+				"parser_engine_rules: a list of {file_types: [\"pdf\"], engine: \"<name from list_parser_engines>\"}. "+
+				"Omit to use the knowledge base's own parser configuration. Engine names are validated "+
+				"against the engines available to this workspace; unknown or unavailable engines are refused "+
+				"instead of silently falling back.")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 	)
@@ -73,6 +82,93 @@ func getUploadStatusTool() mcp.Tool {
 		mcp.WithString("upload_id", mcp.Required(), mcp.Description("Upload id to look up")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
+}
+
+// parseImportProcessConfig validates the optional process_config argument and
+// turns it into KnowledgeProcessOverrides.
+//
+// The MCP surface deliberately exposes exactly one knob — parser_engine_rules —
+// and validates it against the engines this deployment actually offers for the
+// calling workspace. Arbitrary config keys, vendor endpoints, cloud keys and
+// deployment-widening switches stay unreachable; an unknown or unavailable
+// engine is refused up front so the caller never believes a parser ran when the
+// knowledge base default was used instead.
+func (s *Server) parseImportProcessConfig(
+	ctx context.Context, req mcp.CallToolRequest,
+) (*types.KnowledgeProcessOverrides, error) {
+	raw, ok := req.GetArguments()["process_config"]
+	if !ok || raw == nil {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, invalidArgument("process_config cannot be read")
+	}
+	var parsed struct {
+		ParserEngineRules []struct {
+			FileTypes []string `json:"file_types"`
+			Engine    string   `json:"engine"`
+		} `json:"parser_engine_rules"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(encoded))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&parsed); err != nil {
+		return nil, invalidArgument(
+			"process_config only supports parser_engine_rules entries of {file_types, engine}: %v", err)
+	}
+	if len(parsed.ParserEngineRules) == 0 {
+		return nil, invalidArgument("process_config must contain at least one parser_engine_rules entry")
+	}
+
+	engines, _ := s.listParserEngines(ctx)
+	byName := make(map[string]types.ParserEngineInfo, len(engines))
+	available := make([]string, 0, len(engines))
+	for _, e := range engines {
+		byName[strings.ToLower(e.Name)] = e
+		if e.Available {
+			available = append(available, e.Name)
+		}
+	}
+	sort.Strings(available)
+
+	rules := make([]types.ParserEngineRule, 0, len(parsed.ParserEngineRules))
+	for _, rule := range parsed.ParserEngineRules {
+		engine := strings.TrimSpace(rule.Engine)
+		info, known := byName[strings.ToLower(engine)]
+		if !known || !info.Available {
+			return nil, invalidArgument(
+				"parser engine %q is not available on this deployment; available engines: %s",
+				engine, strings.Join(available, ", "))
+		}
+		fileTypes := make([]string, 0, len(rule.FileTypes))
+		seen := map[string]bool{}
+		for _, ft := range rule.FileTypes {
+			ft = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(ft, ".")))
+			if ft == "" || seen[ft] {
+				continue
+			}
+			seen[ft] = true
+			fileTypes = append(fileTypes, ft)
+		}
+		if len(fileTypes) == 0 {
+			return nil, invalidArgument("parser_engine_rules entry for engine %q needs file_types", engine)
+		}
+		if len(info.FileTypes) > 0 {
+			supported := make(map[string]bool, len(info.FileTypes))
+			for _, ft := range info.FileTypes {
+				supported[strings.ToLower(strings.TrimPrefix(ft, "."))] = true
+			}
+			for _, ft := range fileTypes {
+				if !supported[ft] {
+					return nil, invalidArgument(
+						"engine %q cannot parse %q; supported: %s",
+						engine, ft, strings.Join(info.FileTypes, ", "))
+				}
+			}
+		}
+		rules = append(rules, types.ParserEngineRule{FileTypes: fileTypes, Engine: engine})
+	}
+	return &types.KnowledgeProcessOverrides{ParserEngineRules: rules}, nil
 }
 
 func (s *Server) handleImportDocumentFile(
@@ -92,6 +188,12 @@ func (s *Server) handleImportDocumentFile(
 	}
 	if !uploadIDPattern.MatchString(uploadID) {
 		return errorResult(invalidArgument("upload_id must be a UUID")), nil
+	}
+	// Optional parser choice: validated before any state changes so a bad engine
+	// name fails the call instead of silently parsing with the KB default.
+	overrides, err := s.parseImportProcessConfig(ctx, req)
+	if err != nil {
+		return errorResult(err), nil
 	}
 	staging := s.uploadStaging()
 	if staging == nil {
@@ -151,7 +253,7 @@ func (s *Server) handleImportDocumentFile(
 	// A replayed import returns the stored receipt instead of importing again:
 	// this is what makes a lost response recoverable without a duplicate.
 	if upload.State == UploadStateImported && upload.DocumentID != "" {
-		return jsonResult(map[string]any{
+		replay := map[string]any{
 			"knowledge_base_id": upload.KnowledgeBaseID,
 			"upload_id":         upload.UploadID,
 			"document":          map[string]any{"id": upload.DocumentID},
@@ -160,7 +262,13 @@ func (s *Server) handleImportDocumentFile(
 			"queued":            upload.Queued,
 			"replayed":          true,
 			"note":              "this upload was already imported; the stored receipt is replayed",
-		})
+		}
+		if overrides != nil {
+			replay["process_config_applied"] = false
+			replay["note"] = "this upload was already imported; the stored receipt is replayed. " +
+				"The requested parser configuration was NOT re-applied — reparse the document to change it"
+		}
+		return jsonResult(replay)
 	}
 
 	// Step 3: the write check uses the original caller's own grants. The
@@ -221,7 +329,7 @@ func (s *Server) handleImportDocumentFile(
 
 	// Step 5: the import itself runs under the resource OWNER's context.
 	created, importErr := s.knowledgeService.CreateKnowledgeFromFile(
-		scopedCtx, kb.ID, fileHeader, nil, nil, "", nil, askChannel, nil,
+		scopedCtx, kb.ID, fileHeader, nil, nil, "", nil, askChannel, overrides,
 	)
 	duplicate := false
 	var dupErr *types.DuplicateKnowledgeError
@@ -281,6 +389,15 @@ func (s *Server) handleImportDocumentFile(
 	if !queued {
 		result["note"] = "The knowledge record exists but its indexing did not start; the document is not " +
 			"searchable until the existing admin UI re-parses it."
+	}
+	if overrides != nil {
+		result["process_config"] = overrides.ParserEngineRules
+		result["process_config_applied"] = !duplicate
+		if duplicate {
+			result["note"] = "An identical document already existed: its existing parse result was reused, " +
+				"so the requested parser configuration was NOT re-applied. Reparse the existing document " +
+				"to change its parser."
+		}
 	}
 	return jsonResult(result)
 }
