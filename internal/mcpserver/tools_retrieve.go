@@ -100,6 +100,12 @@ type knowledgeBaseSummary struct {
 	// Indexing mirrors the knowledge base's own enable switches, so a client can
 	// tell "asked for but not generated yet" from "not configured".
 	Indexing map[string]bool `json:"indexing_enabled"`
+	// GraphReady says whether the graph is both switched on and configured with
+	// entity/relation types. The enable flag alone is not enough: the graph
+	// query refuses a knowledge base whose extraction types are empty, so
+	// without this a client reads capability_flags.graph=true and then hits
+	// "none of the selected knowledge bases has the knowledge graph enabled".
+	GraphReady bool `json:"graph_ready"`
 }
 
 func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
@@ -138,7 +144,18 @@ func summarizeKnowledgeBase(kb *types.KnowledgeBase) knowledgeBaseSummary {
 			"wiki":    kb.IsWikiEnabled(),
 			"graph":   kb.IsGraphEnabled(),
 		},
+		GraphReady: graphExtractionConfigured(kb),
 	}
+}
+
+// graphExtractionConfigured reports whether the knowledge base can actually
+// extract something: the pipeline is on and at least one entity or relation
+// type is defined.
+func graphExtractionConfigured(kb *types.KnowledgeBase) bool {
+	if kb == nil || !kb.IsGraphEnabled() || kb.ExtractConfig == nil {
+		return false
+	}
+	return len(kb.ExtractConfig.Nodes) > 0 || len(kb.ExtractConfig.Relations) > 0
 }
 
 func (s *Server) handleListKnowledgeBases(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {

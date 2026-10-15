@@ -82,6 +82,21 @@ func (s *Server) handleKnowledgeGraphQuery(ctx context.Context, req mcp.CallTool
 	}
 	kbs := graphKnowledgeBases(allowed)
 	if len(kbs) == 0 {
+		// "Switched on but nothing to extract" is a different problem from
+		// "this knowledge base has no graph at all", and it is the one a caller
+		// hits right after enabling graph without defining entity types.
+		for _, kb := range allowed {
+			if kb.IsGraphEnabled() && !graphExtractionConfigured(kb) {
+				return errorResult(&ToolError{
+					Code: CodeGraphNotConfigured,
+					Message: "the selected knowledge base has graph extraction switched on but no entity " +
+						"or relation types configured, so there is nothing to match; define them " +
+						"(list_knowledge_bases reports graph_ready=false for it) or add the types when " +
+						"creating a knowledge base",
+					Details: map[string]any{"knowledge_base_id": kb.ID, "graph_ready": false},
+				}), nil
+			}
+		}
 		return errorResult(&ToolError{
 			Code: CodeGraphNotConfigured,
 			Message: "none of the selected knowledge bases has the knowledge graph enabled; " +
@@ -293,7 +308,7 @@ func graphEdgeRefs(edge map[string]interface{}, quotes, kbs, docs map[string]str
 		// sentence on the edge.
 		if status != "verified" && edgeQuote != "" && len(chunkIDs) == 1 && cid == chunkIDs[0] {
 			if (chunkKB == "" || refKnowledgeBaseID == "" || chunkKB == refKnowledgeBaseID) &&
-			   (chunkDoc == "" || refKnowledgeID == "" || chunkDoc == refKnowledgeID) {
+				(chunkDoc == "" || refKnowledgeID == "" || chunkDoc == refKnowledgeID) {
 				quote = edgeQuote
 				status = "verified"
 			}
