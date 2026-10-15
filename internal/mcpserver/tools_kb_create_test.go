@@ -206,6 +206,28 @@ func TestCreateKnowledgeBaseRejectsKeyWithoutIngest(t *testing.T) {
 	}
 }
 
+// 图谱示例：实体类型直接给，关系用 "起点,终点,关系" 写法；写错的条目跳过而不是整体失败。
+func TestGraphExtractionConfigParsesEntitiesAndRelations(t *testing.T) {
+	req := createRequest(map[string]any{
+		"graph_entities":  []any{"人员", "项目", " "},
+		"graph_relations": []any{"人员,项目,负责", "写错了", "项目,服务,依赖"},
+	})
+	cfg := graphExtractionConfig(req)
+	if cfg == nil || !cfg.Enabled {
+		t.Fatalf("graph config must be enabled: %+v", cfg)
+	}
+	if len(cfg.Nodes) != 2 || cfg.Nodes[0].Name != "人员" || cfg.Nodes[1].Name != "项目" {
+		t.Fatalf("entities not parsed as asked: %+v", cfg.Nodes)
+	}
+	if len(cfg.Relations) != 2 {
+		t.Fatalf("unparsable relation entries must be skipped, got %+v", cfg.Relations)
+	}
+	first := cfg.Relations[0]
+	if first.Node1 != "人员" || first.Node2 != "项目" || first.Type != "负责" {
+		t.Fatalf("relation not parsed as asked: %+v", first)
+	}
+}
+
 // textOf flattens a tool result's text content for assertions.
 func textOf(result *mcp.CallToolResult) string {
 	var b strings.Builder

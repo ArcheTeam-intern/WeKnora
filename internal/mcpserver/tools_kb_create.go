@@ -3,10 +3,12 @@ package mcpserver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/mark3labs/mcp-go/mcp"
+	"gorm.io/gorm"
 )
 
 // createKnowledgeBaseTool is the entry-point write tool: there is no knowledge
@@ -17,7 +19,9 @@ func createKnowledgeBaseTool() mcp.Tool {
 	return mcp.NewTool(types.MCPEndpointToolCreateKnowledgeBase,
 		mcp.WithDescription("Create a new knowledge base in the caller's workspace and return it. "+
 			"Use it before uploading documents into a fresh library. Vector (semantic) and keyword "+
-			"search are on by default; wiki and knowledge-graph generation can be asked for here."),
+			"search are on by default; wiki and knowledge-graph generation can be asked for here. "+
+			"Embedding, summary and OCR models default to the workspace's configured models, so a "+
+			"new knowledge base is immediately usable."),
 		mcp.WithString("name", mcp.Required(), mcp.Description("Knowledge base name; must be unique "+
 			"enough to be selected later by name")),
 		mcp.WithString("description", mcp.Description("Optional description shown next to the name")),
@@ -27,6 +31,13 @@ func createKnowledgeBaseTool() mcp.Tool {
 			"later (default false)")),
 		mcp.WithBoolean("enable_keyword", mcp.Description("Enable keyword (BM25) indexing (default true)")),
 		mcp.WithBoolean("enable_vector", mcp.Description("Enable semantic vector indexing (default true)")),
+		mcp.WithArray("graph_entities", mcp.Description("Entity type names to extract when "+
+			"enable_graph is true, e.g. [\"人员\",\"项目\"]. Without them the graph pipeline runs "+
+			"but cannot pull out relations."), mcp.WithStringItems()),
+		mcp.WithArray("graph_relations", mcp.Description("Relations to extract, one per entry, "+
+			"written as \"source,target,type\" — e.g. [\"人员,项目,负责\"]."), mcp.WithStringItems()),
+		mcp.WithString("embedding_model_id", mcp.Description("Override the workspace's embedding model")),
+		mcp.WithString("summary_model_id", mcp.Description("Override the workspace's knowledge QA model")),
 		mcp.WithReadOnlyHintAnnotation(false),
 		mcp.WithDestructiveHintAnnotation(true),
 	)
@@ -97,10 +108,16 @@ func (s *Server) handleCreateKnowledgeBase(
 			GraphEnabled:   graph,
 		},
 	}
-	// IsGraphEnabled requires both the flag and an enabled ExtractConfig;
-	// without it the pipeline flag alone would silently extract nothing.
 	if graph {
-		kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
+		kb.ExtractConfig = graphExtractionConfig(req)
+	}
+	// A knowledge base with no models cannot index anything ("failed to get
+	// embedding model: model ID cannot be empty") and a KB without a vision
+	// model cannot read scanned pages. Inherit the workspace's models unless the
+	// caller named others; this is what makes an MCP-created library usable on
+	// the spot instead of failing at the first import.
+	if err := s.applyWorkspaceModelDefaults(ctx, kb, req); err != nil {
+		return errorResult(err), nil
 	}
 
 	created, err := s.kbService.CreateKnowledgeBase(ctx, kb)
@@ -114,6 +131,11 @@ func (s *Server) handleCreateKnowledgeBase(
 
 	result := map[string]any{
 		"knowledge_base": summarizeKnowledgeBase(created),
+		"models": map[string]any{
+			"embedding_model_id": created.EmbeddingModelID,
+			"summary_model_id":   created.SummaryModelID,
+			"vlm_enabled":        created.VLMConfig.Enabled,
+		},
 		"note": "The knowledge base exists now; upload documents into it with upload_file + " +
 			"import_document_file, or add_document.",
 	}
@@ -143,6 +165,91 @@ func (s *Server) handleCreateKnowledgeBase(
 	return jsonResult(result)
 }
 
+// graphExtractionConfig builds the extract config from the caller's entity and
+// relation lists. Each relation is written as "source,target,type"; entries
+// that do not parse are skipped rather than failing the whole creation.
+func graphExtractionConfig(req mcp.CallToolRequest) *types.ExtractConfig {
+	config := &types.ExtractConfig{Enabled: true}
+	for _, name := range stringSlice(req, "graph_entities") {
+		config.Nodes = append(config.Nodes, &types.GraphNode{Name: name})
+	}
+	for _, raw := range stringSlice(req, "graph_relations") {
+		parts := strings.Split(raw, ",")
+		if len(parts) != 3 {
+			continue
+		}
+		from, to, kind := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2])
+		if from == "" || to == "" || kind == "" {
+			continue
+		}
+		config.Relations = append(config.Relations, &types.GraphRelation{Node1: from, Node2: to, Type: kind})
+	}
+	return config
+}
+
+func stringSlice(req mcp.CallToolRequest, key string) []string {
+	raw := req.GetStringSlice(key, nil)
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// applyWorkspaceModelDefaults fills in the tenant's configured models when the
+// caller did not name any, so the new knowledge base can actually parse, index
+// and OCR documents. Values already present on the request win.
+func (s *Server) applyWorkspaceModelDefaults(
+	ctx context.Context, kb *types.KnowledgeBase, req mcp.CallToolRequest,
+) error {
+	embedding := strings.TrimSpace(req.GetString("embedding_model_id", ""))
+	summary := strings.TrimSpace(req.GetString("summary_model_id", ""))
+	if embedding != "" || summary != "" {
+		kb.EmbeddingModelID = embedding
+		kb.SummaryModelID = summary
+		return nil
+	}
+	if s.db == nil {
+		return nil // nothing to inherit from; the caller's other fields still apply
+	}
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return nil
+	}
+	// Workspace model rows are the same ones the UI uses; a default row wins,
+	// otherwise the oldest configured model of that type is used.
+	pick := func(modelType types.ModelType) string {
+		var id string
+		err := s.db.WithContext(ctx).
+			Table("models").
+			Select("id").
+			Where("tenant_id = ? AND type = ? AND deleted_at IS NULL", tenantID, string(modelType)).
+			Order("is_default DESC, created_at ASC").
+			Limit(1).
+			Scan(&id).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return ""
+		}
+		return id
+	}
+	kb.EmbeddingModelID = pick(types.ModelTypeEmbedding)
+	kb.SummaryModelID = pick(types.ModelTypeKnowledgeQA)
+	if kb.EmbeddingModelID == "" {
+		return &ToolError{
+			Code: CodeInvalidArgument,
+			Message: "the workspace has no embedding model configured; configure one before creating " +
+				"a knowledge base, or pass embedding_model_id",
+		}
+	}
+	// Vision model: without it, scanned pages are indexed as empty text.
+	if vlmID := pick(types.ModelTypeVLLM); vlmID != "" {
+		kb.VLMConfig = types.VLMConfig{Enabled: true, ModelID: vlmID}
+	}
+	return nil
+}
+
 // extendEndpointRange appends one knowledge base to a restricted endpoint's
 // allowlist. The stored row is reloaded through the repository update so the
 // change survives the request; a failure is reported to the caller rather than
@@ -155,7 +262,10 @@ func (s *Server) extendEndpointRange(ctx context.Context, ep *types.MCPEndpoint,
 	ids := make([]string, 0, len(ep.KnowledgeBaseIDs)+1)
 	ids = append(ids, ep.KnowledgeBaseIDs...)
 	updated.KnowledgeBaseIDs = append(ids, kbID)
-	return s.endpointRepo.Update(ctx, &updated)
+	if err := s.endpointRepo.Update(ctx, &updated); err != nil {
+		return fmt.Errorf("endpoint range update failed: %w", err)
+	}
+	return nil
 }
 
 func containsID(ids []string, want string) bool {
