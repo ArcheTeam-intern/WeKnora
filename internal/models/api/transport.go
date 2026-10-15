@@ -44,17 +44,37 @@ func WithLLMTimeout(ctx context.Context, d time.Duration) (context.Context, cont
 	return context.WithTimeout(ctx, d)
 }
 
-// HTTPClient is a shared HTTP client for raw HTTP LLM calls with connection-level timeouts.
-// Per-request timeout is enforced via context deadline (see DefaultChatTimeout / DefaultStreamTimeout)
-// rather than http.Client.Timeout, so streaming calls are not prematurely terminated.
-// Uses SSRFSafeDialContext to prevent DNS rebinding attacks at the connection layer.
-var httpTransport = &http.Transport{
-	Proxy:               http.ProxyFromEnvironment,
-	DialContext:         secutils.SSRFSafeDialContext,
-	TLSHandshakeTimeout: 10 * time.Second,
-	IdleConnTimeout:     90 * time.Second,
-	MaxIdleConnsPerHost: 5,
+// FirstByteTimeout bounds how long a model call waits for the first response
+// byte (transport-level; generation itself is governed by the caller's context
+// deadline and streaming keeps the body open afterwards). A local proxy / TUN
+// (Clash and friends) can silently drop an idle keep-alive connection, after
+// which the next request on that connection stalls with no error at all:
+// observed live as an MCP `ask` sitting until its 240s deadline ("read
+// response: context deadline exceeded") while fresh connections (curl)
+// answered the same vendor in under a second. With this bound the stall
+// surfaces as a transport timeout the caller can retry. IdleConnTimeout stays
+// below that middlebox window so dead connections are retired before they can
+// be reused. Override with WEKNORA_LLM_RESPONSE_HEADER_TIMEOUT_SECONDS for
+// vendors that only flush headers after generation completes.
+var FirstByteTimeout = envDurationSeconds("WEKNORA_LLM_RESPONSE_HEADER_TIMEOUT_SECONDS", 60*time.Second)
+
+// newLLMTransport builds the shared transport with an explicit first-byte
+// bound, so tests can exercise the timeout/retry behaviour against a real
+// HTTP server instead of a mock that skips the transport.
+func newLLMTransport(firstByteTimeout time.Duration) *http.Transport {
+	return &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           secutils.SSRFSafeDialContext,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: firstByteTimeout,
+		// Below the middlebox idle window so dead connections retire before
+		// they can be reused.
+		IdleConnTimeout:     30 * time.Second,
+		MaxIdleConnsPerHost: 5,
+	}
 }
+
+var httpTransport = newLLMTransport(FirstByteTimeout)
 
 // HTTPClient is the shared SSRF-safe client every protocol uses.
 var HTTPClient = secutils.NewSSRFSafeHTTPClientWithTransport(

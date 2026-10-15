@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -133,8 +134,24 @@ func (e Endpoint) newPost(ctx context.Context, url string, data []byte, contentT
 
 // Do sends the request and returns the response. Non-2xx responses are
 // turned into an error carrying the body so callers surface vendor messages.
+//
+// A timeout-class transport failure (ResponseHeaderTimeout, dial or TLS
+// handshake timeout) gets one retry on a fresh connection. That is the shape
+// of a keep-alive connection a local proxy dropped silently: the request
+// never reached the vendor, so re-sending it cannot double-bill, while NOT
+// retrying leaves the whole QA turn stalled until its caller deadline.
+// Every other transport failure keeps the caller's own policy
+// (PostJSONWithRetry and friends); a cancelled or expired caller context is
+// never retried because its budget is already gone.
 func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	resp, err := e.httpClient().Do(req)
+	if err != nil && shouldRetryTimedOutRequest(req, err) {
+		if body, bodyErr := req.GetBody(); bodyErr == nil {
+			retry := req.Clone(req.Context())
+			retry.Body = body
+			resp, err = e.httpClient().Do(retry)
+		}
+	}
 	if err != nil {
 		return nil, &TransportError{Op: "send request", Err: err}
 	}
@@ -144,6 +161,31 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
 	}
 	return resp, nil
+}
+
+// shouldRetryTimedOutRequest reports whether a transport failure is the
+// retryable first-byte-timeout class. Two timeout shapes exist and must be
+// told apart, because Go wraps the transport's ResponseHeaderTimeout as
+// context.DeadlineExceeded even though the CALLER's context is still alive:
+//
+//   - req.Context().Err() != nil — the caller's own budget really is gone;
+//     retrying would spend money against a dead request. Never retried.
+//   - a Timeout()-flavoured network error while the caller is alive — the
+//     dropped keep-alive shape: exactly one retry on a fresh connection, with
+//     the identical replayable body. A retried generation may be executed
+//     twice by the vendor if the first attempt was in fact still running; the
+//     transport cannot know, so this single bounded retry is the documented
+//     trade (OpenAI/Anthropic SDKs make the same choice) instead of letting
+//     the whole QA turn die on a dead connection.
+func shouldRetryTimedOutRequest(req *http.Request, err error) bool {
+	if req == nil || req.GetBody == nil {
+		return false // no replayable body: the caller keeps its single attempt
+	}
+	if req.Context().Err() != nil {
+		return false
+	}
+	var timeout interface{ Timeout() bool }
+	return errors.As(err, &timeout) && timeout.Timeout()
 }
 
 // PostJSON sends one authenticated JSON request and decodes the reply into
