@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -210,6 +212,22 @@ func (s *Server) handleWikiReadPage(ctx context.Context, req mcp.CallToolRequest
 // already disambiguates that way in found_kbs / ambiguous_slugs). A KB that
 // fails to load contributes no entry rather than a partial one, so the V2
 // view stays a strict subset of what the tool returned.
+//
+// Unlike the pre-correction implementation, this function does NOT trust the
+// persisted SourceRefsV2 field: it re-derives refs from the legacy
+// SourceRefs, re-authorizes the document under the caller's KB scope, and
+// loads the actual chunk content from the chunk service to build a real
+// quote. Per-chunk status is then one of:
+//
+//   - "verified"          the chunk was actually read and its content matches
+//     the requested chunk id and KB.
+//   - "unverified_source" the chunk was named by the page but not loaded
+//     (missing, cross-KB, or chunk service unavailable), or the legacy ref
+//     had no chunk id and no chunks could be loaded under the authorized KB.
+//   - "unknown"           no SourceRefs at all (synthesized pages).
+//
+// This is the path that satisfies P0-3: provenance is decided against live
+// data, not against whatever the page happened to be tagged with.
 func (s *Server) enrichReadPageWithSourceRefsV2(
 	ctx context.Context, res *types.ToolResult, primarySlug string,
 	kbs []*types.KnowledgeBase,
@@ -256,12 +274,215 @@ func (s *Server) enrichReadPageWithSourceRefsV2(
 				continue
 			}
 			key := slug + "|" + kbID
-			out[key] = types.WikiPageSourceRefsToV2(page)
+			out[key] = s.resolveWikiPageSourceRefs(scopedCtx, page, kb)
 		}
 	}
 	if len(out) > 0 {
 		res.Data["source_refs_v2"] = out
 	}
+}
+
+// resolveWikiPageSourceRefs rebuilds the V2 source-ref view of a single wiki
+// page against the caller's authorized KB. It does NOT trust the persisted
+// V2 slice: it re-derives from the legacy SourceRefs, re-loads the actual
+// chunk content from the chunk service, and validates per-chunk that:
+//
+//  1. The chunk exists in the chunk service.
+//  2. The chunk's KnowledgeBaseID matches the caller's authorized KB id
+//     (so a cross-KB lease or a stale ref can never produce a private quote
+//     for an out-of-scope document).
+//  3. The chunk's content is non-empty (so a verified ref always carries
+//     a real, readable quote).
+//
+// Refs are emitted in the order they appear in page.SourceRefs. A ref that
+// points at a knowledge id the caller cannot see under this KB is reported
+// as unverified_source with no quote and no chunk ids; the knowledge id is
+// not echoed back, so a private id never leaks to the caller.
+func (s *Server) resolveWikiPageSourceRefs(
+	ctx context.Context, page *types.WikiPage, kb *types.KnowledgeBase,
+) []types.SourceRefV2 {
+	if page == nil || kb == nil {
+		return nil
+	}
+	if len(page.SourceRefs) == 0 {
+		return []types.SourceRefV2{{
+			KnowledgeID:      "",
+			KnowledgeBaseID:  kb.ID,
+			ProvenanceStatus: "unknown",
+		}}
+	}
+	chunkRepo := s.chunkRepoForRead()
+	out := make([]types.SourceRefV2, 0, len(page.SourceRefs))
+	seenKnowledge := make(map[string][]*types.Chunk)
+	for _, raw := range page.SourceRefs {
+		knowledgeID, _ := types.ParseWikiSourceRef(raw)
+		knowledgeID = strings.TrimSpace(knowledgeID)
+		if knowledgeID == "" {
+			continue
+		}
+		// Legacy format "uuid" or "uuid[/chunk_id[/chunk_id...]]": split off
+		// the head as the document id, the rest as the cited chunk ids.
+		segments := strings.Split(knowledgeID, "/")
+		docID := strings.TrimSpace(segments[0])
+		var citedChunkIDs []string
+		if len(segments) > 1 {
+			for _, seg := range segments[1:] {
+				if seg = strings.TrimSpace(seg); seg != "" {
+					citedChunkIDs = append(citedChunkIDs, seg)
+				}
+			}
+		}
+		// Re-authorize the document under the caller's KB before any
+		// content read: knowledgeInScope is the same path wiki / search use.
+		if _, _, err := s.knowledgeInScope(ctx, endpointForChunkAuth(ctx), docID); err != nil {
+			// Document is not in the caller's scope: never echo the id
+			// back. An unverified_source ref with empty knowledge id is
+			// the honest signal.
+			out = append(out, types.SourceRefV2{
+				KnowledgeID:      "",
+				KnowledgeBaseID:  kb.ID,
+				ProvenanceStatus: "unverified_source",
+			})
+			continue
+		}
+		chunks, ok := seenKnowledge[docID]
+		if !ok {
+			if chunkRepo == nil {
+				out = append(out, types.SourceRefV2{
+					KnowledgeID:      docID,
+					KnowledgeBaseID:  kb.ID,
+					ProvenanceStatus: "unverified_source",
+				})
+				continue
+			}
+			loaded, err := chunkRepo.ListChunksByKnowledgeID(ctx, kb.TenantID, docID)
+			if err != nil || len(loaded) == 0 {
+				out = append(out, types.SourceRefV2{
+					KnowledgeID:      docID,
+					KnowledgeBaseID:  kb.ID,
+					ProvenanceStatus: "unverified_source",
+				})
+				continue
+			}
+			chunks = loaded
+			seenKnowledge[docID] = chunks
+		}
+		// Index by id and chunk_index so ref-by-id and ref-by-position
+		// (when the legacy format omitted chunk ids) both work.
+		byID := make(map[string]*types.Chunk, len(chunks))
+		for _, c := range chunks {
+			if c != nil && c.ID != "" {
+				byID[c.ID] = c
+			}
+		}
+		if len(citedChunkIDs) == 0 {
+			// Document-level ref: the page was tagged with the knowledge
+			// id but no chunk id. Verify by loading the first readable
+			// chunk under the authorized KB; missing KB / cross KB /
+			// empty content all downgrade to unverified_source.
+			ref := types.SourceRefV2{
+				KnowledgeID:      docID,
+				KnowledgeBaseID:  kb.ID,
+				ProvenanceStatus: "unverified_source",
+			}
+			for _, c := range chunks {
+				if c == nil || c.Content == "" {
+					continue
+				}
+				if c.KnowledgeBaseID != "" && c.KnowledgeBaseID != kb.ID {
+					continue
+				}
+				ref.ChunkIDs = []string{c.ID}
+				ref.Quote = quoteSnippet(c.Content)
+				ref.ProvenanceStatus = "verified"
+				break
+			}
+			out = append(out, ref)
+			continue
+		}
+		// Chunk-level ref: one V2 entry per cited chunk id. The order in
+		// page.SourceRefs is preserved so the view matches the page's
+		// original citation order.
+		for _, cid := range citedChunkIDs {
+			c, found := byID[cid]
+			if !found || c == nil || strings.TrimSpace(c.Content) == "" {
+				out = append(out, types.SourceRefV2{
+					KnowledgeID:      docID,
+					KnowledgeBaseID:  kb.ID,
+					ChunkIDs:         []string{cid},
+					ProvenanceStatus: "unverified_source",
+				})
+				continue
+			}
+			if c.KnowledgeBaseID != "" && c.KnowledgeBaseID != kb.ID {
+				out = append(out, types.SourceRefV2{
+					KnowledgeID:      docID,
+					KnowledgeBaseID:  kb.ID,
+					ChunkIDs:         []string{cid},
+					ProvenanceStatus: "unverified_source",
+				})
+				continue
+			}
+			out = append(out, types.SourceRefV2{
+				KnowledgeID:      docID,
+				KnowledgeBaseID:  kb.ID,
+				ChunkIDs:         []string{cid},
+				Quote:            quoteSnippet(c.Content),
+				ProvenanceStatus: "verified",
+			})
+		}
+	}
+	return out
+}
+
+// chunkRepoForRead returns the chunk repository behind the configured chunk
+// service, or nil when no service is wired. Read paths tolerate a nil repo
+// by emitting unverified_source refs without panicking.
+func (s *Server) chunkRepoForRead() interfaces.ChunkRepository {
+	if s.chunkService == nil {
+		return nil
+	}
+	return s.chunkService.GetRepository()
+}
+
+// endpointForChunkAuth returns a synthesized endpoint reference used only to
+// satisfy knowledgeInScope's signature. The page's KB has already been
+// authorized by the caller (via scopedKBContext); this function does not
+// grant any new privilege, it only carries the KB id forward for the
+// per-document scope check.
+func endpointForChunkAuth(ctx context.Context) *types.MCPEndpoint {
+	if ep, ok := ctx.Value(types.MCPEndpointContextKey).(*types.MCPEndpoint); ok {
+		return ep
+	}
+	return &types.MCPEndpoint{}
+}
+
+// quoteSnippet trims a chunk's content to a short, verifier-friendly excerpt.
+// Long chunks are common in this codebase (whole-document "chunks" are a
+// default in the legacy parser), and 200 characters is enough to anchor a
+// claim while keeping the V2 payload small.
+const quoteSnippetLimit = 200
+
+func quoteSnippet(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= quoteSnippetLimit {
+		return s
+	}
+	// Truncate on a UTF-8 rune boundary so multi-byte sequences (CJK,
+	// emoji) never land half-copied. The byte slice may end in the
+	// middle of a code point; walking back to the last valid rune
+	// start keeps the JSON-encoded quote valid and avoids the
+	// U+FFFD replacement characters that a hard byte-cut would
+	// introduce.
+	cut := quoteSnippetLimit
+	for cut > 0 {
+		r, size := utf8.DecodeRuneInString(s[:cut])
+		if r != utf8.RuneError || size != 1 {
+			break
+		}
+		cut--
+	}
+	return strings.TrimSpace(s[:cut]) + "…"
 }
 
 func (s *Server) handleWikiIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

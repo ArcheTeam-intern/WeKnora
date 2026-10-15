@@ -6,6 +6,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -608,4 +610,312 @@ func TestSanitizeMultipartFilenameStripsQuoting(t *testing.T) {
 func sha256HexForTest(value string) string {
 	sum := sha256.Sum256([]byte(value))
 	return hex.EncodeToString(sum[:])
+}
+
+// --- concurrent first-time uploads sharing one Idempotency-Key --------------
+
+// racingReceiptRepo models the mcp_uploads idempotency unique index and adds a
+// two-party barrier: both callers finish their initial lookup before either
+// Create runs, so the "both miss, then race Create" interleaving is
+// deterministic instead of sleep-timed. createErr, when set, replaces Create
+// entirely so error passthrough can be tested.
+type racingReceiptRepo struct {
+	*fakeReceiptRepo
+	barrier chan struct{}
+	mu      sync.Mutex
+	lookups int
+	// lookupMisses makes the next N lookups answer "not found", modelling the
+	// race window where a winner row exists but the initial lookup ran before
+	// it was committed.
+	lookupMisses int
+	createErr    error
+}
+
+func (r *racingReceiptRepo) FindByIdempotencyKey(
+	ctx context.Context, endpointID string, callerWorkspaceID uint64, callerStorageID, key string,
+) (*UploadRecord, error) {
+	if r.barrier != nil && key != "" {
+		r.mu.Lock()
+		r.lookups++
+		if r.lookups == 2 {
+			close(r.barrier)
+		}
+		r.mu.Unlock()
+		<-r.barrier
+	}
+	r.mu.Lock()
+	if r.lookupMisses > 0 {
+		r.lookupMisses--
+		r.mu.Unlock()
+		return nil, nil
+	}
+	r.mu.Unlock()
+	return r.fakeReceiptRepo.FindByIdempotencyKey(ctx, endpointID, callerWorkspaceID, callerStorageID, key)
+}
+
+func (r *racingReceiptRepo) Create(_ context.Context, record *UploadRecord) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	r.fakeReceiptRepo.mu.Lock()
+	defer r.fakeReceiptRepo.mu.Unlock()
+	if record.IdempotencyKey != "" {
+		for _, row := range r.fakeReceiptRepo.rows {
+			if row.EndpointID == record.EndpointID &&
+				row.CallerWorkspaceID == record.CallerWorkspaceID &&
+				row.CallerStorageID == record.CallerStorageID &&
+				row.IdempotencyKey == record.IdempotencyKey {
+				return fmt.Errorf(
+					"constraint failed: UNIQUE constraint failed: index '%s' (2067)",
+					idempotencyIndexName)
+			}
+		}
+	}
+	copyRecord := *record
+	copyRecord.PayloadPath = ""
+	r.fakeReceiptRepo.rows[record.UploadID] = &copyRecord
+	r.fakeReceiptRepo.created++
+	return nil
+}
+
+// stageUploadDirs counts the upload directories still on disk: one per upload id
+// whose bytes were not cleaned up.
+func stageUploadDirs(t *testing.T, root string) int {
+	t.Helper()
+	count := 0
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() && uploadIDPattern.MatchString(d.Name()) {
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk staging root: %v", err)
+	}
+	return count
+}
+
+type stageOutcome struct {
+	record UploadRecord
+	replay bool
+	err    error
+}
+
+func stagePair(t *testing.T, staging UploadStaging, req UploadRequest, first, second string) (stageOutcome, stageOutcome) {
+	t.Helper()
+	results := make(chan stageOutcome, 2)
+	for _, payload := range []string{first, second} {
+		go func(payload string) {
+			record, replay, err := staging.Stage(context.Background(), req, bytes.NewReader([]byte(payload)))
+			results <- stageOutcome{record: record, replay: replay, err: err}
+		}(payload)
+	}
+	return <-results, <-results
+}
+
+func newRacingStaging(t *testing.T) (UploadStaging, *fakeReceiptRepo, *racingReceiptRepo, string) {
+	t.Helper()
+	root := t.TempDir()
+	base := newFakeReceiptRepo()
+	racing := &racingReceiptRepo{fakeReceiptRepo: base, barrier: make(chan struct{})}
+	return NewStagedUploadStorage(root, racing), base, racing, root
+}
+
+// Two first-time uploads of the same key and identical bytes: both must
+// succeed, resolve to the SAME upload id, and exactly one is a replay. The
+// loser's duplicate bytes are cleaned up.
+func TestConcurrentFirstUploadSameKeyReplaysTheWinner(t *testing.T) {
+	staging, _, _, root := newRacingStaging(t)
+	req := baseUploadRequest(kbA)
+	req.IdempotencyKey = "race-key-same"
+
+	a, b := stagePair(t, staging, req, "identical-bytes", "identical-bytes")
+
+	if a.err != nil || b.err != nil {
+		t.Fatalf("both racers must succeed: a=%v b=%v", a.err, b.err)
+	}
+	if a.record.UploadID != b.record.UploadID {
+		t.Fatalf("both callers must resolve to the winner: %s vs %s", a.record.UploadID, b.record.UploadID)
+	}
+	if a.replay == b.replay {
+		t.Fatalf("exactly one caller is the replay: a.replay=%v b.replay=%v", a.replay, b.replay)
+	}
+	if dirs := stageUploadDirs(t, root); dirs != 1 {
+		t.Fatalf("only the winner's bytes may remain, found %d staged dirs", dirs)
+	}
+	winner, err := staging.Get(context.Background(), uploadLookup{
+		UploadID: a.record.UploadID, EndpointID: req.EndpointID,
+		CallerWorkspaceID: req.CallerWorkspaceID, CallerStorageID: req.CallerStorageID,
+	})
+	if err != nil {
+		t.Fatalf("the winner receipt must stay readable: %v", err)
+	}
+	if _, err := os.Stat(winner.PayloadPath); err != nil {
+		t.Fatalf("the winner's bytes must stay on disk: %v", err)
+	}
+}
+
+// The same race with DIFFERENT bytes: one wins, the other gets the same
+// explicit conflict the sequential replay path returns, the winner is not
+// overwritten, and the loser's bytes are cleaned up.
+func TestConcurrentFirstUploadDifferentBytesConflicts(t *testing.T) {
+	staging, base, _, root := newRacingStaging(t)
+	req := baseUploadRequest(kbA)
+	req.IdempotencyKey = "race-key-different"
+
+	a, b := stagePair(t, staging, req, "winner-bytes", "loser-bytes")
+
+	var loser stageOutcome
+	for _, outcome := range []stageOutcome{a, b} {
+		if outcome.err != nil {
+			loser = outcome
+		}
+	}
+	if loser.err == nil {
+		t.Fatalf("one racer must lose the key: a=%v/%v b=%v/%v", a.err, a.replay, b.err, b.replay)
+	}
+	var toolErr *ToolError
+	if !errors.As(loser.err, &toolErr) || toolErr.Code != CodeIdempotencyConflict {
+		t.Fatalf("the loser must get IDEMPOTENCY_CONFLICT, got %v", loser.err)
+	}
+	if dirs := stageUploadDirs(t, root); dirs != 1 {
+		t.Fatalf("the loser's bytes must be cleaned up, found %d staged dirs", dirs)
+	}
+	base.mu.Lock()
+	defer base.mu.Unlock()
+	if len(base.rows) != 1 {
+		t.Fatalf("exactly the winner receipt must exist, found %d", len(base.rows))
+	}
+}
+
+// Only the idempotency-index violation may recover. A lock timeout, a
+// disconnected database or a primary-key collision has no winner to fall back
+// to and must surface unchanged.
+func TestStageSurfacesRealCreateErrorsInsteadOfFakingReplay(t *testing.T) {
+	for name, injected := range map[string]error{
+		"database locked":      errors.New("database is locked"),
+		"database unavailable": errors.New("database unavailable"),
+		"primary key conflict": errors.New("UNIQUE constraint failed: mcp_uploads.id"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			base := newFakeReceiptRepo()
+			racing := &racingReceiptRepo{fakeReceiptRepo: base, createErr: injected}
+			staging := NewStagedUploadStorage(root, racing)
+			req := baseUploadRequest(kbA)
+			req.IdempotencyKey = "key-" + name
+
+			_, _, err := staging.Stage(context.Background(), req, bytes.NewReader([]byte("payload")))
+			if err == nil {
+				t.Fatal("the real database error must surface")
+			}
+			var toolErr *ToolError
+			if errors.As(err, &toolErr) {
+				t.Fatalf("a failure with no winner must not be reported as %s: %v", toolErr.Code, err)
+			}
+			if !strings.Contains(err.Error(), injected.Error()) {
+				t.Fatalf("the original error must survive, got %v", err)
+			}
+			if len(base.rows) != 0 {
+				t.Fatalf("no receipt may be written when Create fails")
+			}
+			if dirs := stageUploadDirs(t, root); dirs != 0 {
+				t.Fatalf("the failed upload must clean its staged bytes, found %d dirs", dirs)
+			}
+		})
+	}
+}
+
+// A real database failure must not masquerade as an idempotent replay even
+// when a matching winner receipt already exists: with the previous
+// "every Create error is the index race" heuristic this returned
+// IDEMPOTENCY_CONFLICT (or a bogus replay) instead of the lock error.
+func TestStageLockErrorWithExistingWinnerSurfacesTheRealError(t *testing.T) {
+	root := t.TempDir()
+	base := newFakeReceiptRepo()
+	req := baseUploadRequest(kbA)
+	req.IdempotencyKey = "locked-with-winner"
+	// Seed the winner the failed Create would have collided with.
+	winner := UploadRecord{
+		UploadID: newUploadID(), EndpointID: req.EndpointID,
+		CallerWorkspaceID: req.CallerWorkspaceID, CallerStorageID: req.CallerStorageID,
+		OwnerTenantID: req.OwnerTenantID, KnowledgeBaseID: req.KnowledgeBaseID,
+		IdempotencyKey: req.IdempotencyKey, FileName: req.FileName,
+		FileSize: 3, SHA256: sha256HexForTest("old"), State: UploadStateStaged,
+		CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(UploadPayloadTTL),
+		ReceiptExpiresAt: time.Now().UTC().Add(UploadReceiptTTL),
+	}
+	if err := base.Create(context.Background(), &winner); err != nil {
+		t.Fatalf("seed winner: %v", err)
+	}
+	locked := errors.New("database is locked")
+	// The seeded winner exists but the first lookup ran "before" it committed.
+	racing := &racingReceiptRepo{fakeReceiptRepo: base, lookupMisses: 1, createErr: locked}
+	staging := NewStagedUploadStorage(root, racing)
+
+	_, _, err := staging.Stage(context.Background(), req, bytes.NewReader([]byte("new")))
+	if err == nil {
+		t.Fatal("the lock error must surface")
+	}
+	if !strings.Contains(err.Error(), locked.Error()) {
+		t.Fatalf("the original lock error must survive, got %v", err)
+	}
+	var toolErr *ToolError
+	if errors.As(err, &toolErr) {
+		t.Fatalf("a lock error must never become %s", toolErr.Code)
+	}
+}
+
+// A genuine index conflict whose winner cannot be re-read keeps the original
+// error instead of reporting a replay that cannot be resolved.
+func TestStageConflictWithoutReadableWinnerKeepsTheRealError(t *testing.T) {
+	root := t.TempDir()
+	base := newFakeReceiptRepo()
+	racing := &racingReceiptRepo{
+		fakeReceiptRepo: base,
+		createErr: fmt.Errorf("constraint failed: UNIQUE constraint failed: index '%s' (2067)",
+			idempotencyIndexName),
+	}
+	staging := NewStagedUploadStorage(root, racing)
+	req := baseUploadRequest(kbA)
+	req.IdempotencyKey = "orphan-conflict"
+
+	_, _, err := staging.Stage(context.Background(), req, bytes.NewReader([]byte("payload")))
+	if err == nil {
+		t.Fatal("an unresolvable conflict must fail")
+	}
+	var toolErr *ToolError
+	if errors.As(err, &toolErr) {
+		t.Fatalf("no winner is readable, so no idempotency ToolError may be fabricated: %v", err)
+	}
+	if dirs := stageUploadDirs(t, root); dirs != 0 {
+		t.Fatalf("staged bytes must be cleaned up, found %d dirs", dirs)
+	}
+}
+
+// The unique index is partial (WHERE idempotency_key <> ”): two keyless
+// uploads must both create receipts, each with its own upload id.
+func TestStageEmptyKeyAllowsConcurrentCreates(t *testing.T) {
+	root := t.TempDir()
+	base := newFakeReceiptRepo()
+	racing := &racingReceiptRepo{fakeReceiptRepo: base}
+	staging := NewStagedUploadStorage(root, racing)
+	req := baseUploadRequest(kbA) // no Idempotency-Key
+
+	a, b := stagePair(t, staging, req, "one", "two")
+	if a.err != nil || b.err != nil {
+		t.Fatalf("keyless uploads must not conflict: a=%v b=%v", a.err, b.err)
+	}
+	if a.replay || b.replay {
+		t.Fatalf("keyless uploads are never replays: a=%v b=%v", a.replay, b.replay)
+	}
+	if a.record.UploadID == b.record.UploadID {
+		t.Fatalf("keyless uploads must keep distinct ids, both got %s", a.record.UploadID)
+	}
+	if dirs := stageUploadDirs(t, root); dirs != 2 {
+		t.Fatalf("both keyless payloads must remain, found %d dirs", dirs)
+	}
 }

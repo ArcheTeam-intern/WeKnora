@@ -163,10 +163,13 @@ func enrichGraphEdgesWithSourceRefsV2(
 	}
 	// The agent tool already loaded the evidence chunks into data["results"];
 	// index them by chunk id so each edge can cite exactly its own chunks'
-	// content and KB, never the whole query's set.
-	quotes, kbs := graphChunkIndex(data["results"])
+	// content and KB, never the whole query's set. The docs map carries the
+	// per-chunk knowledge_id so graphEdgeRefs can recover a missing
+	// edge-level knowledge_id binding (Neo4j sometimes drops it on legacy
+	// edges) and refuse cross-document verification.
+	quotes, kbs, docs := graphChunkIndex(data["results"])
 	for _, edge := range edges {
-		edge["source_refs_v2"] = graphEdgeRefs(edge, quotes, kbs)
+		edge["source_refs_v2"] = graphEdgeRefs(edge, quotes, kbs, docs)
 	}
 }
 
@@ -192,11 +195,15 @@ func mapSliceOf(raw interface{}) []map[string]interface{} {
 	}
 }
 
-// graphChunkIndex indexes the result entries by chunk id, returning the content
-// quote and knowledge_base_id for each. Entries that do not carry a chunk id are
-// dropped; a chunk present here but not cited by an edge is simply unused.
-func graphChunkIndex(raw interface{}) (quotes, kbs map[string]string) {
-	quotes, kbs = map[string]string{}, map[string]string{}
+// graphChunkIndex indexes the result entries by chunk id, returning the
+// per-chunk quote, knowledge_base_id, and knowledge_id. The KB and the
+// document are tracked per-chunk because one edge may cite chunks from
+// different documents in the same KB, and a cross-KB edge cannot be
+// evaluated without knowing the chunk's own binding. Entries that do not
+// carry a chunk id are dropped; a chunk present here but not cited by
+// an edge is simply unused.
+func graphChunkIndex(raw interface{}) (quotes, kbs, docs map[string]string) {
+	quotes, kbs, docs = map[string]string{}, map[string]string{}, map[string]string{}
 	for _, entry := range mapSliceOf(raw) {
 		chunkID := graphEntryString(entry, "chunk_id")
 		if chunkID == "" {
@@ -208,41 +215,98 @@ func graphChunkIndex(raw interface{}) (quotes, kbs map[string]string) {
 		if kb := graphEntryString(entry, "knowledge_base_id"); kb != "" {
 			kbs[chunkID] = kb
 		}
+		if doc := graphEntryString(entry, "knowledge_id"); doc != "" {
+			docs[chunkID] = doc
+		}
 	}
-	return quotes, kbs
+	return quotes, kbs, docs
 }
 
 // graphEdgeRefs builds the per-edge source view from the edge's own provenance
-// fields, resolving each cited chunk's quote and knowledge base from the indexed
-// evidence. An unmapped edge (no chunk ids or knowledge id) returns a single
-// unknown ref so the absence of a citation is explicit, not implied.
-func graphEdgeRefs(edge map[string]interface{}, quotes, kbs map[string]string) []types.SourceRefV2 {
+// fields, returning ONE SourceRefV2 per cited chunk. Each ref is verified
+// independently: a quote that belongs to chunk A does not verify chunk B, and a
+// chunk whose KB does not match the caller's authorised set is treated as
+// unverified_source with no quote (its private content is never exposed). An
+// unmapped edge (no chunk ids or knowledge id) returns a single unknown ref so
+// the absence of a citation is explicit, not implied.
+//
+// Per-ref status:
+//   - "verified"          when this chunk was actually read and the evidence
+//     is in the caller's KB scope.
+//   - "unverified_source" when the chunk was named by the edge but not
+//     actually read in this query, or its KB does not match.
+//   - "unknown"           when the edge carries no per-relation chunk provenance.
+func graphEdgeRefs(edge map[string]interface{}, quotes, kbs, docs map[string]string) []types.SourceRefV2 {
 	chunkIDs := graphEdgeStringSlice(edge, "chunk_ids")
-	knowledgeID := graphEntryString(edge, "knowledge_id")
-	if len(chunkIDs) == 0 || knowledgeID == "" {
+	edgeKnowledgeID := graphEntryString(edge, "knowledge_id")
+	edgeKnowledgeBaseID := graphEntryString(edge, "knowledge_base_id")
+	edgeQuote := graphEntryString(edge, "quote")
+	if len(chunkIDs) == 0 || edgeKnowledgeID == "" {
 		return []types.SourceRefV2{{ProvenanceStatus: "unknown"}}
 	}
-	knowledgeBaseID := graphEntryString(edge, "knowledge_base_id")
-	quote := graphEntryString(edge, "quote")
+	refs := make([]types.SourceRefV2, 0, len(chunkIDs))
 	for _, cid := range chunkIDs {
-		if quote == "" {
-			quote = quotes[cid]
+		// Per-chunk quote comes from the evidence index, NOT from the edge's
+		// own quote field. The edge-level quote is only used when the edge
+		// itself carries a single, edge-scoped quote (e.g. a literal "A 负责
+		// B") and the chunk is the only one cited; multi-chunk edges must
+		// not let one chunk's quote verify the others.
+		quote, _ := quotes[cid]
+		chunkKB, _ := kbs[cid]
+		// The chunk's own document binding is preferred over the edge's
+		// knowledge_id when the edge's value is empty. This is what lets
+		// us recover a real knowledge_id for Neo4j edges that did not
+		// carry one, without trusting the edge-level field for chunks it
+		// did not actually cite.
+		chunkDoc, _ := docs[cid]
+		refKnowledgeID := edgeKnowledgeID
+		if refKnowledgeID == "" && chunkDoc != "" {
+			refKnowledgeID = chunkDoc
 		}
-		if knowledgeBaseID == "" {
-			knowledgeBaseID = kbs[cid]
+		refKnowledgeBaseID := edgeKnowledgeBaseID
+		if refKnowledgeBaseID == "" && chunkKB != "" {
+			refKnowledgeBaseID = chunkKB
 		}
+		status := "unverified_source"
+		switch {
+		case quote == "":
+			// Chunk was named but the agent did not actually load it in this
+			// query; nothing to verify against.
+			status = "unverified_source"
+		case chunkKB != "" && refKnowledgeBaseID != "" && chunkKB != refKnowledgeBaseID:
+			// Cross-KB leak attempt: the evidence points to a KB the caller
+			// did not ask for, so its content must never be cited.
+			quote = ""
+			status = "unverified_source"
+		case chunkDoc != "" && refKnowledgeID != "" && chunkDoc != refKnowledgeID:
+			// Cross-document leak: the chunk belongs to a different
+			// document than the edge claims. The quote is suppressed;
+			// the per-ref status records the mismatch.
+			quote = ""
+			status = "unverified_source"
+		default:
+			status = "verified"
+		}
+		// Edge-level quote is only adopted when it uniquely identifies the
+		// cited chunk AND no contradicting chunk evidence exists. This keeps
+		// the per-ref contract honest even when the extractor left a single
+		// sentence on the edge.
+		if status != "verified" && edgeQuote != "" && len(chunkIDs) == 1 && cid == chunkIDs[0] {
+			if (chunkKB == "" || refKnowledgeBaseID == "" || chunkKB == refKnowledgeBaseID) &&
+			   (chunkDoc == "" || refKnowledgeID == "" || chunkDoc == refKnowledgeID) {
+				quote = edgeQuote
+				status = "verified"
+			}
+		}
+		refs = append(refs, types.SourceRefV2{
+			KnowledgeID:      refKnowledgeID,
+			KnowledgeBaseID:  refKnowledgeBaseID,
+			ChunkIDs:         []string{cid},
+			Quote:            quote,
+			ProvenanceStatus: status,
+		})
 	}
-	status := "unverified_source"
-	if quote != "" {
-		status = "verified"
-	}
-	return []types.SourceRefV2{{
-		KnowledgeID:      knowledgeID,
-		KnowledgeBaseID:  knowledgeBaseID,
-		ChunkIDs:         chunkIDs,
-		Quote:            quote,
-		ProvenanceStatus: status,
-	}}
+	return refs
 }
 
 // graphEdgeStringSlice reads a string-slice field that may surface as either

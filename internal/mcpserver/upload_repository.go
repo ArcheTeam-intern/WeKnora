@@ -4,10 +4,47 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 )
+
+// idempotencyIndexName is the unique index that arbitrates concurrent
+// first-time uploads sharing one Idempotency-Key (see the mcp_uploads
+// migrations). Create() can only lose that race as a violation of THIS index.
+const idempotencyIndexName = "idx_mcp_uploads_idempotency"
+
+// IsIdempotencyKeyConflict reports whether a Create() failure is the
+// mcp_uploads idempotency-index violation — the one error Stage may recover
+// from by re-reading the winner.
+//
+// Two driver shapes exist. PostgreSQL names the constraint
+// (`duplicate key value violates unique constraint "idx_mcp_uploads_idempotency"`);
+// SQLite (mattn/go-sqlite3) reports the indexed COLUMN list instead
+// (`UNIQUE constraint failed: mcp_uploads.endpoint_id, ...`) because the index
+// is a plain partial index. Both are matched here, but only in forms that
+// can belong to this index: the exact four-column set (any order) or the index
+// name. A primary-key collision ("UNIQUE constraint failed: mcp_uploads.id"
+// alone), a lock timeout or a disconnected database matches neither and must
+// surface as the real error — widening this to every uniqueness/constraint
+// failure would let Stage fabricate an idempotent replay with no winner to
+// recover from. upload_repository_test.go pins the SQLite shape against the
+// real migration index.
+func IsIdempotencyKeyConflict(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	if strings.Contains(msg, idempotencyIndexName) {
+		return true
+	}
+	return strings.Contains(msg, "UNIQUE constraint failed:") &&
+		strings.Contains(msg, "mcp_uploads.endpoint_id") &&
+		strings.Contains(msg, "mcp_uploads.caller_workspace_id") &&
+		strings.Contains(msg, "mcp_uploads.caller_principal_storage_id") &&
+		strings.Contains(msg, "mcp_uploads.idempotency_key")
+}
 
 // UploadReceipt is the persisted row for one staged upload (table mcp_uploads).
 //
@@ -189,9 +226,17 @@ func (r *uploadReceiptRepository) ClaimForImport(
 	// One conditional UPDATE is the whole concurrency control: staged rows and
 	// importing rows with an expired lease are both claimable, and the WHERE
 	// clause decides which. No read-then-write race exists.
+	//
+	// The payload deadline guard is essential: a row whose bytes are already
+	// past expires_at must NOT be claimable, because reading the payload file
+	// would race with the next sweep that deletes it. The state path that
+	// takes over a crashed import keeps the guard so a row whose lease just
+	// expired but whose bytes are also past the deadline is not silently
+	// re-imported.
 	result := r.db.WithContext(ctx).
 		Model(&UploadReceipt{}).
 		Where("id = ?", uploadID).
+		Where("expires_at > ?", now).
 		Where("state = ? OR (state = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?))",
 			UploadStateStaged, UploadStateImporting, now).
 		Updates(map[string]any{
@@ -291,12 +336,42 @@ func (r *uploadReceiptRepository) Sweep(
 	if payloads.Error != nil {
 		return 0, 0, payloads.Error
 	}
-	// Receipts: only after their own, longer deadline.
-	receipts := r.db.Where("receipt_expires_at < ?", now).Delete(&UploadReceipt{})
-	if receipts.Error != nil {
-		return int(payloads.RowsAffected), 0, receipts.Error
+	// Crashed imports: an importing row whose lease AND payload are both
+	// past their deadlines. Without this pass the row stays in `importing`
+	// forever, the bytes get cleaned up by the next orphan scan, and a
+	// later status call sees an `importing` row with no payload. Marking
+	// it `expired` lets the caller tell "the bytes are gone" from "still
+	// being worked on", and lines it up with the sweep's contract that
+	// terminal states are imported / failed / expired.
+	crashed := r.db.Model(&UploadReceipt{}).
+		Where("state = ?", UploadStateImporting).
+		Where("expires_at < ?", now).
+		Where("lease_token <> ''").
+		Where("lease_expires_at < ?", now).
+		Updates(map[string]any{
+			"state":            UploadStateExpired,
+			"lease_token":      "",
+			"lease_expires_at": nil,
+		})
+	if crashed.Error != nil {
+		return int(payloads.RowsAffected), 0, crashed.Error
 	}
-	return int(payloads.RowsAffected), int(receipts.RowsAffected), nil
+	// Receipts: only after their own, longer deadline, AND only when the
+	// row is not held by a live import lease. The lease guard closes a
+	// real gap: receipt_expires_at (72h) is comfortably longer than the
+	// typical import, but a long-running import that exceeds 72h must not
+	// have its bookkeeping deleted out from under it. The filter still
+	// cleans up genuinely abandoned rows; the worst case is "an active
+	// import holds its row a few hours past the deadline" instead of
+	// "the receipt vanishes and a follow-up status call cannot find it".
+	receipts := r.db.Where("receipt_expires_at < ?", now).
+		Where("NOT (lease_token <> '' AND lease_expires_at > ?)", now).
+		Delete(&UploadReceipt{})
+	if receipts.Error != nil {
+		return int(payloads.RowsAffected) + int(crashed.RowsAffected), 0, receipts.Error
+	}
+	return int(payloads.RowsAffected) + int(crashed.RowsAffected),
+		int(receipts.RowsAffected), nil
 }
 
 // ExpiredPayloadRecords returns the records whose bytes are past their payload

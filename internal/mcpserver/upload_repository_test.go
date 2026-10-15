@@ -1,7 +1,9 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -319,5 +321,236 @@ func TestReceiptSweepExpiresPayloadsRespectingLeases(t *testing.T) {
 	}
 	if after.State != UploadStateImporting {
 		t.Fatalf("a leased import must not be expired, state = %q", after.State)
+	}
+}
+
+// TestClaimRefusesPayloadsPastDeadline: the payload TTL guard added to
+// ClaimForImport. A staged row whose bytes are already past expires_at must
+// not be claimable: the next sweep is about to delete the file, and reading
+// it would race with that delete.
+func TestClaimRefusesPayloadsPastDeadline(t *testing.T) {
+	db := newReceiptTestDB(t)
+	repo := NewUploadReceiptRepository(db)
+	ctx := context.Background()
+	row := seedReceipt(t, repo, UploadStateStaged)
+	if err := db.Model(&UploadReceipt{}).Where("id = ?", row.UploadID).
+		Update("expires_at", time.Now().UTC().Add(-time.Hour)).Error; err != nil {
+		t.Fatalf("age the row: %v", err)
+	}
+	claimed, err := repo.ClaimForImport(ctx, row.UploadID, "lease",
+		time.Now().UTC().Add(uploadLeaseTTL))
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed {
+		t.Fatalf("a payload past its deadline must not be claimable")
+	}
+	after, err := repo.Get(ctx, uploadLookup{
+		UploadID: row.UploadID, EndpointID: "ep-1",
+		CallerWorkspaceID: 7, CallerStorageID: "web_user:user-1",
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after.State != UploadStateStaged {
+		t.Fatalf("expired-payload claim must leave state staged, got %q", after.State)
+	}
+}
+
+// TestReceiptSweepKeepsLiveLeaseEvenAfterReceiptDeadline: a row whose
+// receipt_expires_at is in the past but whose lease is still live must
+// survive the row-driven receipt sweep, because the in-flight import
+// depends on the bookkeeping.
+func TestReceiptSweepKeepsLiveLeaseEvenAfterReceiptDeadline(t *testing.T) {
+	db := newReceiptTestDB(t)
+	repo := NewUploadReceiptRepository(db)
+	ctx := context.Background()
+	row := seedReceipt(t, repo, UploadStateStaged)
+	claimed, err := repo.ClaimForImport(ctx, row.UploadID, "lease",
+		time.Now().UTC().Add(time.Hour))
+	if err != nil || !claimed {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if err := db.Model(&UploadReceipt{}).Where("id = ?", row.UploadID).
+		Update("receipt_expires_at", time.Now().UTC().Add(-time.Minute)).Error; err != nil {
+		t.Fatalf("age receipt: %v", err)
+	}
+	_, receipts, err := repo.Sweep(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if receipts != 0 {
+		t.Fatalf("live lease must shield the receipt from deletion, got %d", receipts)
+	}
+	after, err := repo.Get(ctx, uploadLookup{
+		UploadID: row.UploadID, EndpointID: "ep-1",
+		CallerWorkspaceID: 7, CallerStorageID: "web_user:user-1",
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after == nil {
+		t.Fatal("live lease must keep the row")
+	}
+	if after.State != UploadStateImporting {
+		t.Fatalf("state must remain importing under a live lease, got %q", after.State)
+	}
+}
+
+// TestSweepExpiresCrashedImporting: an importing row whose lease AND payload
+// are both past their deadlines is a crashed import. The sweep must mark it
+// expired so subsequent status calls do not report "still being worked on"
+// for a row whose bytes are already gone.
+func TestSweepExpiresCrashedImporting(t *testing.T) {
+	db := newReceiptTestDB(t)
+	repo := NewUploadReceiptRepository(db)
+	ctx := context.Background()
+	row := seedReceipt(t, repo, UploadStateStaged)
+	claimed, err := repo.ClaimForImport(ctx, row.UploadID, "lease",
+		time.Now().UTC().Add(time.Hour))
+	if err != nil || !claimed {
+		t.Fatalf("claim: %v %v", claimed, err)
+	}
+	if err := db.Model(&UploadReceipt{}).Where("id = ?", row.UploadID).
+		Updates(map[string]any{
+			"expires_at":       time.Now().UTC().Add(-2 * time.Hour),
+			"lease_expires_at": time.Now().UTC().Add(-time.Hour),
+		}).Error; err != nil {
+		t.Fatalf("age row: %v", err)
+	}
+	payloads, _, err := repo.Sweep(ctx, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("sweep: %v", err)
+	}
+	if payloads < 1 {
+		t.Fatalf("crashed importing row must be marked expired, got %d", payloads)
+	}
+	after, err := repo.Get(ctx, uploadLookup{
+		UploadID: row.UploadID, EndpointID: "ep-1",
+		CallerWorkspaceID: 7, CallerStorageID: "web_user:user-1",
+	})
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if after == nil {
+		t.Fatal("the row must still be visible after a crashed-importing sweep pass")
+	}
+	if after.State != UploadStateExpired {
+		t.Fatalf("crashed importing must be marked expired, got %q", after.State)
+	}
+	if after.LeaseToken != "" {
+		t.Fatalf("crashed row must have its lease cleared, got %q", after.LeaseToken)
+	}
+}
+
+// TestCompleteSurvivesCallerContextCancel: the receipt write must use a
+// detached context with a bounded deadline, not the caller's request
+// context, so a request cancel / handler timeout does not leave a
+// successfully created document invisible to a follow-up status call.
+// This test drives the storage layer directly: a ctx that is already
+// cancelled must still let Complete persist the receipt.
+func TestCompleteSurvivesCallerContextCancel(t *testing.T) {
+	root := t.TempDir()
+	repo := newFakeReceiptRepo()
+	staging := NewStagedUploadStorage(root, repo)
+	record, _, err := staging.Stage(context.Background(), baseUploadRequest(kbA),
+		bytes.NewReader([]byte("hello, the receipt write must use a detached context")))
+	if err != nil {
+		t.Fatalf("stage: %v", err)
+	}
+	lease, err := staging.Claim(context.Background(), uploadLookup{
+		UploadID:          record.UploadID,
+		EndpointID:        "ep-1",
+		CallerWorkspaceID: 7,
+		CallerStorageID:   "web_user:user-1",
+	}, uploadLeaseTTL)
+	if err != nil || lease == nil {
+		t.Fatalf("claim: %v %v", lease, err)
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate the request context being cancelled before Complete runs.
+	if err := staging.Complete(cancelledCtx, lease, UploadCompletion{
+		DocumentID:   "doc-cancelled",
+		Deduplicated: false,
+		Queued:       true,
+	}); err != nil {
+		t.Fatalf("Complete must survive caller ctx cancel, got %v", err)
+	}
+	row, err := repo.Get(context.Background(), uploadLookup{
+		UploadID: record.UploadID, EndpointID: "ep-1",
+		CallerWorkspaceID: 7, CallerStorageID: "web_user:user-1",
+	})
+	if err != nil {
+		t.Fatalf("get after complete: %v", err)
+	}
+	if row == nil {
+		t.Fatal("receipt must persist after Complete despite caller cancel")
+	}
+	if row.State != UploadStateImported {
+		t.Fatalf("receipt must be imported, got %q", row.State)
+	}
+	if row.DocumentID != "doc-cancelled" {
+		t.Fatalf("document id must be recorded, got %q", row.DocumentID)
+	}
+}
+
+// The classification must hold against the REAL migration index: the SQLite
+// driver reports the indexed column list, not the index name, so a
+// name-only matcher would silently miss every conflict on SQLite and Stage
+// would surface a raw database error instead of the replay/conflict policy.
+func TestIdempotencyIndexConflictIsClassifiedAgainstRealSQLite(t *testing.T) {
+	repo := NewUploadReceiptRepository(newReceiptTestDB(t))
+	ctx := context.Background()
+	now := time.Now().UTC()
+	build := func(id, key string) *UploadRecord {
+		return &UploadRecord{
+			UploadID: id, EndpointID: "ep-1", CallerWorkspaceID: 7,
+			CallerStorageID: "web_user:user-1", OwnerTenantID: 99,
+			KnowledgeBaseID: kbA, IdempotencyKey: key, FileName: "notes.txt",
+			FileSize: 1, SHA256: "abc", State: UploadStateStaged,
+			CreatedAt: now, ExpiresAt: now.Add(UploadPayloadTTL),
+			ReceiptExpiresAt: now.Add(UploadReceiptTTL),
+		}
+	}
+
+	if err := repo.Create(ctx, build("id-1", "k-1")); err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	// Same caller scope + same key: the idempotency index violation.
+	err := repo.Create(ctx, build("id-2", "k-1"))
+	if err == nil {
+		t.Fatal("the unique index must reject the duplicate key")
+	}
+	if !IsIdempotencyKeyConflict(err) {
+		t.Fatalf("the idempotency index violation must classify, got: %v", err)
+	}
+
+	// Same key from a DIFFERENT caller is not a conflict (the index includes
+	// the caller scope).
+	other := build("id-3", "k-1")
+	other.CallerStorageID = "web_user:user-2"
+	if err := repo.Create(ctx, other); err != nil {
+		t.Fatalf("another caller may reuse the key: %v", err)
+	}
+
+	// Primary-key collision: uniqueness on mcp_uploads.id is NOT this index.
+	if err := repo.Create(ctx, build("id-1", "k-2")); err == nil {
+		t.Fatal("the primary key must reject the duplicate id")
+	} else if IsIdempotencyKeyConflict(err) {
+		t.Fatalf("a primary-key collision must not classify as the idempotency index: %v", err)
+	}
+
+	// Empty keys never collide (partial index) and generic errors never match.
+	if err := repo.Create(ctx, build("id-4", "")); err != nil {
+		t.Fatalf("empty-key create one: %v", err)
+	}
+	if err := repo.Create(ctx, build("id-5", "")); err != nil {
+		t.Fatalf("empty-key create two: %v", err)
+	}
+	if IsIdempotencyKeyConflict(errors.New("database is locked")) {
+		t.Fatal("a lock error must never classify as the idempotency conflict")
+	}
+	if IsIdempotencyKeyConflict(nil) {
+		t.Fatal("nil must not classify")
 	}
 }

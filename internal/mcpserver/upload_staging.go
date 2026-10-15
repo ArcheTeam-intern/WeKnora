@@ -39,6 +39,12 @@ const (
 const (
 	UploadPayloadTTL = 24 * time.Hour
 	UploadReceiptTTL = 72 * time.Hour
+	// uploadCompleteTimeout caps the detached context the Complete path uses
+	// to persist the receipt and drop the payload. The receipt write is a
+	// single SQL UPDATE and the file remove is a local os.RemoveAll, so 30s
+	// is generous against runaway filesystem stalls without holding the
+	// import handler open for the whole request timeout.
+	uploadCompleteTimeout = 30 * time.Second
 )
 
 // supportedImportExtensions is the first phase's whitelist. The service layer
@@ -365,7 +371,47 @@ func (s *stagedUploadStorage) Stage(
 	// Publish the receipt only now: it is the marker that the bytes are complete.
 	if err := s.receipts.Create(ctx, &record); err != nil {
 		removeAllQuiet(dir)
-		return UploadRecord{}, false, err
+		// Two first-time uploads of the same Idempotency-Key can both miss the
+		// lookup above and then race Create; the mcp_uploads idempotency index
+		// rejects the loser, whose bytes duplicate the winner's. Re-read the
+		// winner and apply the same replay policy the lookup path uses.
+		//
+		// ONLY that index violation recovers: a lock timeout, a disconnected
+		// database or a primary-key collision has no winner to fall back to and
+		// must surface as the real error rather than a fabricated replay.
+		if !IsIdempotencyKeyConflict(err) {
+			return UploadRecord{}, false, err
+		}
+		winner, lookupErr := s.receipts.FindByIdempotencyKey(ctx, record.EndpointID,
+			record.CallerWorkspaceID, record.CallerStorageID, record.IdempotencyKey)
+		if lookupErr != nil {
+			return UploadRecord{}, false, lookupErr
+		}
+		if winner == nil {
+			// The conflict is real but the winner is not readable: keep the
+			// original database error so the caller is not told about a replay
+			// that cannot be resolved.
+			return UploadRecord{}, false, err
+		}
+		// Same target, same name AND the same bytes this request just wrote and
+		// hashed: the loser of the race simply lost, so it returns the winner's
+		// receipt marked as a replay — exactly like the sequential lookup path.
+		// Receipt expiry keeps following the existing Get/Claim policy.
+		sameTarget := strings.EqualFold(winner.KnowledgeBaseID, record.KnowledgeBaseID)
+		sameName := winner.FileName == record.FileName
+		sameBytes := winner.FileSize == record.FileSize && winner.SHA256 == record.SHA256
+		if sameTarget && sameName && sameBytes {
+			return *winner, true, nil
+		}
+		return *winner, true, &ToolError{
+			Code:    CodeIdempotencyConflict,
+			Message: "this Idempotency-Key was already used for a different file or knowledge base",
+			Details: map[string]any{
+				"existing_knowledge_base_id": winner.KnowledgeBaseID,
+				"existing_file_name":         winner.FileName,
+				"existing_file_size":         winner.FileSize,
+			},
+		}
 	}
 	return record, false, nil
 }
@@ -446,11 +492,29 @@ func (s *stagedUploadStorage) Complete(
 	}
 	// Persist the receipt first, then drop the bytes: a crash in between leaves a
 	// recoverable imported receipt, which is exactly what the plan requires.
-	if err := s.receipts.MarkImported(ctx, lease.Record.UploadID, lease.LeaseToken,
+	//
+	// The receipt write uses a detached context with a bounded deadline: if the
+	// caller's request context is cancelled (client disconnect, handler timeout,
+	// gin's deferred cleanup) the receipt must still be persisted, otherwise a
+	// successfully created document would be invisible to a follow-up status
+	// check and a re-import would create a duplicate. The same detached context
+	// is reused to delete the payload so a request-cancel between MarkImported
+	// and the file remove does not leave orphan bytes for the next sweep.
+	persistCtx, cancel := context.WithTimeout(context.Background(), uploadCompleteTimeout)
+	defer cancel()
+	if err := s.receipts.MarkImported(persistCtx, lease.Record.UploadID, lease.LeaseToken,
 		completion.DocumentID, completion.Deduplicated, completion.Queued); err != nil {
 		return err
 	}
-	removeAllQuiet(filepath.Dir(lease.Record.PayloadPath))
+	if err := removeAll(filepath.Dir(lease.Record.PayloadPath)); err != nil {
+		// The document is created and the receipt records it: returning a
+		// hard error would lie to the caller that no import happened. Log
+		// and let the next Sweep pick the bytes up; the document ID is
+		// already in the receipt.
+		logger.Warnf(ctx,
+			"[mcpserver] staged upload %s imported as %s but its payload could not be removed inline (%v); sweep will retry",
+			lease.Record.UploadID, completion.DocumentID, err)
+	}
 	return nil
 }
 
@@ -500,19 +564,59 @@ func (s *stagedUploadStorage) Sweep(ctx context.Context) (int, int, error) {
 	// two leaves a row whose bytes are already gone (safe to retry) rather than a
 	// row pointing at a file that still consumes disk. Live leases are never in
 	// the returned set, so an in-flight import is not cut off.
+	//
+	// The counter only advances for files we actually removed. A removeAll
+	// failure is logged so an operator can see a stuck directory in the logs
+	// instead of a "nothing to do" Sweep while the disk keeps filling.
 	expired, err := s.receipts.ExpiredPayloadRecords(ctx, now)
+	var payloadRemovals int
 	if err == nil {
 		for _, record := range expired {
-			removeAllQuiet(filepath.Dir(s.payloadPath(record)))
+			if err := removeAll(filepath.Dir(s.payloadPath(record))); err != nil {
+				logger.Warnf(ctx,
+					"[mcpserver] staged upload %s payload directory could not be removed during sweep (%v); will retry next tick",
+					record.UploadID, err)
+				continue
+			}
+			payloadRemovals++
 		}
+	} else {
+		logger.Warnf(ctx,
+			"[mcpserver] expired payload query failed (%v); skipping row-driven payload cleanup this tick", err)
 	}
+	// The orphan scan below does its own live-payload query and fail-fasts on
+	// errors, so a non-recoverable Sweep is reported back to the caller
+	// instead of silently letting the row-driven pass run on a stale view.
+	//
+	// Now the row-driven pass: mark expired and delete old receipts. The
+	// orphan scan already failed-fast above if it could not see live payloads,
+	// so a non-nil error here means the row-driven sweep itself is broken.
+	//
+	// `payloads` is the number of rows we just marked state=expired in the
+	// row-driven pass; `payloadRemovals` is the number of files we
+	// actually removed from disk above. They describe the same set of
+	// records from two angles: one row == one file (modulo crash windows
+	// where the file delete is the second half of the cleanup). Summing
+	// them would double-count, so the final return keeps file removals
+	// and row transitions in separate places: the first return value is
+	// "files removed" (the user-observable disk saving), the second is
+	// "receipts deleted" (the user-observable row removal).
 	payloads, receipts, sweepErr := s.receipts.Sweep(ctx, now)
+	if sweepErr != nil {
+		return payloadRemovals, 0, sweepErr
+	}
 	// The row-driven pass only sees rows. The disk scan closes the gaps a row
 	// cannot report: bytes left behind by a crash between the receipt write and
 	// the file delete, and directories whose row is already gone. Without it the
 	// row counts look clean while the disk still fills up.
-	orphans := s.sweepOrphanDirs(ctx, now)
-	return payloads + orphans, receipts, sweepErr
+	orphans, orphanErr := s.sweepOrphanDirs(ctx, now)
+	if orphanErr != nil {
+		return payloadRemovals, 0, orphanErr
+	}
+	// `payloads` mirrors the file-removal count for the row-driven pass;
+	// only add `orphans` (rows that had no file to remove) so the final
+	// count is the total number of rows that have now been cleaned up.
+	return payloadRemovals + orphans + payloads, receipts, nil
 }
 
 // sweepDirGrace spares directories young enough to be mid-Stage. Stage writes
@@ -529,11 +633,15 @@ const sweepDirGrace = 15 * time.Minute
 // (rows already imported or expired whose bytes survived a failed delete, and
 // directories with no row at all) is removed, which is what makes the sweep
 // converge on the disk contents instead of only on the row counts.
-func (s *stagedUploadStorage) sweepOrphanDirs(ctx context.Context, now time.Time) int {
+func (s *stagedUploadStorage) sweepOrphanDirs(ctx context.Context, now time.Time) (int, error) {
 	live, err := s.receipts.LivePayloadRecords(ctx)
 	if err != nil {
-		logger.Warnf(ctx, "[mcpserver] staging disk sweep skipped: cannot list live receipts: %v", err)
-		return 0
+		// A live-payload query failure must not be silently swallowed: the
+		// disk scan below decides which upload directories are safe to
+		// remove, and a stale "live" view would let it delete an in-flight
+		// import's bytes. Propagate the error so Sweep stops before
+		// touching the receipt table.
+		return 0, fmt.Errorf("live payload query failed: %w", err)
 	}
 	keep := make(map[string]struct{}, len(live))
 	for _, record := range live {
@@ -556,7 +664,11 @@ func (s *stagedUploadStorage) sweepOrphanDirs(ctx context.Context, now time.Time
 		if !os.IsNotExist(err) {
 			logger.Warnf(ctx, "[mcpserver] staging disk sweep cannot read %s: %v", s.root, err)
 		}
-		return 0
+		// A missing root is not an error: the first run after a fresh
+		// deploy has nothing to scan. A read failure on an existing root
+		// is already logged above and is not worth failing the sweep
+		// over — the row-driven pass still runs.
+		return 0, nil
 	}
 	for _, ws := range workspaces {
 		wsDir := filepath.Join(s.root, ws.Name())
@@ -602,7 +714,7 @@ func (s *stagedUploadStorage) sweepOrphanDirs(ctx context.Context, now time.Time
 		}
 		_ = os.Remove(wsDir)
 	}
-	return removed
+	return removed, nil
 }
 
 // recentlyModified reports whether the directory exists and was touched within
@@ -723,6 +835,20 @@ func removeAllQuiet(path string) {
 		return
 	}
 	_ = os.RemoveAll(path)
+}
+
+// removeAll is the observable counterpart of removeAllQuiet: it surfaces
+// errors so the caller can count real successes and log real failures, used
+// by the cleanup paths (Sweep, Complete) where a swallowed failure would
+// leave bytes on disk and the next sweep looking like it had no work.
+func removeAll(path string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if err := os.RemoveAll(path); err != nil {
+		return fmt.Errorf("remove %s: %w", path, err)
+	}
+	return nil
 }
 
 func truncate(value string, limit int) string {

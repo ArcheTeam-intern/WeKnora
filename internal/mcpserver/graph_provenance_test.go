@@ -6,6 +6,22 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+func TestGraphSourcesVerifyEachChunkAndBinding(t *testing.T) {
+	edge := map[string]interface{}{"id": "relation", "chunk_ids": []string{"c1", "unread", "foreign"}, "knowledge_id": "d1", "knowledge_base_id": "kb", "quote": "one quote"}
+	data := map[string]interface{}{"results": []map[string]interface{}{
+		{"chunk_id": "c1", "knowledge_id": "d1", "knowledge_base_id": "kb", "content": "one quote"},
+		{"chunk_id": "foreign", "knowledge_id": "d2", "knowledge_base_id": "other", "content": "private quote"},
+	}}
+	enrichGraphEdgesWithSourceRefsV2(data, map[string]interface{}{"edges": []map[string]interface{}{edge}}, []*types.KnowledgeBase{{ID: "kb"}})
+	refs := edge["source_refs_v2"].([]types.SourceRefV2)
+	if len(refs) != 3 { t.Fatalf("want per-chunk refs, got %+v", refs) }
+	if refs[0].ProvenanceStatus != "verified" || refs[0].Quote != "one quote" { t.Fatalf("readable source = %+v", refs[0]) }
+	for _, ref := range refs[1:] {
+		if ref.ProvenanceStatus == "verified" || ref.Quote != "" || ref.KnowledgeBaseID == "other" { t.Fatalf("unread/mismatched source leaked evidence: %+v", ref) }
+	}
+	if edge["id"] != "relation" { t.Fatal("relation identity changed") }
+}
+
 // TestUnmappedGraphEdgesMustNotClaimAllQueryEvidence is the plan §8 task 6
 // regression: an edge without its own per-relation chunk provenance must not
 // borrow the whole query's evidence set. Each unmapped edge exposes an unknown

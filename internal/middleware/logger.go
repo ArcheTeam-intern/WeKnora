@@ -51,12 +51,17 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 
 // sensitiveFieldRegex 匹配 JSON 中的敏感字段（不区分大小写，兼容 snake_case / camelCase / PascalCase）。
 // $1 捕获原始字段名（包括两侧引号），保持日志中的字段名不变，仅将值替换为 "***"。
+//
+// `content` is included because the MCP `upload_file` tool carries
+// base64-encoded file bytes under that key; logging it would put
+// every uploaded document into the access log. The MCP-specific
+// `arguments` envelope is recorded separately by the audit layer.
 var sensitiveFieldRegex = regexp.MustCompile(
 	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|ticket|token|access[_-]?token|` +
 		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
 		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
 		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
-		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
+		`authorization[_-]?url|authorization[_-]?attempt|content|file|attachment)")\s*:\s*"[^"]*"`,
 )
 
 // sanitizeBody 清理敏感信息
