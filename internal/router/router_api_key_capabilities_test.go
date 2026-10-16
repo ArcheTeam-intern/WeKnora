@@ -345,8 +345,6 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
-	RegisterEmbedChannelRoutes(v1, &handler.EmbedChannelHandler{}, g)
-	RegisterIMChannelRoutes(v1, &handler.IMHandler{}, g)
 	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
 	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
 
@@ -374,8 +372,6 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
-		{http.MethodGet, "/api/v1/embed-channels", types.APIKeyCapabilityManageChannels},
-		{http.MethodGet, "/api/v1/im-channels", types.APIKeyCapabilityManageChannels},
 		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},
 		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
 	}

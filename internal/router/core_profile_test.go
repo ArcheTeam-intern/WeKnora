@@ -19,15 +19,15 @@ type stubEndpointService struct{ interfaces.MCPEndpointService }
 // graph) must stay open.
 func TestKnowledgeCoreReachabilityClosesNonCoreRoutes(t *testing.T) {
 	full := reachabilityFor(&config.Config{})
-	if !full.IM || !full.Embed || !full.Memory || !full.PublicWebSearch ||
+	if !full.Memory || !full.PublicWebSearch ||
 		!full.MCPClientToolbox || !full.ExecutionSandbox || !full.Skills {
-		t.Fatalf("the default profile must keep every route group: %+v", full)
+		t.Fatalf("the default profile must keep every remaining route group: %+v", full)
 	}
 
 	core := reachabilityFor(&config.Config{ProductProfile: config.ProductProfileKnowledgeCore})
-	if core.IM || core.Embed || core.Memory || core.PublicWebSearch ||
+	if core.Memory || core.PublicWebSearch ||
 		core.MCPClientToolbox || core.ExecutionSandbox || core.Skills {
-		t.Fatalf("knowledge-core must close every non-core route group: %+v", core)
+		t.Fatalf("knowledge-core must close every remaining non-core route group: %+v", core)
 	}
 
 	// An unknown value must not be interpreted as "some other profile": config
@@ -59,8 +59,6 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 		MCPEndpointHandler:           &handler.MCPEndpointHandler{},
 		MCPServer:                    &mcpserver.Server{},
 		MCPEndpointService:           &stubEndpointService{},
-		IMHandler:                    &handler.IMHandler{},
-		EmbedChannelHandler:          &handler.EmbedChannelHandler{},
 		MCPServiceHandler:            &handler.MCPServiceHandler{},
 		MCPCredentialsHandler:        &handler.MCPCredentialsHandler{},
 		MCPOAuthHandler:              &handler.MCPOAuthHandler{},
@@ -75,6 +73,8 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 	}
 
 	caps := deploymentCapabilitiesFromRouter(params).Capabilities
+	// IM and embed are physically removed, so they read as unsupported in every
+	// profile; the rest are still only closed by the profile switch.
 	for _, key := range []string{
 		"integrations.im", "integrations.embed", "settings.mcp", "settings.websearch", "settings.sandbox",
 	} {
@@ -90,13 +90,19 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 		}
 	}
 
-	// Same handlers under the default profile still report the features, so the
-	// closure above is the profile's doing and not a missing wiring.
+	// Under the default profile the still-present features come back, so the
+	// closures above are deliberate and not missing wiring. IM and embed do not
+	// come back in any profile: they are deleted, not gated.
 	params.Config = &config.Config{}
 	fullCaps := deploymentCapabilitiesFromRouter(params).Capabilities
-	for _, key := range []string{"integrations.im", "integrations.embed", "settings.mcp", "settings.websearch", "settings.sandbox"} {
+	for _, key := range []string{"settings.mcp", "settings.websearch", "settings.sandbox"} {
 		if !fullCaps[key].Supported {
 			t.Fatalf("the full profile must keep %s available: %+v", key, fullCaps[key])
+		}
+	}
+	for _, key := range []string{"integrations.im", "integrations.embed"} {
+		if fullCaps[key].Supported {
+			t.Fatalf("%s is removed from the build and must not be reported as supported: %+v", key, fullCaps[key])
 		}
 	}
 }

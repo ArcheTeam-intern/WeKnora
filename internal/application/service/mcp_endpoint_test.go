@@ -61,10 +61,27 @@ func (r *stubMCPEndpointRepo) Delete(_ context.Context, tenantID uint64, id stri
 	return nil
 }
 
+// stubAgentLookup is the CustomAgentService double this file needs to exercise
+// the endpoint's agent validation. It used to live in the embed-channel test
+// file; embed channels were removed from the build, and the double moved here
+// with its remaining user.
+type stubAgentLookup struct {
+	interfaces.CustomAgentService
+	agent *types.CustomAgent
+	err   error
+}
+
+func (s *stubAgentLookup) GetAgentByID(_ context.Context, _ string) (*types.CustomAgent, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.agent, nil
+}
+
 func newMCPEndpointServiceForTest(repo *stubMCPEndpointRepo, agent *types.CustomAgent) *mcpEndpointService {
 	return &mcpEndpointService{
 		repo:         repo,
-		agentService: &stubAgentForEmbed{agent: agent},
+		agentService: &stubAgentLookup{agent: agent},
 	}
 }
 

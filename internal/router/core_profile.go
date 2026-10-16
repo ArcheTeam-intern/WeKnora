@@ -6,14 +6,13 @@ import "github.com/Tencent/WeKnora/internal/config"
 //
 // It is deliberately data rather than a scatter of booleans inside NewRouter:
 // the knowledge-core profile is a security posture, so "which entry points are
-// reachable" has to be assertable without booting gin or a database. The
-// physical removal of the modules behind these switches is a separate, later
-// batch; this type only closes reachability.
+// reachable" has to be assertable without booting gin or a database.
+//
+// IM delivery and web-embed publishing are no longer listed here: they were
+// physically removed, so no profile registers them. The remaining switches
+// still gate routes for modules that are only closed, not deleted yet — each
+// switch is dropped from this table in the batch that removes its module.
 type coreProfileReachability struct {
-	// IM covers the IM callback routes and the IM channel management API.
-	IM bool
-	// Embed covers the public embed routes and the embed channel management API.
-	Embed bool
 	// Memory covers the personal long-term memory API.
 	Memory bool
 	// PublicWebSearch covers web search and web search provider credentials.
@@ -39,8 +38,6 @@ func reachabilityFor(cfg *config.Config) coreProfileReachability {
 		return coreProfileReachability{}
 	}
 	return coreProfileReachability{
-		IM:               true,
-		Embed:            true,
 		Memory:           true,
 		PublicWebSearch:  true,
 		MCPClientToolbox: true,

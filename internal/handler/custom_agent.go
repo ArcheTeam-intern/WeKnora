@@ -10,7 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
-	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -29,7 +28,6 @@ type sandboxConfigLookup interface {
 // CustomAgentHandler defines the HTTP handler for custom agent operations
 type CustomAgentHandler struct {
 	service      interfaces.CustomAgentService
-	imService    *im.Service
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository
 	// userService 仅用于 list 接口批量回填 creator_name，作用见
 	// KnowledgeBaseHandler.userService。
@@ -43,7 +41,6 @@ type CustomAgentHandler struct {
 // NewCustomAgentHandler creates a new custom agent handler instance
 func NewCustomAgentHandler(
 	service interfaces.CustomAgentService,
-	imService *im.Service,
 	disabledRepo interfaces.TenantDisabledSharedAgentRepository,
 	userService interfaces.UserService,
 	sandboxConfigs *service.TenantSandboxConfigService,
@@ -51,7 +48,6 @@ func NewCustomAgentHandler(
 ) *CustomAgentHandler {
 	return &CustomAgentHandler{
 		service:        service,
-		imService:      imService,
 		disabledRepo:   disabledRepo,
 		userService:    userService,
 		sandboxConfigs: sandboxConfigs,
@@ -482,13 +478,12 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 		return
 	}
 
-	if err := h.imService.DeleteChannelsByAgent(id, tenantID); err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"agent_id": id,
-		})
-		c.Error(errors.NewInternalServerError("Failed to delete agent IM channels"))
-		return
-	}
+	// Deleting an agent used to cascade into its IM channels. IM delivery is
+	// retired in this build, so there is no channel to stop and no cascade to
+	// run; the historical rows are left untouched (a code change must not drop
+	// data). tenantID is still read above because the authorization path needs
+	// it.
+	_ = tenantID
 
 	// Delete the agent
 	err := h.service.DeleteAgent(ctx, id)

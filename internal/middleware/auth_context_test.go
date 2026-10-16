@@ -68,11 +68,14 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	if got, ok := types.TenantAPIKeyScopeFromContext(ctx); !ok || got.KeyID != 3 {
 		t.Fatalf("ctx api key scope = %#v, ok=%v", got, ok)
 	}
-	if ch, ok := EmbedChannelFromContext(ctx); !ok || ch.ID != "ch" {
-		t.Fatalf("ctx embed channel = %#v, ok=%v", ch, ok)
+	// Extra keys must land on both the request context and the gin key store.
+	// The value below is one of the shared context keys; its owning middleware
+	// is separate from this test, which only checks propagation.
+	if got, ok := ctx.Value(types.EmbedChannelContextKey).(*types.EmbedChannel); !ok || got.ID != "ch" {
+		t.Fatalf("ctx extra value = %#v, ok=%v", got, ok)
 	}
 	if got, ok := c.Get(types.EmbedChannelContextKey.String()); !ok || got.(*types.EmbedChannel).ID != "ch" {
-		t.Fatalf("keys embed channel = %v, ok=%v", got, ok)
+		t.Fatalf("keys extra value = %v, ok=%v", got, ok)
 	}
 }
 

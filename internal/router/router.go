@@ -81,9 +81,6 @@ type RouterParams struct {
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
 	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
-	IMHandler                    *handler.IMHandler
-	EmbedChannelHandler          *handler.EmbedChannelHandler
-	EmbedChannelService          interfaces.EmbedChannelService
 	MCPEndpointHandler           *handler.MCPEndpointHandler
 	MCPEndpointService           interfaces.MCPEndpointService
 	MCPServer                    *mcpserver.Server
@@ -176,9 +173,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// allowed origins. This is the page-level counterpart to the API Origin
 	// allowlist enforced in EmbedAuth. Registered before the static handler so
 	// it runs for the embed HTML response.
-	if params.EmbedChannelService != nil && reach.Embed {
-		r.Use(embedFrameAncestorsMiddleware(params.EmbedChannelService))
-	}
+	// Web-embed framing policy went with the embed surface itself.
 
 	// 前端静态文件（仅 Lite 版本内嵌前端）
 	if handler.Edition == "lite" {
@@ -186,21 +181,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
-	if reach.IM {
-		RegisterIMRoutes(r, params.IMHandler)
-
-		// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-		RegisterEmbedPublicRoutes(
-			r,
-			params.EmbedChannelHandler,
-			params.EmbedChannelService,
-			params.TenantService,
-			params.RedisClient,
-			params.FileService,
-			params.StorageBackendResolver,
-			params.ResourceCatalog,
-		)
-	}
+	// IM callbacks and web-embed publishing are retired: no route, no startup
+	// connection, no handler. Historical rows stay in the database.
 
 	// Workspace MCP server surface (/mcp/:endpoint_id): bearer-token auth per
 	// endpoint, so it must precede the global Auth middleware. Endpoints that
@@ -353,12 +335,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		if reach.Skills {
 			RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		}
-		if reach.IM {
-			RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
-		}
-		if reach.Embed {
-			RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
-		}
+		// IM channel management and embed channel management routes are gone
+		// with their implementations.
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)

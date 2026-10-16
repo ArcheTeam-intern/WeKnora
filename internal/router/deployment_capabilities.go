@@ -6,34 +6,35 @@ import (
 )
 
 func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCapabilitiesData {
-	// The knowledge-core profile does not register the non-core route groups,
-	// so their capabilities must read as absent no matter which handlers the
-	// container still builds. Reporting them as available would put menus and
-	// settings in the SPA for routes that answer 404.
-	coreProfile := params.Config != nil && params.Config.IsKnowledgeCore()
+	reach := reachabilityFor(params.Config)
 
+	// IM delivery and web-embed publishing were physically removed from this
+	// build, so their capabilities read as unsupported in every profile. The
+	// other non-core features are still only gated by the product profile, so a
+	// capability follows both the profile switch and the wiring: reporting a
+	// gated feature as supported would put menus and settings in the SPA for
+	// routes this process never registers.
 	return handler.BuildDeploymentCapabilities(handler.Edition, handler.DeploymentFeatureAvailability{
 		Organizations: params.OrganizationHandler != nil,
 		Agents:        params.CustomAgentHandler != nil,
-		IM:            !coreProfile && params.IMHandler != nil,
-		// Match RegisterEmbedChannelRoutes: management routes depend on handler only.
-		Embed: !coreProfile && params.EmbedChannelHandler != nil,
+		IM:            false,
+		Embed:         false,
 		// Match RegisterMCPEndpointRoutes / RegisterMCPServerRoutes. The MCP
-		// SERVER surface (the main product's entry point) stays in both
-		// profiles; only the third-party MCP toolbox below is core-gated.
+		// SERVER surface — the main product's entry point — stays in every
+		// profile; only the third-party MCP client toolbox below is gated.
 		MCPServer: params.MCPEndpointHandler != nil && params.MCPServer != nil && params.MCPEndpointService != nil,
 		API:       params.TenantHandler != nil && params.TenantAPIKeyService != nil,
-		MCP: !coreProfile && params.MCPServiceHandler != nil &&
+		MCP: reach.MCPClientToolbox && params.MCPServiceHandler != nil &&
 			params.MCPCredentialsHandler != nil &&
 			params.MCPOAuthHandler != nil,
-		WebSearch: !coreProfile && params.WebSearchHandler != nil &&
+		WebSearch: reach.PublicWebSearch && params.WebSearchHandler != nil &&
 			params.WebSearchProviderHandler != nil &&
 			params.WebSearchCredentialsHandler != nil,
 		VectorStore:   params.VectorStoreHandler != nil,
 		Storage:       params.StorageBackendHandler != nil,
-		Sandbox:       !coreProfile && params.SandboxConfigHandler != nil,
-		SandboxDocker: !coreProfile && sandbox.DockerBackendEnabled(),
-		SandboxHost:   !coreProfile && params.HostSandbox.Manager != nil,
-		SandboxRemote: !coreProfile && params.SandboxConfigHandler != nil && !params.HostSandbox.Desktop,
+		Sandbox:       reach.ExecutionSandbox && params.SandboxConfigHandler != nil,
+		SandboxDocker: reach.ExecutionSandbox && sandbox.DockerBackendEnabled(),
+		SandboxHost:   reach.ExecutionSandbox && params.HostSandbox.Manager != nil,
+		SandboxRemote: reach.ExecutionSandbox && params.SandboxConfigHandler != nil && !params.HostSandbox.Desktop,
 	})
 }

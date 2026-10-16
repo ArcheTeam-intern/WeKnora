@@ -73,16 +73,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
-	imPkg "github.com/Tencent/WeKnora/internal/im"
-	"github.com/Tencent/WeKnora/internal/im/dingtalk"
-	"github.com/Tencent/WeKnora/internal/im/feishu"
-	"github.com/Tencent/WeKnora/internal/im/mattermost"
-	"github.com/Tencent/WeKnora/internal/im/qqbot"
-	"github.com/Tencent/WeKnora/internal/im/slack"
-	"github.com/Tencent/WeKnora/internal/im/telegram"
-	"github.com/Tencent/WeKnora/internal/im/wechat"
-	"github.com/Tencent/WeKnora/internal/im/wecom"
-	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -185,7 +175,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
 	must(container.Provide(repository.NewAgentShareRepository))
-	must(container.Provide(repository.NewEmbedChannelRepository))
 	must(container.Provide(repository.NewMCPEndpointRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
@@ -285,7 +274,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewWikiPageService))
 	must(container.Provide(service.NewWikiIngestService, dig.Name("wikiIngest")))
 	must(container.Provide(service.NewWikiLintService))
-	must(container.Provide(service.NewEmbedChannelService))
 	must(container.Provide(service.NewMCPEndpointService))
 	must(container.Provide(mcpserver.NewServer))
 
@@ -595,19 +583,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
-	// IM integration. The service object stays provided in every profile —
-	// unrelated constructors (CustomAgentHandler among them) depend on it, and
-	// dropping the provider makes dig fail to build the whole application even
-	// when nothing requests an IM feature. What the knowledge-core profile
-	// skips is the side effect: registerIMService opens outbound platform
-	// connections, which hiding a menu cannot undo.
-	logger.Debugf(ctx, "[Container] Registering IM integration...")
-	must(container.Provide(imPkg.NewService))
-	if !productProfileIsKnowledgeCore(container) {
-		must(container.Invoke(registerIMService))
-	}
-	must(container.Provide(handler.NewIMHandler))
-	must(container.Provide(handler.NewEmbedChannelHandler))
+	// IM delivery and web-embed publishing are retired in this build: there is
+	// no provider, no handler and no startup connection. The historical tables
+	// stay in place — a code change must not drop data.
 	must(container.Provide(handler.NewMCPEndpointHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
@@ -1832,33 +1810,6 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("bocha", infra_web_search.NewBochaProvider)
 	registry.Register("brave", infra_web_search.NewBraveProvider)
 	registry.Register("serply", infra_web_search.NewSerplyProvider)
-}
-
-// registerIMService registers adapter factories, loads enabled channels, and
-// wires the process-lifetime shutdown hook. Each platform's factory lives in
-// its own subpackage to keep this file focused on wiring.
-func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceCleaner) {
-	imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
-	imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
-	// Lark is Feishu's international cloud: same adapter, different host/tenant.
-	imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
-	imService.RegisterAdapterFactory("slack", slack.NewFactory())
-	imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
-	imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
-	imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
-	imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
-	imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
-	imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
-
-	// Load and start all enabled channels from database
-	if err := imService.LoadAndStartChannels(); err != nil {
-		logger.Warnf(context.Background(), "[IM] Failed to load channels from database: %v", err)
-	}
-
-	cleaner.RegisterWithName("IMService", func() error {
-		imService.Stop()
-		return nil
-	})
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
