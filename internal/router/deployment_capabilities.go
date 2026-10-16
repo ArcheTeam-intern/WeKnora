@@ -5,16 +5,14 @@ import (
 )
 
 func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCapabilitiesData {
-	reach := reachabilityFor(params.Config)
 
-	// IM delivery, web-embed publishing, public web search and the agent
+	// IM delivery, web-embed publishing, public web search, the agent
 	// execution sandbox (terminal, desktop, local browser, sandbox/skill
-	// settings) were physically removed from this build, so those capabilities
-	// read as unsupported in every profile. The remaining non-core feature is
-	// still only gated by the product profile, so its capability follows both
-	// the profile switch and the wiring: reporting a gated feature as supported
-	// would put menus and settings in the SPA for routes this process never
-	// registers.
+	// settings) and the third-party MCP client toolbox were physically removed
+	// from this build, so those capabilities read as unsupported in every
+	// profile. What remains follows the wiring: reporting a missing feature as
+	// supported would put menus and settings in the SPA for routes this process
+	// never registers.
 	return handler.BuildDeploymentCapabilities(handler.Edition, handler.DeploymentFeatureAvailability{
 		Organizations: params.OrganizationHandler != nil,
 		Agents:        params.CustomAgentHandler != nil,
@@ -22,13 +20,11 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		Embed:         false,
 		// Match RegisterMCPEndpointRoutes / RegisterMCPServerRoutes. The MCP
 		// SERVER surface — the main product's entry point — stays in every
-		// profile; only the third-party MCP client toolbox below is gated.
+		// profile.
 		MCPServer: params.MCPEndpointHandler != nil && params.MCPServer != nil && params.MCPEndpointService != nil,
 		API:       params.TenantHandler != nil && params.TenantAPIKeyService != nil,
-		MCP: reach.MCPClientToolbox && params.MCPServiceHandler != nil &&
-			params.MCPCredentialsHandler != nil &&
-			params.MCPOAuthHandler != nil,
-		WebSearch:     false,
+		MCP:       false,
+		WebSearch: false,
 		VectorStore:   params.VectorStoreHandler != nil,
 		Storage:       params.StorageBackendHandler != nil,
 		Sandbox:       false,

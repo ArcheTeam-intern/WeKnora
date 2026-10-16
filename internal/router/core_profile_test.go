@@ -13,102 +13,56 @@ import (
 // snapshot report the MCP SERVER as wired; no method is called.
 type stubEndpointService struct{ interfaces.MCPEndpointService }
 
-// The knowledge-core profile is a security posture, so the negative test comes
-// first: with the profile on, every non-core route group must read as closed,
-// and the knowledge surface (knowledge base, parsing, MCP server, QA, wiki,
-// graph) must stay open.
-func TestKnowledgeCoreReachabilityClosesNonCoreRoutes(t *testing.T) {
-	full := reachabilityFor(&config.Config{})
-	if !full.MCPClientToolbox {
-		t.Fatalf("the default profile must keep every remaining route group: %+v", full)
-	}
-
-	core := reachabilityFor(&config.Config{ProductProfile: config.ProductProfileKnowledgeCore})
-	if core.MCPClientToolbox {
-		t.Fatalf("knowledge-core must close every remaining non-core route group: %+v", core)
-	}
-
-	// An unknown value must not be interpreted as "some other profile": config
-	// normalization already maps it to full before the router sees it, and a
-	// hand-built config with a typo falls back the same way.
-	typo := reachabilityFor(&config.Config{ProductProfile: "knowledge_core"})
-	if typo != full {
-		t.Fatalf("an unknown profile must behave like full: %+v", typo)
-	}
-
-	// A nil config (lite/degraded construction paths) must not panic and must
-	// behave like full.
-	if reachabilityFor(nil) != full {
-		t.Fatal("a nil config must behave like full")
-	}
-}
-
-// The capability snapshot drives the SPA menus. If the knowledge-core profile
-// left the non-core capabilities reported as supported while their routes are
-// not registered, the UI would offer settings pages that answer 404.
-func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
+// TestRemovedModulesReadAsUnsupported pins the capability snapshot: every module
+// the pruning batches deleted (IM, embed, public web search, the execution
+// sandbox and the third-party MCP client toolbox) must read unsupported in
+// BOTH profiles — deleted, not gated — while the knowledge surface and the MCP
+// SERVER entry point stay wired.
+func TestRemovedModulesReadAsUnsupported(t *testing.T) {
 	params := RouterParams{
-		Config:                   &config.Config{ProductProfile: config.ProductProfileKnowledgeCore},
-		OrganizationHandler:      &handler.OrganizationHandler{},
-		CustomAgentHandler:       &handler.CustomAgentHandler{},
-		TenantHandler:            &handler.TenantHandler{},
-		VectorStoreHandler:       &handler.VectorStoreHandler{},
-		StorageBackendHandler:    &handler.StorageBackendHandler{},
-		MCPEndpointHandler:       &handler.MCPEndpointHandler{},
-		MCPServer:                &mcpserver.Server{},
-		MCPEndpointService:       &stubEndpointService{},
-		MCPServiceHandler:        &handler.MCPServiceHandler{},
-		MCPCredentialsHandler:    &handler.MCPCredentialsHandler{},
-		MCPOAuthHandler:          &handler.MCPOAuthHandler{},
-		MessageSuggestionHandler: &handler.MessageSuggestionHandler{},
-		TenantMemberHandler:      &handler.TenantMemberHandler{},
-		TenantInvitationHandler:  &handler.TenantInvitationHandler{},
-		AuditLogHandler:          &handler.AuditLogHandler{},
+		Config:                      &config.Config{},
+		OrganizationHandler:         &handler.OrganizationHandler{},
+		CustomAgentHandler:          &handler.CustomAgentHandler{},
+		TenantHandler:               &handler.TenantHandler{},
+		VectorStoreHandler:          &handler.VectorStoreHandler{},
+		StorageBackendHandler:       &handler.StorageBackendHandler{},
+		MCPEndpointHandler:          &handler.MCPEndpointHandler{},
+		MCPServer:                   &mcpserver.Server{},
+		MCPEndpointService:          &stubEndpointService{},
+		MessageSuggestionHandler:    &handler.MessageSuggestionHandler{},
+		TenantMemberHandler:         &handler.TenantMemberHandler{},
+		TenantInvitationHandler:     &handler.TenantInvitationHandler{},
+		AuditLogHandler:             &handler.AuditLogHandler{},
+		TenantAPIKeyService:         nil,
 	}
 
-	caps := deploymentCapabilitiesFromRouter(params).Capabilities
-	// IM, embed and public web search are physically removed, so they read as
-	// unsupported in every profile; the rest are still only closed by the
-	// profile switch.
-	for _, key := range []string{
-		"integrations.im", "integrations.embed", "settings.mcp", "settings.websearch", "settings.sandbox",
-	} {
-		if caps[key].Supported {
-			t.Fatalf("knowledge-core must not report %s as supported: %+v", key, caps[key])
-		}
-	}
-	// The knowledge surface and the MCP SERVER entry point stay available even
-	// though the MCP client toolbox is closed.
-	for _, key := range []string{"organizations", "agents", "integrations.mcpserver", "settings.vectorstore", "settings.storage"} {
-		if !caps[key].Supported {
-			t.Fatalf("knowledge-core must keep %s available: %+v", key, caps[key])
-		}
-	}
-
-	// Under the default profile the still-present features come back, so the
-	// closures above are deliberate and not missing wiring. IM, embed and
-	// public web search do not come back in any profile: they are deleted,
-	// not gated.
-	params.Config = &config.Config{}
-	fullCaps := deploymentCapabilitiesFromRouter(params).Capabilities
-	for _, key := range []string{"settings.mcp"} {
-		if !fullCaps[key].Supported {
-			t.Fatalf("the full profile must keep %s available: %+v", key, fullCaps[key])
-		}
-	}
-	for _, key := range []string{
-		"integrations.im", "integrations.embed", "settings.websearch",
+	removed := []string{
+		"integrations.im", "integrations.embed", "settings.websearch", "settings.mcp",
 		"settings.sandbox", "settings.sandbox.docker", "settings.sandbox.host", "settings.sandbox.remote",
-	} {
-		if fullCaps[key].Supported {
-			t.Fatalf("%s is removed from the build and must not be reported as supported: %+v", key, fullCaps[key])
+	}
+	kept := []string{"organizations", "agents", "integrations.mcpserver", "settings.vectorstore", "settings.storage"}
+
+	for _, profile := range []string{config.ProductProfileFull, config.ProductProfileKnowledgeCore} {
+		params.Config = &config.Config{ProductProfile: profile}
+		caps := deploymentCapabilitiesFromRouter(params).Capabilities
+		for _, key := range removed {
+			if caps[key].Supported {
+				t.Fatalf("profile %q must not report removed %s as supported: %+v", profile, key, caps[key])
+			}
+		}
+		for _, key := range kept {
+			if !caps[key].Supported {
+				t.Fatalf("profile %q must keep %s available: %+v", profile, key, caps[key])
+			}
 		}
 	}
 }
 
 // ProductProfile defaults and env handling: the profile must never be empty in
 // a running process, and an unknown value must resolve to full rather than to a
-// profile that does not exist.
+// profile that does not exist. Since every non-core module was physically
+// removed, the profile no longer gates route registration; what remains is the
+// agent-side tool filter (see tools.FilterToolsForCoreProfile).
 func TestProductProfileNormalization(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"", config.ProductProfileFull},
@@ -123,7 +77,7 @@ func TestProductProfileNormalization(t *testing.T) {
 			t.Fatalf("profile %q normalized to %q, want %q", c.in, got, c.want)
 		}
 	}
-	if (&config.Config{ProductProfile: config.ProductProfileKnowledgeCore}).IsKnowledgeCore() != true {
+	if !(&config.Config{ProductProfile: config.ProductProfileKnowledgeCore}).IsKnowledgeCore() {
 		t.Fatal("IsKnowledgeCore must report true for the knowledge-core profile")
 	}
 	if (&config.Config{}).IsKnowledgeCore() {

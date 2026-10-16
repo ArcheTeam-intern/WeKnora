@@ -61,9 +61,6 @@ type RouterParams struct {
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
 	SystemHandler                *handler.SystemHandler
-	MCPServiceHandler            *handler.MCPServiceHandler
-	MCPCredentialsHandler        *handler.MCPCredentialsHandler
-	MCPOAuthHandler              *handler.MCPOAuthHandler
 	VectorStoreHandler           *handler.VectorStoreHandler
 	StorageBackendHandler        *handler.StorageBackendHandler
 	StorageBackendResolver       interfaces.StorageBackendResolver
@@ -100,14 +97,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 		logger.Errorf(context.Background(), "[Router] failed to set trusted proxies: %v", err)
 	}
 
-	// Product profile: the knowledge-core profile closes the non-core
-	// reachability (IM/embed publishing, long-term memory, public web search,
-	// the agent execution sandbox and the third-party MCP toolbox). It gates
-	// ROUTE REGISTRATION only — the knowledge base, parsing, MCP surface,
-	// native QA, wiki and graph keep working, and the providers themselves are
-	// left alone until the physical removal batches. Unset stays "full", so an
-	// existing deployment is unchanged and rollback is a config change.
-	reach := reachabilityFor(params.Config)
+	// Product profile: the non-core modules the knowledge-core profile used to
+	// close at route registration (IM/embed, memory, web search, sandbox,
+	// MCP client toolbox) are now physically removed, so both profiles serve
+	// the same surface. The profile keeps its remaining meaning in the agent
+	// side: the knowledge-core tool filter in agent_service.
 
 	// CORS 中间件应放在最前面。
 	// 注意：通配符 AllowOrigins 下浏览器会拒绝一切带凭据（cookie）的跨域
@@ -296,9 +290,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
-		if reach.MCPClientToolbox {
-			RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
-		}
+		// The third-party MCP client toolbox was physically removed from this
+		// build: no external-service routes, no OAuth, no tool approvals. The
+		// MCP SERVER surface (endpoint table, its auth and /mcp/core) stays.
 		// Public web search was physically removed from this build: no search
 		// routes, no provider-credential routes, no web tools in the agent
 		// runtime. The stored tenants.web_search_config column is left alone

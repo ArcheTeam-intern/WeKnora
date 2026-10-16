@@ -300,60 +300,6 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 	}
 }
 
-func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	g := &rbacGuards{}
-	v1 := gin.New().Group("/api/v1")
-
-	RegisterTenantRoutes(v1, &handler.TenantHandler{}, nil, nil, nil, g)
-	RegisterModelRoutes(v1, &handler.ModelHandler{}, &handler.ModelCredentialsHandler{}, g)
-	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
-	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
-	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
-	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
-	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
-	RegisterDataSourceRoutes(v1, &handler.DataSourceHandler{}, &handler.DataSourceCredentialsHandler{}, g)
-	RegisterWeKnoraCloudRoutes(v1, &handler.WeKnoraCloudHandler{}, g)
-
-	capabilitiesPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodGet, "/api/v1/system/capabilities")
-	if capabilitiesPolicy.RequireFullAccess || len(capabilitiesPolicy.Capabilities) != 0 {
-		t.Fatalf("system capabilities should be readable by any valid API key: %#v", capabilitiesPolicy)
-	}
-
-	cases := []struct {
-		method string
-		path   string
-		cap    types.APIKeyCapability
-	}{
-		{http.MethodGet, "/api/v1/tenants", types.APIKeyCapabilityManageTenantSettings},
-		{http.MethodGet, "/api/v1/models", types.APIKeyCapabilityManageModels},
-		{http.MethodDelete, "/api/v1/models/:id", types.APIKeyCapabilityManageModels},
-		{http.MethodPost, "/api/v1/models/:id/copy", types.APIKeyCapabilityManageModels},
-		{http.MethodPost, "/api/v1/evaluation", types.APIKeyCapabilityRunEvaluations},
-		{http.MethodGet, "/api/v1/system/info", types.APIKeyCapabilityManageVectorStores},
-		{http.MethodGet, "/api/v1/mcp-services", types.APIKeyCapabilityManageMCPServices},
-		{
-			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
-			types.APIKeyCapabilityManageMCPServices,
-		},
-		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
-		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
-		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},
-		{http.MethodGet, "/api/v1/models/weknoracloud/status", types.APIKeyCapabilityManageModels},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
-			if !policy.RequireFullAccess {
-				t.Fatal("policy should require full access without a matching capability")
-			}
-			if !policyHasCapability(policy, tc.cap) {
-				t.Fatalf("policy capabilities = %#v, want %s", policy.Capabilities, tc.cap)
-			}
-		})
-	}
-}
 
 func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)

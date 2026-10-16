@@ -487,16 +487,7 @@ func (e *AgentEngine) runToolCall(
 		}
 	}
 
-	// Keep the provider-visible proxy call intact; resolve a separate target
-	// identity for live events, persisted presentation and tracing.
-	var target *types.ToolCallTarget
-	if len(tc.UnresolvedHandles) == 0 {
-		target = e.toolRegistry.MCPCallTarget(ctx, tc.Function.Name, json.RawMessage(tc.Function.Arguments))
-	}
 	executionName, executionArgs := tc.Function.Name, args
-	if target != nil {
-		executionName, executionArgs = target.Name, target.Args
-	}
 
 	logger.Debugf(ctx, "%s Args: %s", toolTag, tc.Function.Arguments)
 
@@ -535,10 +526,6 @@ func (e *AgentEngine) runToolCall(
 	// Mirror that policy for Langfuse: redact raw arguments to avoid
 	// leaking raw SQL into the observability backend.
 	toolSpanInput := buildToolSpanInput(tc, executionArgs, toolHintSensitiveArgs[executionName])
-	if target != nil {
-		toolSpanInput["mcp_service"] = target.ServiceName
-		toolSpanInput["mcp_tool"] = target.ToolName
-	}
 	argumentResolution, _ := toolSpanInput["argument_resolution"].(string)
 	toolCtx, toolSpan := mgr.StartSpan(ctx, langfuse.SpanOptions{
 		Name:  "agent.tool." + executionName,
@@ -586,7 +573,6 @@ func (e *AgentEngine) runToolCall(
 	duration := time.Since(toolCallStartTime).Milliseconds()
 
 	toolCall := types.ToolCall{
-		Target:           target,
 		ID:               tc.ID,
 		Name:             tc.Function.Name,
 		Args:             args,

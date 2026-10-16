@@ -303,10 +303,6 @@ func (e *AgentEngine) Execute(
 		imgs = imageURLs[0]
 	}
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
-	if e.toolRegistry != nil {
-		e.toolRegistry.RememberMCPHistory(messages)
-		e.toolRegistry.RefreshMCPTools(ctx)
-	}
 
 	// Get tool definitions for function calling
 	tools := e.buildToolsForLLM()
@@ -556,14 +552,6 @@ loop:
 			}
 			return state, ctx.Err()
 		default:
-		}
-
-		// A slow startup, OAuth discovery or explicit refresh may have produced
-		// new definitions since the previous response. Publish them only here,
-		// after all previous tool calls have finished, and rebuild the wire list.
-		if e.toolRegistry != nil {
-			e.toolRegistry.RefreshMCPTools(ctx)
-			tools = e.buildToolsForLLM()
 		}
 
 		// Each iteration runs inside an "agent.round.<N>" Langfuse span.

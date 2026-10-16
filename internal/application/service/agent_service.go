@@ -6,12 +6,10 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/agent"
-	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -90,8 +88,6 @@ type agentService struct {
 	graphRepo            interfaces.RetrieveGraphRepository
 	cfg                  *config.Config
 	modelService         interfaces.ModelService
-	mcpServiceService    interfaces.MCPServiceService
-	mcpManager           *mcp.MCPManager
 	eventBus             *event.EventBus
 	db                   *gorm.DB
 	knowledgeBaseService interfaces.KnowledgeBaseService
@@ -103,7 +99,6 @@ type agentService struct {
 	tenantService        interfaces.TenantService
 	messageService       interfaces.MessageService
 	storageResolver      interfaces.StorageBackendResolver
-	toolApprovalGate     approval.MCPApproval
 }
 
 // NewAgentService creates a new agent service
@@ -114,8 +109,6 @@ func NewAgentService(
 	knowledgeService interfaces.KnowledgeService,
 	fileService interfaces.FileService,
 	chunkService interfaces.ChunkService,
-	mcpServiceService interfaces.MCPServiceService,
-	mcpManager *mcp.MCPManager,
 	eventBus *event.EventBus,
 	db *gorm.DB,
 	duckdb *sql.DB,
@@ -123,7 +116,6 @@ func NewAgentService(
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
 	storageResolver interfaces.StorageBackendResolver,
-	toolApprovalGate approval.MCPApproval,
 	userRepo interfaces.UserRepository,
 	graphRepo interfaces.RetrieveGraphRepository,
 ) interfaces.AgentService {
@@ -136,8 +128,6 @@ func NewAgentService(
 		knowledgeService:     knowledgeService,
 		fileService:          fileService,
 		chunkService:         chunkService,
-		mcpServiceService:    mcpServiceService,
-		mcpManager:           mcpManager,
 		eventBus:             eventBus,
 		db:                   db,
 		duckdb:               duckdb,
@@ -145,7 +135,6 @@ func NewAgentService(
 		tenantService:        tenantService,
 		messageService:       messageService,
 		storageResolver:      storageResolver,
-		toolApprovalGate:     toolApprovalGate,
 	}
 	return svc
 }
@@ -179,11 +168,6 @@ func (s *agentService) CreateAgentEngine(
 	if err := s.registerTools(ctx, toolRegistry, config, rerankModel, chatModel, sessionID); err != nil {
 		return nil, fmt.Errorf("failed to register tools: %w", err)
 	}
-	s.registerMCPTools(ctx, toolRegistry, config)
-
-	// Advertise cached service summaries independently of @mentions. Concrete
-	// tool definitions are published after describe, before the next model request.
-	toolRegistry.PrepareMCPTools(ctx)
 
 	// 3. Resolve knowledge base and selected document metadata
 	kbInfos, selectedDocs := s.resolveKBAndDocInfos(ctx, config)
@@ -201,9 +185,6 @@ func (s *agentService) CreateAgentEngine(
 		systemPromptTemplate,
 	)
 	engine.SetAppConfig(s.cfg)
-	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
-	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
-	engine.SetPinnedMentions(pinnedMCP)
 	engine.SetQuestionOrigin(s.resolveQuestionOriginInfo(ctx, config.QuestionOrigin, config.SearchTargets, kbInfos))
 
 	// Non-vision chat models use the configured VLM to describe tool images.
@@ -224,75 +205,6 @@ func (s *agentService) CreateAgentEngine(
 	return engine, nil
 }
 
-// registerMCPTools registers MCP tools from enabled services for this tenant.
-func (s *agentService) registerMCPTools(
-	ctx context.Context,
-	toolRegistry *tools.ToolRegistry,
-	config *types.AgentConfig,
-) {
-	tenantID := uint64(0)
-	if tid, ok := types.TenantIDFromContext(ctx); ok {
-		tenantID = tid
-	}
-	if tenantID == 0 || s.mcpServiceService == nil || s.mcpManager == nil {
-		return
-	}
-
-	mcpMode := config.MCPSelectionMode
-	if mcpMode == "" {
-		mcpMode = "all"
-	}
-	if mcpMode == "none" {
-		logger.Infof(ctx, "MCP services disabled by agent config (mode: none)")
-		return
-	}
-
-	var mcpServices []*types.MCPService
-	var err error
-
-	if mcpMode == "selected" {
-		if len(config.MCPServices) == 0 {
-			logger.Infof(ctx, "MCP services disabled by agent config (mode: selected, no services)")
-			return
-		}
-		mcpServices, err = s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.MCPServices)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to list selected MCP services: %v", err)
-			return
-		}
-		logger.Infof(ctx, "Using %d selected MCP services from agent config", len(mcpServices))
-	} else {
-		mcpServices, err = s.mcpServiceService.ListMCPServices(ctx, tenantID)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to list MCP services: %v", err)
-			return
-		}
-	}
-
-	enabledServices := make([]*types.MCPService, 0)
-	for _, svc := range mcpServices {
-		if svc != nil && svc.Enabled {
-			enabledServices = append(enabledServices, svc)
-		}
-	}
-	if len(enabledServices) > 0 {
-		metadataService, ok := s.mcpServiceService.(interfaces.MCPMetadataService)
-		if !ok {
-			logger.Warnf(ctx, "MCP metadata storage is unavailable")
-			return
-		}
-		registered, err := tools.RegisterMCPTools(
-			ctx, toolRegistry, enabledServices, s.mcpManager, s.toolApprovalGate,
-			config.MCPAuthWaitTimeout, s.mcpServiceService.GetMCPServiceByID,
-			&tools.MCPMetadataIO{Get: metadataService.GetMCPMetadata, Put: metadataService.PersistMCPMetadata},
-		)
-		if err != nil {
-			logger.Warnf(ctx, "Failed to register MCP directory: %v", err)
-		} else {
-			logger.Infof(ctx, "Registered %d MCP service(s) for on-demand discovery", registered)
-		}
-	}
-}
 
 // resolveKBAndDocInfos loads knowledge base metadata and selected document info for prompt.
 func (s *agentService) resolveKBAndDocInfos(
@@ -902,74 +814,5 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 	return selectedDocs, nil
 }
 
-func (s *agentService) resolvePinnedMCPServiceInfos(
-	ctx context.Context,
-	config *types.AgentConfig,
-) []*agent.PinnedMCPServiceInfo {
-	if len(config.PinnedMCPServiceIDs) == 0 || s.mcpServiceService == nil {
-		return nil
-	}
-	tenantID := uint64(0)
-	if tid, ok := types.TenantIDFromContext(ctx); ok {
-		tenantID = tid
-	}
-	if tenantID == 0 {
-		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)
-	}
 
-	services, err := s.mcpServiceService.ListMCPServicesByIDs(ctx, tenantID, config.PinnedMCPServiceIDs)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to resolve pinned MCP services: %v", err)
-		return fallbackPinnedMCPInfos(config.PinnedMCPServiceIDs)
-	}
-	byID := make(map[string]*types.MCPService, len(services))
-	for _, svc := range services {
-		if svc != nil {
-			byID[svc.ID] = svc
-		}
-	}
-	result := make([]*agent.PinnedMCPServiceInfo, 0, len(config.PinnedMCPServiceIDs))
-	for _, id := range config.PinnedMCPServiceIDs {
-		if id == "" {
-			continue
-		}
-		if svc, ok := byID[id]; ok {
-			result = append(result, &agent.PinnedMCPServiceInfo{
-				ID:          svc.ID,
-				Name:        svc.Name,
-				Description: svc.Description,
-			})
-			continue
-		}
-		result = append(result, &agent.PinnedMCPServiceInfo{ID: id, Name: id})
-	}
-	return result
-}
 
-func (s *agentService) attachPinnedMCPToolNames(
-	registry *tools.ToolRegistry,
-	pinned []*agent.PinnedMCPServiceInfo,
-) {
-	if registry == nil || len(pinned) == 0 {
-		return
-	}
-	byService := tools.MCPToolNamesByServiceID(registry)
-	for _, info := range pinned {
-		if info == nil || info.ID == "" {
-			continue
-		}
-		info.ToolNames = append([]string(nil), byService[info.ID]...)
-		info.Discoverable = registry.HasMCPServer(info.ID)
-	}
-}
-
-func fallbackPinnedMCPInfos(ids []string) []*agent.PinnedMCPServiceInfo {
-	result := make([]*agent.PinnedMCPServiceInfo, 0, len(ids))
-	for _, id := range ids {
-		if id == "" {
-			continue
-		}
-		result = append(result, &agent.PinnedMCPServiceInfo{ID: id, Name: id})
-	}
-	return result
-}
