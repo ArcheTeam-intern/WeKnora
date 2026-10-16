@@ -595,12 +595,15 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
-	// IM integration. The knowledge-core profile does not build the IM
-	// service chain at all: registering it starts outbound platform
+	// IM integration. The service object stays provided in every profile —
+	// unrelated constructors (CustomAgentHandler among them) depend on it, and
+	// dropping the provider makes dig fail to build the whole application even
+	// when nothing requests an IM feature. What the knowledge-core profile
+	// skips is the side effect: registerIMService opens outbound platform
 	// connections, which hiding a menu cannot undo.
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
+	must(container.Provide(imPkg.NewService))
 	if !productProfileIsKnowledgeCore(container) {
-		must(container.Provide(imPkg.NewService))
 		must(container.Invoke(registerIMService))
 	}
 	must(container.Provide(handler.NewIMHandler))
