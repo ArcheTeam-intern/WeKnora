@@ -85,6 +85,12 @@ type Server struct {
 
 	mcp     *server.MCPServer
 	handler http.Handler
+	// The core surface (five aggregated tools at /mcp/core/:endpoint_id) is a
+	// second MCP server sharing every dependency above. Built lazily so a
+	// deployment that never mounts it pays nothing.
+	coreOnce    sync.Once
+	coreMCP     *server.MCPServer
+	coreHandler http.Handler
 }
 
 // NewServer builds the MCP server and its Streamable HTTP transport.

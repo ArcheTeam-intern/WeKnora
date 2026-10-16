@@ -45,8 +45,15 @@ func RegisterMCPServerRoutes(
 	if srv == nil || endpointService == nil {
 		return
 	}
-	h := gin.WrapH(srv.Handler())
 	auth := middleware.MCPEndpointAuth(endpointService, tenantService, identity...)
+	// The core surface comes first: it is a static segment ("core") followed by
+	// the endpoint parameter, and registering it before the parameterised legacy
+	// route keeps gin from capturing "core" as an endpoint id.
+	core := gin.WrapH(srv.CoreHandler())
+	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
+		r.Handle(method, handler.MCPEndpointPath+"core/:endpoint_id", auth, core)
+	}
+	h := gin.WrapH(srv.Handler())
 	for _, method := range []string{http.MethodPost, http.MethodGet, http.MethodDelete} {
 		r.Handle(method, handler.MCPEndpointPath+":endpoint_id", auth, h)
 	}
