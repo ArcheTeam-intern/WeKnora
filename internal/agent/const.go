@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
-	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -36,12 +34,9 @@ const (
 	defaultLLMStallTimeout = 120 * time.Second
 
 	// defaultToolExecTimeout is the default maximum time for a single tool execution.
-	// Prevents long-running tools (web_fetch, database_query) from hanging indefinitely.
+	// Prevents long-running tools (database_query, data_analysis) from hanging
+	// indefinitely.
 	defaultToolExecTimeout = 60 * time.Second
-	// shellExecToolTimeout is slightly longer than shell_exec's own hard
-	// 600-second command timeout so the tool can return a structured timeout
-	// result instead of being cancelled first by the generic agent wrapper.
-	shellExecToolTimeout = 10*time.Minute + 5*time.Second
 
 	// maxLLMRetries is the maximum number of retries for transient LLM errors.
 	maxLLMRetries = 2
@@ -82,18 +77,10 @@ const truncatedAnswerFallback = "Sorry, this answer kept hitting the model's per
 // and the round that tripped it produced no text.
 const stalledAnswerFallback = "I'm sorry, I was unable to generate a response. Please try again."
 
-func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
-	if toolName == "local_browser" && len(arguments) > 0 {
-		var input struct {
-			Method string `json:"method"`
-		}
-		if json.Unmarshal([]byte(arguments[0]), &input) == nil && browserskill.IsHumanStep(input.Method) {
-			return browserskill.HumanStepTimeout
-		}
-	}
-	if toolName == "shell_exec" {
-		return shellExecToolTimeout
-	}
+// toolExecutionTimeout returns the wall-clock cap for one tool call. Shell and
+// browser tools are retired with the execution sandbox, so every tool gets the
+// default cap.
+func toolExecutionTimeout(_ string, _ ...string) time.Duration {
 	return defaultToolExecTimeout
 }
 
@@ -191,12 +178,10 @@ func (e *AgentEngine) getCompletionTokenBudget() int {
 
 func completionTokenBudgetFor(cfg *types.AgentConfig) int {
 	configured := 0
-	sandboxID := ""
 	if cfg != nil {
 		configured = cfg.MaxCompletionTokens
-		sandboxID = cfg.SandboxConfigID
 	}
-	return types.AgentRoundMaxCompletionTokensFor(configured, sandboxID)
+	return types.AgentRoundMaxCompletionTokens(configured)
 }
 
 // contextReserveTokens is the part of the window that history may not occupy,

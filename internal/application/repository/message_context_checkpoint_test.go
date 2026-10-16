@@ -7,7 +7,35 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+// newMessageRepositoryForForkTest opens an in-memory sqlite repository for the
+// checkpoint tests. It used to live beside the fork tests; both the fork
+// surface and those tests are gone, the helper is not.
+func newMessageRepositoryForForkTest(t *testing.T) (*messageRepository, *gorm.DB) {
+	t.Helper()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.Message{}))
+	return &messageRepository{db: db}, db
+}
+
+func seedMessage(t *testing.T, db *gorm.DB, id, sessionID, role string, at time.Time) {
+	t.Helper()
+	require.NoError(t, db.Session(&gorm.Session{SkipHooks: true}).Create(&types.Message{
+		ID: id, SessionID: sessionID, Role: role, Content: "m-" + id, CreatedAt: at,
+	}).Error)
+}
+
+func messageIDs(messages []*types.Message) []string {
+	ids := make([]string, 0, len(messages))
+	for _, m := range messages {
+		ids = append(ids, m.ID)
+	}
+	return ids
+}
 
 func TestGetLatestContextCheckpointReturnsTheNewestInTheSession(t *testing.T) {
 	repo, db := newMessageRepositoryForForkTest(t)

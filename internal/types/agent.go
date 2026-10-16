@@ -37,61 +37,28 @@ func AgentMaxContextTokens(configured, modelContextWindow int) int {
 // tool-call JSON.
 const DefaultSmartReasoningMaxCompletionTokens = 4096
 
-// DefaultAgentMaxCompletionTokens is the per-round budget when the agent
-// can write or edit sandbox files. Those tool calls carry the file body in
-// JSON; a 4096 cap truncates mid-stream (finish_reason=length).
-const DefaultAgentMaxCompletionTokens = 24576
-
 // DefaultQuickAnswerMaxCompletionTokens is the RAG answer budget.
 const DefaultQuickAnswerMaxCompletionTokens = 2048
 
-// NeedsSandboxWriteCompletionBudget reports whether this agent may register
-// write_sandbox_file / edit_sandbox_file. Those tools follow the bound
-// sandbox, not the allowed_tools checklist.
-func NeedsSandboxWriteCompletionBudget(sandboxConfigID string) bool {
-	return strings.TrimSpace(sandboxConfigID) != ""
-}
-
 // DefaultMaxCompletionTokens is the unset-config default for one agent:
-// quick-answer 2048, smart-reasoning 4096, smart-reasoning with a sandbox 24576.
-func DefaultMaxCompletionTokens(agentMode, sandboxConfigID string) int {
+// quick-answer 2048, smart-reasoning 4096. The sandbox write-file extension
+// (24576) went with the execution sandbox: no tool carries a file body in its
+// JSON arguments any more.
+func DefaultMaxCompletionTokens(agentMode string) int {
 	if agentMode == AgentModeSmartReasoning {
-		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) {
-			return DefaultAgentMaxCompletionTokens
-		}
 		return DefaultSmartReasoningMaxCompletionTokens
 	}
 	return DefaultQuickAnswerMaxCompletionTokens
 }
 
 // AgentRoundMaxCompletionTokens returns the completion-token budget for one
-// ReAct LLM round when no sandbox is bound. Zero (unset) uses
-// DefaultSmartReasoningMaxCompletionTokens. An explicit configured value is
-// honored as-is.
+// ReAct LLM round. Zero (unset) uses DefaultSmartReasoningMaxCompletionTokens.
+// An explicit configured value is honored as-is.
 func AgentRoundMaxCompletionTokens(configured int) int {
-	return AgentRoundMaxCompletionTokensFor(configured, "")
-}
-
-// MinSandboxWriteCompletionTokens is the floor applied to an explicitly
-// configured per-round budget when a sandbox is bound. write_sandbox_file and
-// edit_sandbox_file carry the whole file body inside the tool-call JSON, so a
-// cap sized for ordinary chat truncates the arguments mid-string on every
-// attempt — the agent then burns its rounds rewriting a file it can never
-// finish. Below this the setting is not a preference, it is a deadlock.
-const MinSandboxWriteCompletionTokens = 8192
-
-// AgentRoundMaxCompletionTokensFor is AgentRoundMaxCompletionTokens with
-// the agent's sandbox: unset + sandbox uses the large write-file budget, and a
-// configured value too small to hold a file write is raised to the floor.
-func AgentRoundMaxCompletionTokensFor(configured int, sandboxConfigID string) int {
 	if configured > 0 {
-		if NeedsSandboxWriteCompletionBudget(sandboxConfigID) &&
-			configured < MinSandboxWriteCompletionTokens {
-			return MinSandboxWriteCompletionTokens
-		}
 		return configured
 	}
-	return DefaultMaxCompletionTokens(AgentModeSmartReasoning, sandboxConfigID)
+	return DefaultMaxCompletionTokens(AgentModeSmartReasoning)
 }
 
 // UnlimitedMaxIterations is the stored MaxIterations value meaning the ReAct
@@ -147,20 +114,11 @@ type AgentConfig struct {
 	// Skills configuration (Progressive Disclosure pattern)
 	SkillsEnabled bool     `json:"skills_enabled"` // Whether skills are enabled (default: false)
 	SkillDirs     []string `json:"skill_dirs"`     // Directories to search for skills
-	AllowedSkills []string `json:"allowed_skills"` // Skill names whitelist (empty = allow all)
-
 	// Runtime-only fields (not persisted)
 	ChatModelSupportsVision bool   `json:"-"` // Resolved model capability, never supplied by tool input.
 	VLMModelID              string `json:"-"` // VLM model ID for tool images, resolved from CustomAgent config.
-	SandboxConfigID         string `json:"-"` // Workspace sandbox config ID for skill execution.
-	// TenantSkills are the skills installed into the selected sandbox config's
-	// snapshot image, already narrowed to the ones this run can actually
-	// invoke. Runtime only: it is derived per turn from the config the agent
-	// selected, never stored on the agent record.
-	TenantSkills []*TenantSkillEntity `json:"-"`
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
-	PinnedSkillNames    []string `json:"-"`
 	// QuestionOrigin is the knowledge source of a suggested question the user
 	// picked, already checked to be inside KnowledgeBases (runtime only;
 	// rendered into runtime_context as a retrieval hint).

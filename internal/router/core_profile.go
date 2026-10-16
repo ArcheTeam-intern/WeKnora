@@ -18,12 +18,6 @@ type coreProfileReachability struct {
 	// OAuth and approvals). The MCP SERVER surface — the main product's entry
 	// point — is not part of this switch and stays reachable in both profiles.
 	MCPClientToolbox bool
-	// ExecutionSandbox covers the agent execution sandbox: terminal, desktop,
-	// local browser and the sandbox/skill configuration API.
-	ExecutionSandbox bool
-	// Skills covers the skill management API. Skill execution depends on the
-	// sandbox, so the profile keeps them together.
-	Skills bool
 }
 
 // reachabilityFor maps a configuration onto the reachable route groups. An
@@ -36,7 +30,5 @@ func reachabilityFor(cfg *config.Config) coreProfileReachability {
 	}
 	return coreProfileReachability{
 		MCPClientToolbox: true,
-		ExecutionSandbox: true,
-		Skills:           true,
 	}
 }

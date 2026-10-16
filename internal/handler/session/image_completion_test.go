@@ -13,6 +13,19 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// completionEventRecorder captures stream events so completion-order tests can
+// assert what the client saw and when. It used to live next to the artifact
+// completion tests; the artifact surface is gone, the recorder is still handy.
+type completionEventRecorder struct {
+	interfaces.StreamManager
+	events []interfaces.StreamEvent
+}
+
+func (s *completionEventRecorder) AppendEvent(_ context.Context, _, _ string, e interfaces.StreamEvent) error {
+	s.events = append(s.events, e)
+	return nil
+}
+
 type imageCompletionMessages struct {
 	interfaces.MessageService
 	saved      *types.Message

@@ -16,150 +16,20 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
-// A shared agent invokes skills and MCP services that live in ITS OWNER's
-// workspace. The @ pickers used to read the caller's own workspace, so they
-// came up empty (skills, and MCP in "selected" mode) or offered the caller's
+// A shared agent invokes MCP services that live in ITS OWNER's workspace. The @
+// picker used to read the caller's own workspace, so it offered the caller's
 // own services under "all", which the backend then dropped from the mention.
 const lenderWorkspace = uint64(84)
+
+// testSkillTenantID was the caller workspace of the removed skill picker; the
+// MCP picker tests authenticate as the same borrower.
+const testSkillTenantID = uint64(7)
 
 func pickerAuth(c *gin.Context) {
 	c.Set(types.TenantIDContextKey.String(), testSkillTenantID)
 	c.Set(types.UserIDContextKey.String(), "user-1")
 	c.Next()
 }
-
-func sharedSkillAgent(mode string, selected ...string) *types.CustomAgent {
-	return &types.CustomAgent{
-		ID: "agent-1", TenantID: lenderWorkspace,
-		Config: types.CustomAgentConfig{
-			SandboxConfigID:     "cfg-of-lender",
-			SkillsSelectionMode: mode,
-			SelectedSkills:      selected,
-		},
-	}
-}
-
-func newPickerSkillRouter(h *SkillHandler) *gin.Engine {
-	gin.SetMode(gin.TestMode)
-	r := gin.New()
-	r.Use(middleware.ErrorHandler())
-	r.Use(pickerAuth)
-	r.GET("/skills", h.ListSkills)
-	return r
-}
-
-type skillPickerBody struct {
-	Success         bool                `json:"success"`
-	Data            []SkillInfoResponse `json:"data"`
-	SkillsAvailable bool                `json:"skills_available"`
-}
-
-func getSkills(t *testing.T, r *gin.Engine, query string) (int, skillPickerBody) {
-	t.Helper()
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/skills"+query, nil))
-	var body skillPickerBody
-	if w.Code == http.StatusOK {
-		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
-	}
-	return w.Code, body
-}
-
-func TestListSkillsReadsASharedAgentsOwnWorkspace(t *testing.T) {
-	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{
-		{Name: "ppt-generator", Description: "make ppt"},
-		{Name: "xlsx", Description: "spreadsheets"},
-	}}
-	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-	code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
-
-	require.Equal(t, http.StatusOK, code)
-	require.True(t, body.SkillsAvailable)
-	require.Len(t, body.Data, 2)
-	require.Equal(t, lenderWorkspace, lister.tenantID,
-		"installed skills are looked up where the agent runs")
-	require.Equal(t, "cfg-of-lender", lister.configID)
-	require.Equal(t, testSkillTenantID, agents.caller)
-	require.Equal(t, lenderWorkspace, agents.source)
-}
-
-// The config comes from the agent, never from the query string: otherwise a
-// borrower could name any config id in the owner's workspace and enumerate the
-// skills installed on it.
-func TestListSkillsIgnoresTheQueryConfigForASharedAgent(t *testing.T) {
-	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
-	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-	code, _ := getSkills(t, router,
-		"?agent_id=agent-1&agent_source_tenant_id=84&sandbox_config_id=cfg-somebody-elses")
-
-	require.Equal(t, http.StatusOK, code)
-	require.Equal(t, "cfg-of-lender", lister.configID)
-}
-
-func TestListSkillsNarrowsToASharedAgentsSelection(t *testing.T) {
-	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{
-		{Name: "ppt-generator"}, {Name: "xlsx"}, {Name: "internal-only"},
-	}}
-	agents := &scopedAgentStub{agent: sharedSkillAgent("selected", "xlsx")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-	code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
-
-	require.Equal(t, http.StatusOK, code)
-	require.Len(t, body.Data, 1)
-	require.Equal(t, "xlsx", body.Data[0].Name,
-		"a borrower only sees the skills the agent was configured with")
-}
-
-// An owner who turned skills off must not have their skill inventory listed to
-// borrowers, so the lookup does not even run.
-func TestListSkillsStaysEmptyWhenASharedAgentDisabledSkills(t *testing.T) {
-	for _, mode := range []string{"", "none", "nonsense"} {
-		lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
-		agents := &scopedAgentStub{agent: sharedSkillAgent(mode)}
-		router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-		code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
-
-		require.Equal(t, http.StatusOK, code, mode)
-		require.Empty(t, body.Data, mode)
-		require.False(t, body.SkillsAvailable, mode)
-		require.Zero(t, lister.tenantID, "skills mode %q must not reach the owner's inventory", mode)
-	}
-}
-
-// Without a source workspace the request is an ordinary own-agent one and must
-// keep reading the caller's own workspace, agent_id or not.
-func TestListSkillsKeepsTheOwnWorkspacePathUnchanged(t *testing.T) {
-	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
-	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-	code, body := getSkills(t, router, "?agent_id=agent-1&sandbox_config_id=cfg-mine")
-
-	require.Equal(t, http.StatusOK, code)
-	require.Len(t, body.Data, 1)
-	require.Equal(t, testSkillTenantID, lister.tenantID)
-	require.Equal(t, "cfg-mine", lister.configID)
-	require.Zero(t, agents.caller, "no share lookup for an own agent")
-}
-
-func TestListSkillsRefusesAnUnreachableShare(t *testing.T) {
-	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
-	agents := &scopedAgentStub{agent: nil}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
-
-	code, _ := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
-
-	require.Equal(t, http.StatusForbidden, code)
-	require.Zero(t, lister.tenantID)
-}
-
-// ---- @MCP ----
 
 type pickerMCPStub struct {
 	interfaces.MCPServiceService

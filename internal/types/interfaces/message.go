@@ -46,25 +46,6 @@ type MessageService interface {
 
 	// DeleteSessionKnowledge deletes all Knowledge entries for messages in a session from the chat history KB.
 	DeleteSessionKnowledge(ctx context.Context, sessionID string)
-
-	// GetSessionArtifacts returns every skill-produced MessageArtifact
-	// recorded against any assistant message of the session. Used to power
-	// the frontend "download files generated in this session" drawer and
-	// to clean up storage blobs on session deletion.
-	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
-
-	// ListArtifactLibrary lists the latest version of every artifact across
-	// the caller's sessions, newest first. Tenant and owner scope come from
-	// ctx; query.TenantID and query.UserID are overwritten.
-	ListArtifactLibrary(ctx context.Context, query *types.ArtifactLibraryQuery) (*types.PageResult, error)
-
-	// DeleteSessionArtifact tombstones a skill-generated file (and optionally
-	// every version of it) in a session the caller owns, and reports the blobs
-	// whose bytes the caller should now reclaim. Shared-agent read access does
-	// not carry delete rights.
-	DeleteSessionArtifact(
-		ctx context.Context, req *types.ArtifactDeleteRequest,
-	) (*types.ArtifactDeleteResult, error)
 }
 
 // MessageRepository defines the message repository interface
@@ -136,45 +117,7 @@ type MessageRepository interface {
 	GetKnowledgeIDsBySessionID(ctx context.Context, sessionID string) ([]string, error)
 	// UpdateMessageKnowledgeID updates the knowledge_id field for a message
 	UpdateMessageKnowledgeID(ctx context.Context, messageID string, knowledgeID string) error
-	// GetSessionArtifacts returns every skill-produced MessageArtifact recorded
-	// against any assistant message of the session, in creation order. The
-	// implementation only projects the artifacts JSONB column, so it stays
-	// cheap even for long conversations. Empty slice + nil error means the
-	// session has no artifacts yet (never an error).
-	GetSessionArtifacts(ctx context.Context, sessionID string) (types.MessageArtifacts, error)
-	// ListArtifactLibrary returns one page of the latest artifact versions in
-	// the sessions query.TenantID / query.UserID can see, plus the total.
-	ListArtifactLibrary(
-		ctx context.Context, query *types.ArtifactLibraryQuery,
-	) ([]*types.ArtifactLibraryItem, int64, error)
-	// FindSessionArtifact returns the live artifact row addressed by
-	// (session, message, position), or nil when there is none. A tombstoned
-	// row reads as absent.
-	FindSessionArtifact(
-		ctx context.Context, sessionID, messageID string, position int,
-	) (*types.MessageArtifactRecord, error)
-	// FindSessionArtifactVersions returns every live row of the session sharing
-	// sourcePath — the regenerations the artifact library folds into one entry.
-	// An empty sourcePath yields nothing: such artifacts have no version group.
-	FindSessionArtifactVersions(
-		ctx context.Context, sessionID, sourcePath string,
-	) ([]types.MessageArtifactRecord, error)
-	// SoftDeleteSessionArtifacts tombstones the referenced rows and returns the
-	// subset it marked, leaving out rows another caller already tombstoned.
-	SoftDeleteSessionArtifacts(
-		ctx context.Context, sessionID string, refs []types.ArtifactRef, at time.Time,
-	) ([]types.ArtifactRef, error)
-	// CountLiveArtifactsByURL counts undeleted artifact rows pointing at a
-	// stored object, across every session. Callers use it as the last guard
-	// before reclaiming bytes that a fork copy, a legacy raw path or a later
-	// re-attachment may still need.
-	CountLiveArtifactsByURL(ctx context.Context, url string) (int64, error)
 	// GetSessionAttachments returns every user-uploaded attachment recorded in
 	// the session. Implementations should project only the attachments column.
 	GetSessionAttachments(ctx context.Context, sessionID string) (types.MessageAttachments, error)
-	// RewriteSandboxCheckpoints replaces SandboxID on every copied checkpoint
-	// in the session that still points at oldSandboxID, keeping CommitSHA and
-	// CommittedAt. Used after a forked sandbox boots so a later fork-of-fork
-	// compares against the live handle rather than the parent's sandbox.
-	RewriteSandboxCheckpoints(ctx context.Context, sessionID, oldSandboxID, newSandboxID string) error
 }

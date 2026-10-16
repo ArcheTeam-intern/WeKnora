@@ -124,7 +124,7 @@ func (s *messageService) GetMessage(ctx context.Context, sessionID string, messa
 	}
 
 	logger.Info(ctx, "Message retrieved successfully")
-	return s.clarifyReadArtifactVersions(ctx, sessionID, []*types.Message{message})[0], nil
+	return message, nil
 }
 
 // GetMessagesBySession retrieves paginated messages for a specific session
@@ -154,7 +154,7 @@ func (s *messageService) GetMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages successfully", len(messages))
-	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
+	return messages, nil
 }
 
 // GetRecentMessagesBySession retrieves the most recent messages from a session
@@ -187,7 +187,7 @@ func (s *messageService) GetRecentMessagesBySession(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d recent messages successfully", len(messages))
-	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
+	return messages, nil
 }
 
 // GetMessagesBySessionBeforeTime retrieves messages sent before a specific time
@@ -221,7 +221,7 @@ func (s *messageService) GetMessagesBySessionBeforeTime(ctx context.Context,
 	}
 
 	logger.Infof(ctx, "Retrieved %d messages before time successfully", len(messages))
-	return s.clarifyReadArtifactVersions(ctx, sessionID, messages), nil
+	return messages, nil
 }
 
 // UpdateMessage updates an existing message's content or metadata
@@ -367,55 +367,9 @@ func (s *messageService) DeleteSessionKnowledge(ctx context.Context, sessionID s
 	}
 }
 
-// GetSessionArtifacts returns every skill-produced artifact recorded against
-// any assistant message of the session. Thin pass-through to the repository:
-// the collector and session cleanup both need it, and centralising it here
-// keeps tests able to inject a stub MessageService.
-func (s *messageService) GetSessionArtifacts(
-	ctx context.Context, sessionID string,
-) (types.MessageArtifacts, error) {
-	if sessionID == "" {
-		return types.MessageArtifacts{}, nil
-	}
-	return s.messageRepo.GetSessionArtifacts(ctx, sessionID)
-}
-
 // artifactLibraryMaxPageSize caps one library page; the page renders a card
 // per row, so larger pages only cost bandwidth.
 const artifactLibraryMaxPageSize = 100
-
-// ListArtifactLibrary lists the latest version of every artifact in the
-// sessions the caller can see. Scope follows ListSessions for its default
-// (unfiltered) view: the caller's own sessions plus legacy tenant-level ones.
-func (s *messageService) ListArtifactLibrary(
-	ctx context.Context, query *types.ArtifactLibraryQuery,
-) (*types.PageResult, error) {
-	if query == nil {
-		query = &types.ArtifactLibraryQuery{}
-	}
-	query.TenantID = types.MustTenantIDFromContext(ctx)
-	query.UserID = types.SessionOwnerIDFromContext(ctx)
-	pagination := &types.Pagination{Page: query.Page, PageSize: query.PageSize}
-	query.Page = pagination.GetPage()
-	query.PageSize = min(pagination.GetPageSize(), artifactLibraryMaxPageSize)
-	pagination.PageSize = query.PageSize
-	query.FileTypes = normalizeArtifactFileTypes(query.FileTypes)
-
-	items, total, err := s.messageRepo.ListArtifactLibrary(ctx, query)
-	if err != nil {
-		logger.ErrorWithFields(ctx, err, map[string]interface{}{
-			"tenant_id": query.TenantID,
-			"user_id":   query.UserID,
-		})
-		return nil, err
-	}
-	for _, item := range items {
-		if handle, ok := types.ParseResourcePath(item.URL); ok {
-			item.Handle = types.BuildResourcePath(handle)
-		}
-	}
-	return types.NewPageResult(total, pagination, items), nil
-}
 
 // normalizeArtifactFileTypes lower-cases extensions and adds the leading dot
 // the collector stores ("pdf" and ".PDF" both become ".pdf").

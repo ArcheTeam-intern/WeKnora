@@ -13,7 +13,6 @@ import (
 	ginSwagger "github.com/swaggo/gin-swagger"
 	"go.uber.org/dig"
 
-	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -58,9 +57,6 @@ type RouterParams struct {
 	MessageSuggestionHandler     *handler.MessageSuggestionHandler
 	ModelHandler                 *handler.ModelHandler
 	ModelCredentialsHandler      *handler.ModelCredentialsHandler
-	SandboxConfigHandler         *handler.SandboxConfigHandler
-	SandboxSkillHandler          *handler.SandboxSkillHandler
-	MeEnvVarHandler              *handler.MeEnvVarHandler
 	EvaluationHandler            *handler.EvaluationHandler
 	AuthHandler                  *handler.AuthHandler
 	InitializationHandler        *handler.InitializationHandler
@@ -76,7 +72,6 @@ type RouterParams struct {
 	TagHandler                   *handler.TagHandler
 	CustomAgentHandler           *handler.CustomAgentHandler
 	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
-	SkillHandler                 *handler.SkillHandler
 	OrganizationHandler          *handler.OrganizationHandler
 	MCPEndpointHandler           *handler.MCPEndpointHandler
 	MCPEndpointService           interfaces.MCPEndpointService
@@ -86,7 +81,6 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
-	HostSandbox                  service.HostSandboxManager
 }
 
 // NewRouter 创建新的路由
@@ -196,17 +190,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// WeKnora authentication headers.
 	serveResourceGrants(r, params.ResourceCatalog, params.TenantService, params.FileService, params.StorageBackendResolver)
 
-	// Sandbox terminal WebSocket (self-authenticated via a short-lived
-	// query ticket — see RegisterSandboxTerminalRoutes; browsers cannot set
-	// auth headers on the WS handshake, so this must precede the global Auth
-	// middleware). The ticket is minted by an authenticated POST.
-	if reach.ExecutionSandbox {
-		RegisterSandboxTerminalRoutes(r, params.SessionHandler)
-		RegisterSandboxDesktopRoutes(r, params.SessionHandler)
-		r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
-		r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
-		r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
-	}
+	// The agent execution sandbox is retired: no terminal/desktop WebSocket
+	// routes, no local-browser extension endpoints. Those routes used to sit
+	// before the auth middleware because a WS handshake cannot carry headers;
+	// with them gone the block is gone too.
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -304,13 +291,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
-		if reach.ExecutionSandbox {
-			RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
-			RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
-			v1.GET("/me/browser", params.SessionHandler.BrowserSkillAccount)
-			v1.GET("/me/browser/extension", params.SessionHandler.BrowserSkillDownload)
-			v1.POST("/me/browser", params.SessionHandler.BrowserSkillAccount)
-		}
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
@@ -328,9 +308,9 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
-		if reach.Skills {
-			RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
-		}
+		// Skill installation and the sandbox/skill settings API were removed
+		// with the agent execution sandbox: no skill catalog, no install, no
+		// per-user env vars for sandboxed runs.
 		// IM channel management and embed channel management routes are gone
 		// with their implementations.
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)

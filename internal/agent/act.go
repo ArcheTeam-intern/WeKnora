@@ -511,7 +511,7 @@ func (e *AgentEngine) runToolCall(
 		Data: event.AgentToolCallData{
 			ToolCallID: tc.ID,
 			ToolName:   executionName,
-			Arguments:  agenttools.SanitizeSandboxFileCallArgs(executionName, executionArgs),
+			Arguments:  executionArgs,
 			Iteration:  iteration,
 			Hint:       toolHint,
 		},

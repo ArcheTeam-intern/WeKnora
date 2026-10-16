@@ -682,7 +682,7 @@ func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
 
 // buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
 // Tool names are not listed here — they are already in the function-calling schema.
-func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) string {
+func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo) string {
 	var lines []string
 	for _, svc := range mcpServices {
 		if svc == nil {
@@ -721,16 +721,6 @@ func buildMustUseBlock(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkil
 		lines = append(lines, fmt.Sprintf(
 			"Must use MCP tools whose names start with %s (@%s) to answer the question below.",
 			prefix, display,
-		))
-	}
-	for _, skill := range skills {
-		if skill == nil || skill.Name == "" {
-			continue
-		}
-		name := sanitizeMustUseField(skill.Name)
-		lines = append(lines, fmt.Sprintf(
-			"Must call read_file(path=%q) for @Skill %q before answering.",
-			"skill://"+name+"/SKILL.md", name,
 		))
 	}
 	if len(lines) == 0 {
@@ -804,7 +794,7 @@ func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin)
 	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
-	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
+	mustUse := buildMustUseBlock(e.pinnedMCPServices)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
 }
 

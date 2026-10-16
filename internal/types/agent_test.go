@@ -86,29 +86,16 @@ func TestAgentRoundMaxCompletionTokens(t *testing.T) {
 	if got := AgentRoundMaxCompletionTokens(0); got != DefaultSmartReasoningMaxCompletionTokens {
 		t.Fatalf("zero configured = %d, want %d", got, DefaultSmartReasoningMaxCompletionTokens)
 	}
-	if got := AgentRoundMaxCompletionTokensFor(0, "cfg-a"); got != DefaultAgentMaxCompletionTokens {
-		t.Fatalf("unset with sandbox = %d, want %d", got, DefaultAgentMaxCompletionTokens)
-	}
 	if got := AgentRoundMaxCompletionTokens(2048); got != 2048 {
 		t.Fatalf("explicit 2048 = %d, want 2048", got)
 	}
 	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
 		t.Fatalf("explicit 4096 = %d, want 4096", got)
 	}
-	// With a sandbox bound, a cap this small cannot hold a file body inside the
-	// tool-call JSON, so every write truncates mid-string and the agent can
-	// never finish. The floor makes the setting survivable rather than a
-	// deadlock.
-	if got := AgentRoundMaxCompletionTokensFor(4096, "cfg-a"); got != MinSandboxWriteCompletionTokens {
-		t.Fatalf("explicit 4096 with sandbox = %d, want floor %d", got, MinSandboxWriteCompletionTokens)
-	}
-	if got := AgentRoundMaxCompletionTokensFor(32768, "cfg-a"); got != 32768 {
-		t.Fatalf("explicit value above the floor must be honored, got %d", got)
-	}
-	if got := AgentRoundMaxCompletionTokens(4096); got != 4096 {
-		t.Fatalf("no sandbox means no floor, got %d", got)
-	}
+	// The sandbox write-file floor (24576 with a bound sandbox, 8192 for an
+	// explicit small cap) went with the execution sandbox: no tool carries a
+	// file body in its JSON arguments any more.
 	if got := AgentRoundMaxCompletionTokens(64000); got != 64000 {
-		t.Fatalf("explicit high value = %d, want 64000", got)
+		t.Fatalf("explicit 64000 = %d, want 64000", got)
 	}
 }

@@ -12,6 +12,16 @@ import (
 	"gorm.io/gorm"
 )
 
+// deleteForkMessageRepo stubs the message repository for session deletion
+// tests. It was defined in the deleted fork tests.
+type deleteForkMessageRepo struct {
+	interfaces.MessageRepository
+}
+
+func (deleteForkMessageRepo) GetKnowledgeIDsBySessionID(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+
 func TestSessionManagementScope(t *testing.T) {
 	operations := []string{"update", "delete", "batch_delete"}
 	callers := []struct {

@@ -224,12 +224,6 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 		if name == ToolCallMCPTool {
 			errMsg += mcpCallArgumentsHint
 		}
-		if name == ToolWriteSandboxFile {
-			errMsg += writeSandboxMissingFieldHint
-		}
-		if name == ToolEditSandboxFile {
-			errMsg += editSandboxMissingFieldHint
-		}
 		common.PipelineWarn(ctx, "AgentTool", "validation_failed", map[string]interface{}{
 			"tool":   name,
 			"errors": errMsg,

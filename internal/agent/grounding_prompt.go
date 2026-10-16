@@ -28,9 +28,6 @@ func formatGroundingGuidance(names []string) string {
 		"evidence before supplying content to a generator; no extra lookup is needed if the supplied " +
 		"material already supports that content.\n")
 
-	if slices.Contains(names, "local_browser") {
-		b.WriteString(localBrowserSourcePrompt)
-	}
 	var kbTools []string
 	for _, name := range []string{
 		tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolListDocuments,

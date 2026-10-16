@@ -16,7 +16,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -707,21 +706,6 @@ func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
-func TestBuildSystemPromptUsesHostWorkspace(t *testing.T) {
-	engine := newTestEngine(t, nil)
-	registry := agenttools.NewToolRegistry()
-	registry.RegisterTool(newCountingTool("shell_exec"))
-	engine.toolRegistry = registry
-	engine.SetWorkspaceLayout(sandbox.WorkspaceLayout{
-		Origin: sandbox.WorkspaceOriginHost,
-		Root:   "/Users/dev/My Project",
-	})
-	prompt := engine.buildSystemPrompt(context.Background())
-	require.Contains(t, prompt, "/Users/dev/My Project")
-	require.NotContains(t, prompt, "Session workspace: /workspace")
-	require.NotContains(t, prompt, "There is no /workspace")
-}
-
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
 	t.Helper()
 	cfg := &types.AgentConfig{
@@ -907,23 +891,6 @@ func TestStreamThinkingToEventBus_SetsCompletionTokenBudget(t *testing.T) {
 		require.Len(t, mock.opts, 1)
 		assert.Zero(t, mock.opts[0].MaxTokens)
 		assert.Equal(t, types.DefaultSmartReasoningMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
-	})
-
-	t.Run("defaults to the write-file budget when a sandbox is bound", func(t *testing.T) {
-		mock := &mockChat{
-			responses: []mockResponse{
-				{chunks: []types.StreamResponse{{Content: "ok", Done: true, FinishReason: "stop"}}},
-			},
-		}
-		engine := newTestEngine(t, mock, func(cfg *types.AgentConfig) {
-			cfg.SandboxConfigID = "cfg-a"
-		})
-		_, err := engine.streamThinkingToEventBus(context.Background(),
-			[]chat.Message{{Role: "user", Content: "test"}}, nil, 0, "sess-1")
-		require.NoError(t, err)
-		require.Len(t, mock.opts, 1)
-		assert.Zero(t, mock.opts[0].MaxTokens)
-		assert.Equal(t, types.DefaultAgentMaxCompletionTokens, mock.opts[0].MaxCompletionTokens)
 	})
 
 	t.Run("preserves explicit higher budget", func(t *testing.T) {

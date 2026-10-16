@@ -20,7 +20,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -275,10 +274,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		request.SummaryModelID = ""
 	}
 
-	if request.LocalBrowserEnabled && (customAgent == nil || !customAgent.IsAgentMode()) {
-		return nil, nil, errors.NewBadRequestError("Local browser requires an agent with tool calling enabled")
-	}
-
 	// Log merge results for debugging
 	logger.Infof(ctx, "[%s] @mention merge: request.KnowledgeBaseIDs=%v, request.MentionedItems=%d, merged kbIDs=%v, merged knowledgeIDs=%v",
 		logPrefix, request.KnowledgeBaseIDs, len(request.MentionedItems), kbIDs, knowledgeIDs)
@@ -422,7 +417,6 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 	tagScopes := mergeTagScopesFromRequestIDs(mentionScopes, requestTagIDs, secutils.SanitizeForLogArray(kbIDs))
 	tagIDs := dedupRequestStrings(append(request.TagIDs, mentionedIDsByType(request.MentionedItems, "tag")...))
 	mcpServiceIDs := dedupRequestStrings(append(request.MCPServiceIDs, mentionedIDsByType(request.MentionedItems, "mcp")...))
-	skillNames := dedupRequestStrings(append(request.SkillNames, mentionedIDsByType(request.MentionedItems, "skill")...))
 	executionContext, agentID, agentTenantID, modelID := buildMessageExecutionContext(
 		ctx,
 		customAgent,
@@ -433,11 +427,8 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		secutils.SanitizeForLogArray(tagIDs),
 		tagScopes,
 		secutils.SanitizeForLogArray(mcpServiceIDs),
-		secutils.SanitizeForLogArray(skillNames),
 		request.WebSearchEnabled,
 	)
-
-	executionContext.LocalBrowserEnabled = request.LocalBrowserEnabled
 
 	// Build request context
 	reqCtx := &qaRequestContext{
@@ -466,11 +457,9 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 		tagScopes:             tagScopes,
 		tagIDs:                secutils.SanitizeForLogArray(tagIDs),
 		mcpServiceIDs:         secutils.SanitizeForLogArray(mcpServiceIDs),
-		skillNames:            secutils.SanitizeForLogArray(skillNames),
 		summaryModelID:        secutils.SanitizeForLog(request.SummaryModelID),
 		reasoningEffort:       request.ReasoningEffort,
 		webSearchEnabled:      request.WebSearchEnabled,
-		localBrowserEnabled:   request.LocalBrowserEnabled,
 		mentionedItems:        convertMentionedItems(request.MentionedItems),
 		effectiveTenantID:     effectiveTenantID,
 		sharedAgentReadOnly:   sharedAgentReadOnly,
@@ -527,7 +516,6 @@ func buildMessageExecutionContext(
 	tagIDs []string,
 	tagScopes []types.TagScope,
 	mcpServiceIDs []string,
-	skillNames []string,
 	webSearchEnabled bool,
 ) (types.MessageExecutionContext, string, uint64, string) {
 	locale := types.LanguageFromContextOrDefault(ctx)
@@ -538,7 +526,6 @@ func buildMessageExecutionContext(
 		TagIDs:              tagIDs,
 		TagScopes:           cloneTagScopes(tagScopes),
 		MCPServiceIDs:       mcpServiceIDs,
-		SkillNames:          skillNames,
 		WebSearchEnabled:    webSearchEnabled,
 		Locale:              locale,
 		LangfuseTraceparent: langfuse.TraceparentFromContext(ctx),
@@ -740,8 +727,6 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 	// The session's sandbox stays bound to the session owner even when the
 	// borrowed tenant above drives everything else, because DeleteSession tears
 	// that sandbox down from a request that only knows the session's tenant.
-	baseCtx = types.WithSandboxTenantID(baseCtx, reqCtx.session.TenantID)
-
 	eventBus := event.NewEventBus()
 	asyncCtx, cancel := context.WithCancel(logger.CloneContext(baseCtx))
 
@@ -988,10 +973,6 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 	}
 
 	// Execute normal mode QA, generate title unless disabled
-	if request.LocalBrowserEnabled {
-		_ = c.Error(errors.NewBadRequestError("Local browser requests must use the agent endpoint"))
-		return
-	}
 	h.executeQA(reqCtx, qaModeNormal, !request.DisableTitle)
 }
 
@@ -1155,41 +1136,19 @@ func (h *Handler) rejectIfOtherAgentRunLive(ctx context.Context, reqCtx *qaReque
 	return errors.NewConflictError("another turn is already running in this session")
 }
 
-func (h *Handler) rejectIfSessionRewinding(ctx context.Context, sessionID string) error {
-	type rewindSendGuard interface {
-		RejectSendIfRewinding(context.Context, string) error
-	}
-	guard, ok := h.sessionService.(rewindSendGuard)
-	if !ok {
-		return nil
-	}
-	err := guard.RejectSendIfRewinding(ctx, sessionID)
-	if err == nil {
-		return nil
-	}
-	if stderrors.Is(err, sandbox.ErrSessionRewindLocked) {
-		return errors.NewConflictError("session rewind is in progress")
-	}
-	return errors.NewInternalServerError(err.Error())
-}
-
 func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (func(), bool) {
 	noop := func() {}
 	if reqCtx == nil {
 		return noop, true
 	}
 	type sessionTurnHolder interface {
-		HoldSandboxTurn(context.Context, string, string) (func(), error)
+		HoldTurn(context.Context, string, string) (func(), error)
 	}
 	holder, ok := h.sessionService.(sessionTurnHolder)
 	if !ok {
 		return noop, true
 	}
-	configID := ""
-	if reqCtx.customAgent != nil {
-		configID = reqCtx.customAgent.Config.SandboxConfigID
-	}
-	release, err := holder.HoldSandboxTurn(ctx, reqCtx.sessionID, configID)
+	release, err := holder.HoldTurn(ctx, reqCtx.sessionID, "")
 	if err == nil {
 		// The QA service reads this off the built request and skips its own
 		// hold, so the send path opens and closes the lease exactly once.
@@ -1197,11 +1156,7 @@ func (h *Handler) holdQATurn(ctx context.Context, reqCtx *qaRequestContext) (fun
 	}
 	if err != nil {
 		if reqCtx.c != nil && !reqCtx.skipSSE {
-			if stderrors.Is(err, sandbox.ErrSessionRewindLocked) || stderrors.Is(err, sandbox.ErrSessionTurnActive) {
-				_ = reqCtx.c.Error(errors.NewConflictError("session rewind is in progress"))
-			} else {
-				_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
-			}
+			_ = reqCtx.c.Error(errors.NewInternalServerError(err.Error()))
 		} else {
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": reqCtx.sessionID})
 		}
@@ -1236,14 +1191,6 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			}
 			return
 		}
-	}
-	if err := h.rejectIfSessionRewinding(ctx, sessionID); err != nil {
-		if reqCtx.c != nil && !reqCtx.skipSSE {
-			_ = reqCtx.c.Error(err)
-		} else {
-			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
-		}
-		return
 	}
 
 	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)

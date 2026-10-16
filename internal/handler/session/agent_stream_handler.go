@@ -8,26 +8,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
-	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
-
-// SandboxIDLookup reports the sandbox currently bound to a session without
-// provisioning one. A session with no live sandbox reports ok=false, which the
-// completion path treats as "nothing to check point".
-type SandboxIDLookup interface {
-	BoundSandboxID(ctx context.Context, sessionID string) (string, bool)
-}
-
-var _ SandboxIDLookup = (*sandbox.SessionBoundManager)(nil)
-
-var _ SandboxIDLookup = (*service.PinnedSessionSandbox)(nil)
 
 // AgentStreamHandler handles agent events for SSE streaming
 // It uses a dedicated EventBus per request to avoid SessionID filtering
@@ -45,21 +31,6 @@ type AgentStreamHandler struct {
 	completionEvent    *interfaces.StreamEvent // Published only after the final message is persisted.
 
 	eventBus *event.EventBus
-
-	// artifactCollector drains skill-generated files from the session
-	// sandbox after the agent completes. Nil when the sandbox backend
-	// doesn't support artifact collection or WeKnora was built without it.
-	artifactCollector *service.ArtifactCollector
-
-	// checkpointer commits the sandbox's /workspace at the end of the turn so
-	// session fork can roll a forked sandbox back to this exact message. Nil
-	// when the deployment has no sandbox backend; handleComplete checks.
-	checkpointer *service.WorkspaceCheckpointer
-
-	// sandboxIDLookup resolves the session's currently bound sandbox ID. The
-	// ID is stored next to the commit SHA because a SHA is only meaningful
-	// within one sandbox's git repository.
-	sandboxIDLookup SandboxIDLookup
 
 	// State tracking
 	knowledgeRefs   []*types.SearchResult
@@ -112,9 +83,6 @@ func NewAgentStreamHandler(
 	assistantMessage *types.Message,
 	streamManager interfaces.StreamManager,
 	eventBus *event.EventBus,
-	artifactCollector *service.ArtifactCollector,
-	checkpointer *service.WorkspaceCheckpointer,
-	sandboxIDLookup SandboxIDLookup,
 ) *AgentStreamHandler {
 	return &AgentStreamHandler{
 		ctx:                ctx,
@@ -126,9 +94,6 @@ func NewAgentStreamHandler(
 		assistantMessage:   assistantMessage,
 		streamManager:      streamManager,
 		eventBus:           eventBus,
-		artifactCollector:  artifactCollector,
-		checkpointer:       checkpointer,
-		sandboxIDLookup:    sandboxIDLookup,
 		knowledgeRefs:      make([]*types.SearchResult, 0),
 		eventStartTimes:    make(map[string]time.Time),
 	}
@@ -234,7 +199,7 @@ func (h *AgentStreamHandler) handleToolCall(ctx context.Context, evt event.Event
 
 	metadata := map[string]interface{}{
 		"tool_name":    data.ToolName,
-		"arguments":    agenttools.SanitizeSandboxFileCallArgs(data.ToolName, data.Arguments),
+		"arguments":    data.Arguments,
 		"tool_call_id": data.ToolCallID,
 	}
 
@@ -720,102 +685,6 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
 			h.assistantMessage.Usage = usage
 		}
-
-		// Check point /workspace before draining artifacts. Every tool has
-		// finished, and the turn's sandbox lease is still held, so the sandbox
-		// is guaranteed to still be here.
-		//
-		// This runs on every exit path, including cancelled and errored turns.
-		// Skipping unsuccessful turns would fold their file changes into the
-		// NEXT turn's commit, so forking at that next turn would silently pick
-		// up the cancelled turn's edits.
-		//
-		// Best-effort throughout: a nil checkpoint just means this message
-		// cannot serve as a fork point.
-		if h.checkpointer != nil && h.sandboxIDLookup != nil {
-			checkpointCtx := context.WithoutCancel(h.ctx)
-			if sandboxID, ok := h.sandboxIDLookup.BoundSandboxID(checkpointCtx, h.sessionID); ok {
-				h.assistantMessage.SandboxCheckpoint = h.checkpointer.Checkpoint(
-					checkpointCtx, h.sessionID, sandboxID, h.assistantMessageID,
-				)
-			}
-		}
-
-		// Drain skill-generated files from the sandbox into persistent
-		// storage. Best-effort: any failure is logged and the turn is
-		// persisted without artifacts. Collect is a no-op when either the
-		// collector wasn't wired in, no sandbox is bound, or no files were
-		// produced — those cases must not disturb the completion path.
-		//
-		// Layouts without a separate output tree must not be collected
-		// (scanning Root would upload the whole project). Remote backends keep
-		// skills.ArtifactOutputDir(), or layout.OutputDir when advertised.
-		var previous types.MessageArtifacts
-		if h.artifactCollector != nil {
-			collectCtx := context.WithoutCancel(h.ctx)
-			var artifacts types.MessageArtifacts
-			if collectDir, skip := h.artifactCollector.CollectTarget(collectCtx, h.sessionID); !skip {
-				if collectDir == "" {
-					collectDir = skills.ArtifactOutputDir()
-				}
-				var err error
-				artifacts, err = h.artifactCollector.CollectWithNotify(
-					collectCtx,
-					h.sessionID,
-					h.assistantMessageID,
-					h.tenantID,
-					collectDir,
-					h.emitArtifactsPending,
-				)
-				if err != nil {
-					logger.GetLogger(h.ctx).Warnf(
-						"artifact collect failed session=%s message=%s: %v",
-						h.sessionID, h.assistantMessageID, err,
-					)
-				}
-			}
-
-			// Resolve the files the answer names against this turn's artifacts
-			// AND the ones already recorded for the session.
-			//
-			// A turn can legitimately reference a file it did not regenerate.
-			// The first turn after a session fork is restored to the fork point,
-			// so every unchanged file is de-duplicated out of `artifacts` — yet
-			// the model still writes `sandbox:<name>` for it. Gating the
-			// rewrite on `artifacts` alone would leave those references
-			// unnormalized, and the client resolves names only against the
-			// message's own artifact list, so they would render as missing
-			// files.
-			// KnownArtifacts is oldest-first. Name matching is first-wins, so
-			// this turn shadows a regenerated file, then the latest known
-			// version (the fork-point file) beats earlier ones of the same name.
-			known := h.artifactCollector.SessionArtifacts(collectCtx, h.sessionID)
-			referenced := referencedArtifacts(
-				h.assistantMessage.Content,
-				mergeArtifactLists(artifacts, artifactsNewestFirst(known)),
-			)
-			previous = historyOnlyArtifacts(referenced, artifacts)
-
-			if attached := mergeArtifactLists(h.assistantMessage.Artifacts, artifacts, referenced); len(attached) > 0 {
-				h.assistantMessage.Artifacts = attached
-				// The answer text names generated files the way the model saw
-				// them in the sandbox. Bind those names to artifact indices now
-				// that the index space is final, so a reloaded conversation
-				// renders them instead of showing a broken link.
-				h.assistantMessage.Content = rewriteArtifactReferences(
-					h.assistantMessage.Content, attached,
-				)
-				logger.GetLogger(h.ctx).Infof(
-					"artifact collect attached %d file(s) to message=%s session=%s",
-					len(attached), h.assistantMessageID, h.sessionID,
-				)
-			}
-			// A reused reference is owned by this message too, so deleting the
-			// message that first produced the file cannot invalidate it.
-			h.artifactCollector.BindArtifactsToMessage(collectCtx, h.assistantMessageID, previous)
-		}
-		h.assistantMessage.Content = types.ClarifyArtifactVersions(h.assistantMessage.Content,
-			h.assistantMessage.Artifacts, previous, types.LanguageFromContextOrDefault(h.ctx))
 	}
 
 	// Fallback: if no answer events were streamed but we have a final answer,
@@ -859,20 +728,12 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	}
 
 	// Prepare completion metadata. Publishing must wait for the caller to save
-	// Content/AgentSteps/Artifacts: message-scoped file requests authorize against
-	// that persisted output as soon as the client receives this event.
+	// the message: message-scoped requests authorize against that persisted
+	// output as soon as the client receives this event.
 	completeData := map[string]interface{}{
 		"total_steps":       data.TotalSteps,
 		"total_duration_ms": data.TotalDurationMs,
 		"final_content":     h.assistantMessage.Content,
-	}
-	// Attach the freshly-collected artifacts so the frontend can render the
-	// download button without waiting for a page refresh. We strip the
-	// storage URL and any other server-only fields via publicArtifactViews
-	// — clients only ever download through /artifacts/:index which enforces
-	// tenant ownership.
-	if len(h.assistantMessage.Artifacts) > 0 {
-		completeData["artifacts"] = publicArtifactViews(h.assistantMessage.Artifacts)
 	}
 	// Carry the turn's aggregated LLM usage both inside data (map consumers)
 	// and on the typed event field, which buildStreamResponse promotes to the
@@ -908,50 +769,6 @@ func (h *AgentStreamHandler) publishCompletion(ctx context.Context) error {
 	}
 	h.completionEvent = nil
 	return nil
-}
-
-// emitArtifactsPending tells the live UI that sandbox files exist and are
-// being uploaded. It must not take h.mu — Collect calls it while
-// handleComplete already holds the lock.
-func (h *AgentStreamHandler) emitArtifactsPending(count int) {
-	if h == nil || h.streamManager == nil || count <= 0 {
-		return
-	}
-	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID:        fmt.Sprintf("artifacts-pending-%d", time.Now().UnixMilli()),
-		Type:      types.ResponseTypeArtifactsPending,
-		Timestamp: time.Now(),
-		Data: map[string]interface{}{
-			"count": count,
-		},
-	}); err != nil {
-		logger.GetLogger(h.ctx).Warnf(
-			"append artifacts_pending failed session=%s message=%s: %v",
-			h.sessionID, h.assistantMessageID, err,
-		)
-	}
-}
-
-// publicArtifactViews returns a redacted view of the artifact list suitable
-// for direct serialization onto the SSE stream. The physical storage path is
-// stripped; the resource handle is kept because it is what the answer body
-// references, and the frontend needs it to tie an inline reference to the file
-// it names. Bytes are fetched through /artifacts/:index/download.
-func publicArtifactViews(list types.MessageArtifacts) []map[string]interface{} {
-	out := make([]map[string]interface{}, 0, len(list))
-	for i, a := range list {
-		out = append(out, map[string]interface{}{
-			"index":       i,
-			"handle":      artifactHandle(a),
-			"file_name":   a.FileName,
-			"file_type":   a.FileType,
-			"file_size":   a.FileSize,
-			"source_path": a.SourcePath,
-			"mod_time":    a.ModTime,
-			"created_at":  a.CreatedAt,
-		})
-	}
-	return out
 }
 
 // handleCommandOutput forwards UI-only progress without adding partial output

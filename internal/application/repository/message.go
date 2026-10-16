@@ -32,7 +32,7 @@ func (r *messageRepository) CreateMessage(
 		if err := tx.Create(message).Error; err != nil {
 			return err
 		}
-		return insertMessageArtifacts(tx, []*types.Message{message})
+		return nil
 	})
 	if err != nil {
 		return nil, err
@@ -48,9 +48,6 @@ func (r *messageRepository) GetMessage(
 	if err := r.db.WithContext(ctx).Where(
 		"id = ? AND session_id = ?", messageID, sessionID,
 	).First(&message).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, &message); err != nil {
 		return nil, err
 	}
 	return &message, nil
@@ -69,9 +66,6 @@ func (r *messageRepository) GetMessagesBySession(
 	if err := r.db.WithContext(ctx).Where("session_id = ?", sessionID).
 		Order("created_at ASC, id ASC").
 		Offset((page - 1) * pageSize).Limit(pageSize).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
 		return nil, err
 	}
 	return messages, nil
@@ -100,9 +94,6 @@ func (r *messageRepository) GetRecentMessagesBySession(
 		}
 		return cmp
 	})
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
-		return nil, err
-	}
 	return messages, nil
 }
 
@@ -147,9 +138,6 @@ func (r *messageRepository) GetMessagesBySessionBeforeTime(
 		}
 		return cmp
 	})
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
-		return nil, err
-	}
 	return messages, nil
 }
 
@@ -166,9 +154,6 @@ func (r *messageRepository) ListMessagesBySessionBeforeCursor(
 		query = query.Where("created_at < ? OR (created_at = ? AND id < ?)", before, before, beforeID)
 	}
 	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
 		return nil, err
 	}
 	return messages, nil
@@ -192,47 +177,15 @@ func (r *messageRepository) ListMessagesBySessionUpTo(
 		Find(&messages).Error; err != nil {
 		return nil, err
 	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
-		return nil, err
-	}
 	return messages, nil
 }
 
-// ListAssistantCheckpointsUpTo returns the assistant messages strictly before
-// the (boundary, boundaryID) cursor, oldest first, carrying only the columns
-// that identify a workspace checkpoint.
-//
-// Rewind asks "does kept history still reach a commit SHA, and did it contain
-// an assistant turn at all". ListMessagesBySessionUpTo can answer that, but it
-// selects every column and joins artifacts for the whole conversation to do
-// so. This is the same question against a fraction of the rows and bytes.
-func (r *messageRepository) ListAssistantCheckpointsUpTo(
-	ctx context.Context, sessionID string, boundary time.Time, boundaryID string,
-) ([]*types.Message, error) {
-	var messages []*types.Message
-	if err := r.db.WithContext(ctx).
-		Model(&types.Message{}).
-		Select("id", "session_id", "role", "created_at", "sandbox_checkpoint").
-		Where("session_id = ? AND role = ?", sessionID, "assistant").
-		Where("created_at < ? OR (created_at = ? AND id < ?)", boundary, boundary, boundaryID).
-		Order("created_at ASC, id ASC").
-		Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-// UpdateMessage updates an existing message. Artifacts are rewritten only
-// when message.Artifacts is non-nil (see writeMessageArtifacts).
+// UpdateMessage updates an existing message.
 func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Message) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&types.Message{}).Where(
-			"id = ? AND session_id = ?", message.ID, message.SessionID,
-		).Updates(message).Error; err != nil {
-			return err
-		}
-		return writeMessageArtifacts(tx, message)
-	})
+	return r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ? AND session_id = ?", message.ID, message.SessionID).
+		Updates(message).Error
 }
 
 // DeleteMessagesFrom soft-deletes every message of a session at or after the
@@ -292,9 +245,6 @@ func (r *messageRepository) GetFirstMessageOfUser(ctx context.Context, sessionID
 	).Order("created_at ASC").First(&message).Error; err != nil {
 		return nil, err
 	}
-	if err := attachArtifacts(ctx, r.db, &message); err != nil {
-		return nil, err
-	}
 	return &message, nil
 }
 
@@ -313,9 +263,6 @@ func (r *messageRepository) GetMessageByRequestID(
 			return nil, nil
 		}
 		return nil, result.Error
-	}
-	if err := attachArtifacts(ctx, r.db, &message); err != nil {
-		return nil, err
 	}
 
 	return &message, nil
@@ -359,9 +306,6 @@ func (r *messageRepository) SearchMessagesByKeyword(
 	}
 
 	if err := query.Order("messages.created_at DESC").Limit(limit).Find(&results).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
 		return nil, err
 	}
 
@@ -416,9 +360,6 @@ func (r *messageRepository) GetMessagesByKnowledgeIDs(
 		Find(&results).Error; err != nil {
 		return nil, err
 	}
-	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
-		return nil, err
-	}
 	return results, nil
 }
 
@@ -439,9 +380,6 @@ func (r *messageRepository) GetMessagesByRequestIDs(
 		Where("messages.session_id = ?", sessionID).
 		Where("messages.request_id IN ?", requestIDs).
 		Find(&results).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifactsWithSession(ctx, r.db, results); err != nil {
 		return nil, err
 	}
 	return results, nil
@@ -535,40 +473,6 @@ func (r *messageRepository) UpdateMessageKnowledgeID(
 		Model(&types.Message{}).
 		Where("id = ?", messageID).
 		Update("knowledge_id", knowledgeID).Error
-}
-
-// RewriteSandboxCheckpoints retargets copied checkpoints onto the forked
-// session's live sandbox. CommitSHA / CommittedAt are left untouched: the git
-// objects are in the snapshot, only the sandbox identity changed.
-func (r *messageRepository) RewriteSandboxCheckpoints(
-	ctx context.Context, sessionID, oldSandboxID, newSandboxID string,
-) error {
-	if sessionID == "" || oldSandboxID == "" || newSandboxID == "" || oldSandboxID == newSandboxID {
-		return nil
-	}
-	var messages []*types.Message
-	if err := r.db.WithContext(ctx).
-		Where("session_id = ?", sessionID).
-		Find(&messages).Error; err != nil {
-		return err
-	}
-	for _, message := range messages {
-		if message == nil || message.SandboxCheckpoint == nil {
-			continue
-		}
-		if message.SandboxCheckpoint.SandboxID != oldSandboxID {
-			continue
-		}
-		updated := *message.SandboxCheckpoint
-		updated.SandboxID = newSandboxID
-		if err := r.db.WithContext(ctx).
-			Model(&types.Message{}).
-			Where("id = ? AND session_id = ?", message.ID, sessionID).
-			Update("sandbox_checkpoint", updated).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // GetSessionAttachments returns every user-uploaded attachment in creation

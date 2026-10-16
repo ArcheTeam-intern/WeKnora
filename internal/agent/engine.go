@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
-	"github.com/Tencent/WeKnora/internal/agent/skills"
 	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/common"
@@ -17,7 +16,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -41,11 +39,9 @@ type AgentEngine struct {
 	knowledgeBasesInfo   []*KnowledgeBaseInfo    // Detailed knowledge base information for prompt
 	selectedDocs         []*SelectedDocumentInfo // User-selected documents (via @ mention)
 	pinnedMCPServices    []*PinnedMCPServiceInfo // User @mentioned MCP services for this turn
-	pinnedSkills         []*PinnedSkillInfo      // User @mentioned skills for this turn
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
-	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
 	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management, calibrated
@@ -78,7 +74,6 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
-	workspaceLayout   sandbox.WorkspaceLayout
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -143,46 +138,19 @@ func (e *AgentEngine) SetQuestionOrigin(origin *QuestionOriginInfo) {
 	e.questionOrigin = origin
 }
 
-// SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
-func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, skills []*PinnedSkillInfo) {
+// SetPinnedMentions sets per-turn @mention scope for MCP services.
+func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo) {
 	e.pinnedMCPServices = mcpServices
-	e.pinnedSkills = skills
-}
-
-// SetWorkspaceLayout injects the session's real workspace into the system
-// prompt. Host sessions must pass the user directory so the model does not
-// keep listing /workspace.
-func (e *AgentEngine) SetWorkspaceLayout(layout sandbox.WorkspaceLayout) {
-	if e == nil {
-		return
-	}
-	e.workspaceLayout = layout
 }
 
 func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
-		Language:         types.LanguageNameFromContext(ctx),
-		Config:           e.appConfig,
-		SkillInstallMode: e.config.SkillInstallMode(),
-		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
-		WorkspaceLayout:  e.workspaceLayout,
-	}
-	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
-		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()
+		Language:       types.LanguageNameFromContext(ctx),
+		Config:         e.appConfig,
+		ProtocolPrompt: e.modelContext.ProtocolPrompt(),
 	}
 	if e.toolRegistry != nil {
 		opts.SelectedTools = e.toolRegistry.ListTools()
-		if _, err := e.toolRegistry.GetTool("local_browser"); err == nil {
-			metadata := make([]*skills.SkillMetadata, 0, len(opts.SkillsMetadata))
-			for _, item := range opts.SkillsMetadata {
-				if item != nil && item.Name != "browser" && item.Name != "browser-skill" {
-					metadata = append(metadata, item)
-				}
-			}
-			opts.SkillsMetadata = metadata
-		}
-		_, err := e.toolRegistry.GetTool(agenttools.ToolShellExec)
-		opts.ShellExecEnabled = err == nil
 	}
 	return opts
 }
@@ -199,32 +167,6 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	return renderSystemPromptSections(sections)
 }
 
-// NewAgentEngineWithSkills creates a new agent engine with skills support
-func NewAgentEngineWithSkills(
-	config *types.AgentConfig,
-	chatModel chat.Chat,
-	toolRegistry *agenttools.ToolRegistry,
-	eventBus *event.EventBus,
-	knowledgeBasesInfo []*KnowledgeBaseInfo,
-	selectedDocs []*SelectedDocumentInfo,
-	sessionID string,
-	systemPromptTemplate string,
-	skillsManager *skills.Manager,
-) *AgentEngine {
-	engine := NewAgentEngine(
-		config,
-		chatModel,
-		toolRegistry,
-		eventBus,
-		knowledgeBasesInfo,
-		selectedDocs,
-		sessionID,
-		systemPromptTemplate,
-	)
-	engine.skillsManager = skillsManager
-	return engine
-}
-
 // SetAppConfig sets the application config for prompt template resolution.
 // This allows the engine to read default prompts from config/prompt_templates/ YAML files.
 func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
@@ -237,16 +179,6 @@ func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
 // This follows the same pattern as Handler.analyzeImageAttachments() in the handler layer.
 func (e *AgentEngine) SetImageDescriber(fn ImageDescriberFunc) {
 	e.imageDescriber = fn
-}
-
-// SetSkillsManager sets the skills manager for the engine
-func (e *AgentEngine) SetSkillsManager(manager *skills.Manager) {
-	e.skillsManager = manager
-}
-
-// GetSkillsManager returns the skills manager
-func (e *AgentEngine) GetSkillsManager() *skills.Manager {
-	return e.skillsManager
 }
 
 // estimateCurrentTokens returns the best estimate of the current context token

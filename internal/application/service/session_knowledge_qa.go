@@ -26,19 +26,12 @@ func (s *sessionService) KnowledgeQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
-	// IM/MCP call KnowledgeQA without executeQA's send-side lease, so hold one
+	// IM/MCP call KnowledgeQA without executeQA's send-side gate, so hold one
 	// for the pipeline. HTTP send already took it before persisting the turn
-	// and says so on the request; taking a second would double every rewind
-	// check and lease round trip on the hot send path.
+	// and says so on the request; taking a second would double the lease round
+	// trip on the hot send path.
 	if !req.TurnLeaseHeld {
-		if err := s.RejectSendIfRewinding(ctx, req.Session.ID); err != nil {
-			return err
-		}
-		configID := ""
-		if req.CustomAgent != nil {
-			configID = req.CustomAgent.Config.SandboxConfigID
-		}
-		releaseTurn, holdErr := s.holdSandboxTurn(ctx, req.Session.ID, configID)
+		releaseTurn, holdErr := s.holdTurn(ctx, req.Session.ID, "")
 		if holdErr != nil {
 			return holdErr
 		}

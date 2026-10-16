@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -195,67 +194,4 @@ func TestResolveAgent_UsesShareWhenNoOwnAgentMatches(t *testing.T) {
 	require.Equal(t, sharedAgent, agent)
 	require.Equal(t, uint64(84), effectiveTenantID)
 	require.True(t, sharedReadOnly)
-}
-
-func TestTerminalProvisionPin_UsesSharedAgentSandboxConfig(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(
-		http.MethodGet,
-		"/?agent_id=builtin-smart-reasoning&agent_source_tenant_id=84",
-		nil,
-	)
-	c.Set(types.UserIDContextKey.String(), "user-1")
-	c.Set(types.TenantIDContextKey.String(), uint64(7))
-	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
-	c.Request = c.Request.WithContext(ctx)
-
-	sharedAgent := &types.CustomAgent{
-		ID:       "builtin-smart-reasoning",
-		TenantID: 84,
-		Config:   types.CustomAgentConfig{SandboxConfigID: "shared-cfg"},
-	}
-	h := &Handler{
-		agentShareService: &resolveAgentShareStub{agent: sharedAgent},
-		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{
-			ID:       "builtin-smart-reasoning",
-			TenantID: 7,
-			Config:   types.CustomAgentConfig{SandboxConfigID: "local-cfg"},
-		}},
-	}
-
-	require.Equal(t, service.SandboxPin{}, h.terminalProvisionPin(ctx, c, false),
-		"lookup-only connects must not resolve an agent config")
-	// The lending workspace travels with the config id: sandbox configs are
-	// keyed by (tenant, id), so "shared-cfg" does not exist in workspace 7.
-	require.Equal(t,
-		service.SandboxPin{ConfigID: "shared-cfg", TenantID: 84},
-		h.terminalProvisionPin(ctx, c, true))
-}
-
-// An own agent's config already lives in the caller's workspace, so the pin
-// carries no owner and SandboxPin.TenantOr falls back to the request tenant.
-func TestTerminalProvisionPin_OwnAgentCarriesNoWorkspace(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	c.Request = httptest.NewRequest(
-		http.MethodGet, "/?agent_id=builtin-smart-reasoning", nil)
-	c.Set(types.UserIDContextKey.String(), "user-1")
-	c.Set(types.TenantIDContextKey.String(), uint64(7))
-	ctx := context.WithValue(c.Request.Context(), types.TenantIDContextKey, uint64(7))
-	c.Request = c.Request.WithContext(ctx)
-
-	h := &Handler{
-		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{
-			ID:       "builtin-smart-reasoning",
-			TenantID: 7,
-			Config:   types.CustomAgentConfig{SandboxConfigID: "local-cfg"},
-		}},
-	}
-
-	pin := h.terminalProvisionPin(ctx, c, true)
-	require.Equal(t, service.SandboxPin{ConfigID: "local-cfg"}, pin)
-	require.Equal(t, uint64(7), pin.TenantOr(7))
 }

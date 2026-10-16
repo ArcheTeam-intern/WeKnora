@@ -53,7 +53,6 @@ import (
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
-	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
@@ -81,7 +80,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/router"
-	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/stream"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -167,8 +165,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
-	must(container.Provide(repository.NewTenantSandboxConfigRepository))
-	must(container.Provide(repository.NewTenantSkillRepository))
 	must(container.Provide(repository.NewCustomAgentRepository))
 	must(container.Provide(repository.NewOrganizationRepository))
 	must(container.Provide(repository.NewKBShareRepository))
@@ -187,30 +183,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(mcp.NewMCPManager))
 	must(container.Invoke(registerMCPCleanup))
 	must(container.Provide(mcp.NewOAuthManager))
-
-	// Sandbox manager fallback is disabled; executable backends are resolved
-	// from named workspace configurations. Lite additionally provides a host
-	// manager that resolveSandboxForExecution uses only when the process is
-	// Lite and the session has no named remote config. Web never gets one.
-	logger.Debugf(ctx, "[Container] Registering sandbox manager...")
-	must(container.Provide(newSandboxManager))
-	must(container.Provide(provideHostApprovalModeLoader))
-	must(container.Provide(provideHostProjectDirsLoader))
-	must(container.Provide(hostProjectLookup))
-	must(container.Provide(hostModeLookup))
-	must(container.Provide(provideHostSandboxManager))
-	// Per-tenant sandbox backends: the resolver builds a manager per request
-	// from the tenant's own configuration, falling back to the singleton above
-	// for tenants that configured nothing.
-	must(container.Provide(service.NewTenantSandboxConfigLoader))
-	must(container.Provide(service.NewForkBootstrapperFromRepos))
-	must(container.Provide(func(b *service.ForkBootstrapper) sandbox.SessionBootstrapper {
-		if b == nil {
-			return nil
-		}
-		return b
-	}))
-	must(container.Provide(newTenantSandboxResolver))
 
 	// Business service layer
 	logger.Debugf(ctx, "[Container] Registering business services...")
@@ -235,17 +207,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewUserService))
 	must(container.Provide(service.NewSystemSettingService))
 	must(container.Provide(service.NewModelCatalogService))
-	must(container.Provide(func(
-		repo repository.TenantSandboxConfigRepository,
-		agents interfaces.CustomAgentRepository,
-		skills repository.TenantSkillRepository,
-		files interfaces.StorageBackendResolver,
-	) *service.TenantSandboxConfigService {
-		return service.NewTenantSandboxConfigService(repo, agents, buildGlobalSandboxConfig(), skills, files)
-	}))
-	must(container.Provide(func(s *service.TenantSandboxConfigService) service.WorkspaceSandboxPolicy {
-		return s
-	}))
 	must(container.Provide(service.NewWeKnoraCloudService))
 
 	// Extract services - register individual extracters with names
@@ -303,118 +264,18 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// SessionService is passed as parameter to CreateAgentEngine method when creating AgentService
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
-	must(container.Provide(service.NewSessionSandboxPinner))
 	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))
-	must(container.Provide(func(cleaner interfaces.ResourceCleaner, db *gorm.DB) (*browserskill.Manager, error) {
-		manager := browserskill.NewManager(browserskill.NewStore(db))
-		if err := manager.ValidateConfiguration(); err != nil {
-			return nil, err
-		}
-		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
-		return manager, nil
-	}))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)
 	// SessionService is created after AgentService and passes itself to AgentService.CreateAgentEngine when needed
 	logger.Debugf(ctx, "[Container] Registering session service...")
-	must(container.Provide(service.NewSessionService))
-	must(container.Provide(service.NewTenantSkillService))
-	// The member-facing half of env vars is its own service because its
-	// authority is different in kind: it derives the identity from the context
-	// and touches only that identity's rows.
-	must(container.Provide(service.NewUserEnvService))
-
-	// ArtifactCollector drains skill-generated files from the sandbox on
-	// each agent turn. The factory returns nil when the sandbox backend does
-	// not support per-session file inspection; downstream code guards on nil.
-	must(container.Provide(service.NewArtifactCollectorFromSandboxManager))
-
-	// WorkspaceCheckpointer commits the sandbox /workspace after each agent
-	// turn so session fork can roll a forked sandbox back to a given message.
-	// The process-wide Manager is DisabledManager, so the runner and ID lookup
-	// go through the session pin + per-tenant resolver — the same path
-	// ArtifactCollector already uses. Direct Manager type-asserts still win
-	// when a deployment injects a SessionBoundManager as the process default.
-	must(container.Provide(func(
-		pinner *service.SessionSandboxPinner,
-		host service.HostSandboxManager,
-	) *service.HostSessionResolver {
-		return service.NewHostSessionResolver(pinner, host.Manager, host.Desktop)
-	}))
-	must(container.Provide(func(
-		mgr sandbox.Manager,
-		resolver sandbox.TenantSandboxResolver,
-		pinner *service.SessionSandboxPinner,
-		host *service.HostSessionResolver,
-	) *service.PinnedSessionSandbox {
-		return service.NewPinnedSessionSandbox(pinner, resolver, mgr, host)
-	}))
-	must(container.Provide(func(
-		mgr sandbox.Manager,
-		pinned *service.PinnedSessionSandbox,
-	) *service.WorkspaceCheckpointer {
-		if runner, ok := mgr.(service.SandboxShellRunner); ok {
-			return service.NewWorkspaceCheckpointer(runner)
-		}
-		return service.NewWorkspaceCheckpointer(pinned)
-	}))
-	must(container.Provide(func(
-		mgr sandbox.Manager,
-		pinned *service.PinnedSessionSandbox,
-	) session.SandboxIDLookup {
-		if lookup, ok := mgr.(session.SandboxIDLookup); ok {
-			return lookup
-		}
-		if pinned == nil {
-			return nil
-		}
-		return pinned
-	}))
-	must(container.Provide(func(
-		mgr sandbox.Manager,
-		pinned *service.PinnedSessionSandbox,
-	) service.SessionForkSandboxPort {
-		if port, ok := mgr.(service.SessionForkSandboxPort); ok {
-			return port
-		}
-		if pinned == nil {
-			return nil
-		}
-		return pinned
-	}))
-	must(container.Provide(service.NewSessionForkServiceFromRepos))
-	must(container.Provide(func(
-		mgr sandbox.Manager,
-		pinned *service.PinnedSessionSandbox,
-	) service.SessionRewindSandboxPort {
-		if port, ok := mgr.(service.SessionRewindSandboxPort); ok {
-			return port
-		}
-		if pinned == nil {
-			return nil
-		}
-		return pinned
-	}))
 	must(container.Provide(service.NewSessionBusyGate))
-	must(container.Provide(service.NewSessionRewindServiceFromRepos))
-
-	// SandboxTerminalService opens interactive PTYs on session sandboxes for
-	// the frontend terminal panel. First-use provisioning takes a sandbox
-	// config ID already resolved by the WebSocket handler (own or shared agent).
-	must(container.Provide(service.NewSandboxTerminalService))
-	// One-shot desktop handshake tickets. Falls back to an in-process store
-	// when Redis is absent (Lite mode), same as the binding store.
-	must(container.Provide(service.NewSandboxDesktopTicketStore))
-	must(container.Provide(service.NewSandboxDesktopLastStore))
-	// Desktop relay. It rides SandboxTerminalService's resolution path so the
-	// desktop always lands on the session's existing sandbox.
-	must(container.Provide(service.NewSandboxDesktopService))
-
+	must(container.Provide(service.NewSessionService))
 	logger.Debugf(ctx, "[Container] Registering task enqueuer...")
 	redisAvailable := os.Getenv("REDIS_ADDR") != ""
 	if redisAvailable {
@@ -483,28 +344,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
-	// TenantSkillService is provided next to SessionService (handlers need
-	// it), but Invoke constructs the whole chain. SessionService needs
-	// *chatpipeline.EventManager, which only exists after the pipeline
-	// block above — starting the reaper any earlier panics.
-	if !productProfileIsKnowledgeCore(container) {
-		must(container.Invoke(startTenantSkillReaper))
-	}
-	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
-	must(container.Provide(func(
-		sessions interfaces.SessionRepository,
-		resolver sandbox.TenantSandboxResolver,
-		mgr sandbox.Manager,
-	) *service.ForkSnapshotReaper {
-		return service.NewForkSnapshotReaperFromRepos(
-			sessions, service.NewResolverForkSnapshotDeleter(resolver, mgr),
-		)
-	}))
-	if !productProfileIsKnowledgeCore(container) {
-		must(container.Invoke(startForkSnapshotReaper))
-	}
-	logger.Debugf(ctx, "[Container] Fork snapshot reaper registered")
-
 	// HTTP handlers layer
 	logger.Debugf(ctx, "[Container] Registering HTTP handlers...")
 	must(container.Provide(handler.NewTenantHandler))
@@ -520,13 +359,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMessageHandler))
 	must(container.Provide(handler.NewMessageSuggestionHandler))
 	must(container.Provide(handler.NewModelHandler))
-	must(container.Provide(handler.NewSandboxConfigHandler))
-	must(container.Provide(func(
-		s *service.TenantSkillService, streams interfaces.StreamManager,
-	) *handler.SandboxSkillHandler {
-		return handler.NewSandboxSkillHandler(s, streams)
-	}))
-	must(container.Provide(handler.NewMeEnvVarHandler))
 	must(container.Provide(handler.NewEvaluationHandler))
 	must(container.Provide(handler.NewInitializationHandler))
 	must(container.Provide(handler.NewAuthHandler))
@@ -550,11 +382,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
-	must(container.Provide(func(
-		s *service.TenantSkillService, agents interfaces.AgentShareService,
-	) *handler.SkillHandler {
-		return handler.NewSkillHandler(s, s, agents)
-	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 
 	// Data source handler
@@ -586,14 +413,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
-
-	// BrowserSkill is registered when its manager is constructed, which is
-	// early, so reverse-order cleanup would run it last. Force the manager
-	// to exist, then run that hook first so a slow cron stop cannot leave
-	// the daemon alive until the process is killed.
-	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
-		cleaner.Promote("BrowserSkill")
-	}))
 
 	// The staged-upload sweep sits at the end of init on purpose: it pulls in
 	// *mcpserver.Server, whose dependency graph (SessionService →
@@ -1853,54 +1672,6 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
 		svc.StopWithin(cleanupStepTimeout)
-		return nil
-	})
-}
-
-// startTenantSkillReaper starts the stuck-install / orphan-snapshot cron and
-// registers cleanup. Best-effort: a startup error is logged but does NOT abort
-// the container — the rest of the system stays usable.
-func startTenantSkillReaper(svc *service.TenantSkillService, cleaner interfaces.ResourceCleaner) {
-	if svc == nil {
-		return
-	}
-	if err := svc.Start(context.Background()); err != nil {
-		logger.Warnf(context.Background(), "[Container] tenant skill reaper start failed: %v", err)
-	}
-	cleaner.RegisterWithName("TenantSkillReaper", func() error {
-		svc.StopWithin(cleanupStepTimeout)
-		return nil
-	})
-}
-
-// startForkSnapshotReaper collects snapshots of forks that were never opened.
-// Best-effort: a wiring gap is logged but does NOT abort the container.
-func startForkSnapshotReaper(reaper *service.ForkSnapshotReaper, cleaner interfaces.ResourceCleaner) {
-	if reaper == nil {
-		logger.Warnf(context.Background(), "[Container] fork snapshot reaper unavailable")
-		return
-	}
-	if cleaner == nil {
-		logger.Warnf(context.Background(), "[Container] fork snapshot reaper start failed: resource cleaner missing")
-		return
-	}
-	stop := make(chan struct{})
-	go func() {
-		ticker := time.NewTicker(6 * time.Hour)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				if _, err := reaper.ReapOnce(context.Background()); err != nil {
-					logger.Warnf(context.Background(), "[ForkSnapshotReaper] reap failed: %v", err)
-				}
-			case <-stop:
-				return
-			}
-		}
-	}()
-	cleaner.RegisterWithName("ForkSnapshotReaper", func() error {
-		close(stop)
 		return nil
 	})
 }

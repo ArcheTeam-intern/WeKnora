@@ -330,34 +330,6 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 		if count > 0 {
 			return fmt.Sprintf("Knowledge search returned %d result(s) (details omitted from history)", count)
 		}
-	case "shell_exec":
-		if rebuilt := rebuildShellExecHistory(data); rebuilt != "" {
-			return rebuilt
-		}
-		return compactShellExecHeadline(data)
-	case "write_sandbox_file":
-		path := stringField(data, "path")
-		size := intField(data, "size")
-		if path != "" {
-			added := intField(data, "added_lines")
-			removed := intField(data, "removed_lines")
-			if stat := formatSandboxDiffStat(added, removed); stat != "" {
-				return fmt.Sprintf("Wrote %s (%s, %d bytes)", path, stat, size)
-			}
-			return fmt.Sprintf("Wrote %s (%d bytes)", path, size)
-		}
-	case "edit_sandbox_file":
-		path := stringField(data, "path")
-		size := intField(data, "size")
-		n := intField(data, "replacements")
-		if path != "" {
-			added := intField(data, "added_lines")
-			removed := intField(data, "removed_lines")
-			if stat := formatSandboxDiffStat(added, removed); stat != "" {
-				return fmt.Sprintf("Edited %s (%s, %d replacement(s), %d bytes)", path, stat, n, size)
-			}
-			return fmt.Sprintf("Edited %s (%d replacement(s), %d bytes)", path, n, size)
-		}
 	case "attachment_parsing":
 		parsed := intField(data, "parsed_count")
 		skipped := intField(data, "skipped_count")

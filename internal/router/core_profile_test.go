@@ -19,12 +19,12 @@ type stubEndpointService struct{ interfaces.MCPEndpointService }
 // graph) must stay open.
 func TestKnowledgeCoreReachabilityClosesNonCoreRoutes(t *testing.T) {
 	full := reachabilityFor(&config.Config{})
-	if !full.MCPClientToolbox || !full.ExecutionSandbox || !full.Skills {
+	if !full.MCPClientToolbox {
 		t.Fatalf("the default profile must keep every remaining route group: %+v", full)
 	}
 
 	core := reachabilityFor(&config.Config{ProductProfile: config.ProductProfileKnowledgeCore})
-	if core.MCPClientToolbox || core.ExecutionSandbox || core.Skills {
+	if core.MCPClientToolbox {
 		t.Fatalf("knowledge-core must close every remaining non-core route group: %+v", core)
 	}
 
@@ -60,7 +60,6 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 		MCPServiceHandler:        &handler.MCPServiceHandler{},
 		MCPCredentialsHandler:    &handler.MCPCredentialsHandler{},
 		MCPOAuthHandler:          &handler.MCPOAuthHandler{},
-		SandboxConfigHandler:     &handler.SandboxConfigHandler{},
 		MessageSuggestionHandler: &handler.MessageSuggestionHandler{},
 		TenantMemberHandler:      &handler.TenantMemberHandler{},
 		TenantInvitationHandler:  &handler.TenantInvitationHandler{},
@@ -92,12 +91,15 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 	// not gated.
 	params.Config = &config.Config{}
 	fullCaps := deploymentCapabilitiesFromRouter(params).Capabilities
-	for _, key := range []string{"settings.mcp", "settings.sandbox"} {
+	for _, key := range []string{"settings.mcp"} {
 		if !fullCaps[key].Supported {
 			t.Fatalf("the full profile must keep %s available: %+v", key, fullCaps[key])
 		}
 	}
-	for _, key := range []string{"integrations.im", "integrations.embed", "settings.websearch"} {
+	for _, key := range []string{
+		"integrations.im", "integrations.embed", "settings.websearch",
+		"settings.sandbox", "settings.sandbox.docker", "settings.sandbox.host", "settings.sandbox.remote",
+	} {
 		if fullCaps[key].Supported {
 			t.Fatalf("%s is removed from the build and must not be reported as supported: %+v", key, fullCaps[key])
 		}

@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"io"
+	"mime/multipart"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +15,89 @@ import (
 
 // resolvingCatalog answers Resolve from a fixed handle → tenant map and records
 // every Bind, which is all bindContentResources exercises.
+// Helpers carried over from the deleted artifact collector tests; the
+// knowledge content-binding and resource-release tests still use them.
+
+type bindCall struct {
+	ref       string
+	ownerType string
+	ownerID   string
+	relation  string
+}
+
+// fakeCatalog captures Bind calls; every other ResourceCatalog method is a
+// no-op stub because the collector only ever calls Bind.
+
+type fakeCatalog struct {
+	binds   []bindCall
+	bindErr error
+	// Release scripting, used by the deletion-guard tests. releaseRemaining
+	// maps a reference to the binding count left after the release; a missing
+	// entry answers -1 ("not a catalog handle").
+	releaseRemaining map[string]int64
+	releaseErr       error
+	releases         []string
+	ownerRefs        map[string][]string
+	listErr          error
+}
+
+func (c *fakeCatalog) Register(context.Context, uint64, string, interfaces.ResourceRegistration) (string, error) {
+	return "", nil
+}
+
+func (c *fakeCatalog) Resolve(context.Context, string) (*types.StoredResource, error) {
+	return nil, nil
+}
+
+func (c *fakeCatalog) ResolvePath(_ context.Context, v string) (string, *types.StoredResource, error) {
+	return v, nil, nil
+}
+
+func (c *fakeCatalog) Bind(_ context.Context, ref, ownerType, ownerID, relation string) error {
+	c.binds = append(c.binds, bindCall{ref, ownerType, ownerID, relation})
+	return c.bindErr
+}
+func (c *fakeCatalog) MarkDeleted(context.Context, string) error { return nil }
+
+func (c *fakeCatalog) Release(_ context.Context, ref, ownerType, ownerID string) (int64, error) {
+	c.releases = append(c.releases, ref+"|"+ownerType+"|"+ownerID)
+	if c.releaseErr != nil {
+		return -1, c.releaseErr
+	}
+	if remaining, ok := c.releaseRemaining[ref]; ok {
+		return remaining, nil
+	}
+	return -1, nil
+}
+
+func (c *fakeCatalog) ListReferencesByOwner(_ context.Context, _ string, ownerIDs ...string) ([]string, error) {
+	if c.listErr != nil {
+		return nil, c.listErr
+	}
+	var out []string
+	for _, id := range ownerIDs {
+		out = append(out, c.ownerRefs[id]...)
+	}
+	return out, nil
+}
+
+var _ interfaces.ResourceCatalog = (*fakeCatalog)(nil)
+
+func (c *fakeCatalog) CreateAccessGrant(context.Context, string, time.Duration) (string, error) {
+	return "", nil
+}
+
+func (c *fakeCatalog) ResolveAccessGrant(context.Context, string) (*types.StoredResource, error) {
+	return nil, nil
+}
+
+// -----------------------------------------------------------------------------
+// Tests
+// -----------------------------------------------------------------------------
+
+// resourceRefFileService is a fileService whose SaveBytes returns a valid
+// resource:// reference, so the collector's binding path is exercised.
+
 type resolvingCatalog struct {
 	tenantByRef map[string]uint64
 	binds       []bindCall
@@ -139,4 +224,50 @@ func TestBindChunkResourcesClaimsContentAndImageInfo(t *testing.T) {
 	if len(catalog.binds) != 2 {
 		t.Fatalf("binds = %v, want content and image_info handles", catalog.binds)
 	}
+}
+
+// fakeFileService is the minimal FileService the content-binding and resource
+// release tests need; it came from the deleted artifact collector tests.
+type fakeFileService struct {
+	saved     map[string][]byte
+	saveErr   error
+	seq       int
+	tenantIDs []uint64
+}
+
+func (f *fakeFileService) CheckConnectivity(_ context.Context) error { return nil }
+
+func (f *fakeFileService) SaveFile(_ context.Context, _ *multipart.FileHeader, _ uint64, _ string) (string, error) {
+	panic("SaveFile should not be called here")
+}
+
+func (f *fakeFileService) SaveBytes(_ context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
+	if f.saveErr != nil {
+		return "", f.saveErr
+	}
+	if f.saved == nil {
+		f.saved = map[string][]byte{}
+	}
+	f.seq++
+	key := "fake://tenant-" + fileName
+	f.saved[key] = append([]byte(nil), data...)
+	f.tenantIDs = append(f.tenantIDs, tenantID)
+	return key, nil
+}
+
+func (f *fakeFileService) GetFile(_ context.Context, filePath string) (io.ReadCloser, error) {
+	if data, ok := f.saved[filePath]; ok {
+		return io.NopCloser(strings.NewReader(string(data))), nil
+	}
+	return nil, errors.New("file not found")
+}
+
+func (f *fakeFileService) GetFileURL(_ context.Context, _ string) (string, error) {
+	return "", errors.New("unused")
+}
+
+func (f *fakeFileService) DeleteFile(_ context.Context, _ string) error { return nil }
+
+func (f *fakeFileService) CopyFile(_ context.Context, _ string, _ uint64, _ string) (string, error) {
+	return "", errors.New("unused")
 }

@@ -166,55 +166,15 @@ func (s *sessionService) AgentQA(
 		llmContext = []chat.Message{}
 	}
 
-	// Hold the sandbox across this turn so an install that finishes while we
-	// are running cannot rebuild the VM between tool calls. Staging below is
-	// the first resolve: if the previous turn left a stale mark, that is
-	// where the new image is picked up. HTTP send already holds the lease it
-	// took before persisting the turn, so only direct callers take one here.
+	// Hold the per-session send gate across this turn. HTTP send already took
+	// the same gate before persisting the turn, so only direct callers hold
+	// one here.
 	if !req.TurnLeaseHeld {
-		releaseTurn, err := s.holdSandboxTurn(ctx, sessionID, agentConfig.SandboxConfigID)
+		releaseTurn, err := s.holdTurn(ctx, sessionID, "")
 		if err != nil {
 			return err
 		}
 		defer releaseTurn()
-	}
-
-	// Reconcile all durable session attachments into the session's remote
-	// sandbox before the model can request shell or skill execution. The
-	// durable storage URL — not the ephemeral sandbox path — remains the
-	// source of truth. Gated on the sandbox manager advertising a session
-	// filesystem capability so provider-neutral remote wiring stays here.
-	var stagedAttachments []stagedSessionAttachment
-	stager, ok := s.agentService.(sessionAttachmentStager)
-	if !ok {
-		return errors.New("agent service does not support session attachment staging")
-	}
-	// Probe the backend this session's sandbox actually runs on. Gating on the
-	// process-wide manager instead could inspect a different backend than the
-	// named workspace config selected by this agent.
-	inputStore, storeErr := stager.sessionSandboxInputStore(ctx, sessionID, agentConfig.SandboxConfigID)
-	if storeErr != nil {
-		return fmt.Errorf("resolve sandbox file store for session %s: %w", sessionID, storeErr)
-	}
-	mgr, _, layoutErr := resolveSandboxForExecution(
-		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
-		req.Session.TenantID, sessionID, agentConfig.SandboxConfigID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop),
-	)
-	layout := sessionWorkspaceLayout(
-		ctx, sessionID, mgr, layoutErr, s.hostSandbox, agentConfig.SandboxConfigID,
-	)
-	if inputStore != nil && strings.TrimSpace(layout.InputDir) != "" {
-		sessionAttachments, loadErr := s.messageRepo.GetSessionAttachments(ctx, sessionID)
-		if loadErr != nil {
-			return fmt.Errorf("load session attachments for sandbox staging: %w", loadErr)
-		}
-		stagedAttachments, err = stager.stageSessionAttachments(
-			ctx, sessionID, agentConfig.SandboxConfigID, req.Session.TenantID, sessionAttachments, layout,
-		)
-		if err != nil {
-			return fmt.Errorf("restore session attachments into sandbox: %w", err)
-		}
 	}
 
 	// Create agent engine with EventBus
@@ -265,11 +225,6 @@ func (s *sessionService) AgentQA(
 		agentQuery += req.Attachments.BuildPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
 	}
-	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
-		agentQuery += manifest
-		logger.Infof(ctx, "Appended %d staged sandbox attachment path(s) to agent query", len(stagedAttachments))
-	}
-
 	// Scope envelopes (runtime_context / must_use) are injected per LLM call inside
 	// the agent engine only; we intentionally do not persist them on user messages
 	// so multi-turn history stays clean and is not skewed by stale @mention scope.
@@ -341,36 +296,6 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.LLMCallTimeout = s.cfg.Agent.LLMCallTimeout
 	}
 
-	// Configure skills based on CustomAgentConfig
-	s.configureSkillsFromAgent(ctx, agentConfig, customAgent)
-
-	// Then add the skills installed into the sandbox config this run boots.
-	//
-	// The workspace is the one on the context rather than the agent's owner,
-	// because that is where resolveSandboxForExecution reads it; skillsForRun
-	// picks the config the same way the sandbox resolution does.
-	sandboxTenantID, _ := types.TenantIDFromContext(ctx)
-	var (
-		skillConfigID string
-		tenantSkills  []*types.TenantSkillEntity
-	)
-	if s.hostDesktop {
-		skillConfigID, tenantSkills = hostSkillsForRun(ctx, s.tenantSkillRepo, s.hostSkillTree, sandboxTenantID)
-	} else {
-		skillConfigID, tenantSkills = skillsForRun(
-			ctx, s.sandboxPinner, s.sandboxConfigRepo, s.tenantSkillRepo,
-			sandboxTenantID, req.Session.ID, agentConfig.SandboxConfigID,
-		)
-	}
-	agentConfig.TenantSkills = tenantSkills
-	if len(tenantSkills) > 0 {
-		// The config named here is the one the skills came from, which is the
-		// pinned one whenever it differs from the agent's - the only case the
-		// line is worth reading.
-		logger.Infof(ctx, "Sandbox config %s offers %d installed skill(s) to this run",
-			skillConfigID, len(tenantSkills))
-	}
-
 	// Resolve knowledge bases using shared helper
 	kbIDs, knowledgeIDs, err := s.resolveKnowledgeBases(ctx, req)
 	if err != nil {
@@ -389,7 +314,6 @@ func (s *sessionService) buildAgentConfig(
 	// whitelist to the mentioned items and records the pinned set used for the
 	// <must_use> hint, keeping all scope logic in one place per resource type.
 	isSharedAgent := req.SharedAgentReadOnly
-	applyPerRequestSkillScope(ctx, agentConfig, customAgent.Config.SkillsSelectionMode, req.SkillNames)
 	applyPerRequestMCPScope(ctx, agentConfig, customAgent.Config.MCPServices, isSharedAgent, req.MCPServiceIDs)
 
 	// Use custom agent's system prompt if specified
@@ -469,38 +393,6 @@ func mergeResolvedTagKnowledgeIDs(
 		merged = append(merged, target.KnowledgeIDs...)
 	}
 	return uniqueNonEmptyStrings(merged)
-}
-
-// applyPerRequestSkillScope records the @Skill mentions for this turn as the
-// pinned set that drives the <must_use> hint. It deliberately does NOT narrow
-// the allow-gate: an agent whose prompt requires a skill the user did not
-// @mention must still be able to read and execute it. Mentioning a skill only
-// prioritizes it, it never revokes access to the agent's configured set.
-//
-// It is a no-op when no skills were mentioned or skills are disabled.
-func applyPerRequestSkillScope(
-	ctx context.Context,
-	agentConfig *types.AgentConfig,
-	skillsMode string,
-	requested []string,
-) {
-	if len(requested) == 0 {
-		return
-	}
-	if skillsMode == "none" || skillsMode == "" {
-		logger.Warnf(ctx, "Ignoring @skill mention: agent skills selection is disabled (mode=%s)", skillsMode)
-		return
-	}
-	if !agentConfig.SkillsEnabled {
-		return
-	}
-	// PinnedSkillNames carries only mentioned skills that are currently
-	// allowed, so the <must_use> hint never directs the model at a skill it
-	// cannot load. An empty AllowedSkills means all skills are allowed,
-	// matching Manager.isSkillAllowed, so every mention is pinned in that case.
-	agentConfig.PinnedSkillNames = pinPreservingRequestOrder(requested, agentConfig.AllowedSkills)
-	logger.Infof(ctx, "Applied per-request @skill scope: requested=%v effective=%v pinned=%v",
-		requested, agentConfig.AllowedSkills, agentConfig.PinnedSkillNames)
 }
 
 // applyPerRequestMCPScope pins authorized @MCP mentions for the <must_use> hint,
@@ -624,43 +516,6 @@ func dedupPreservingOrder(values []string) []string {
 		result = append(result, value)
 	}
 	return result
-}
-
-// configureSkillsFromAgent turns the agent's skill picker into runtime flags.
-// The skills themselves come from the sandbox image (TenantSkills), not from
-// a host skill directory — that copy is not what shell_exec would find
-// inside the sandbox.
-func (s *sessionService) configureSkillsFromAgent(
-	ctx context.Context,
-	agentConfig *types.AgentConfig,
-	customAgent *types.CustomAgent,
-) {
-	if customAgent == nil {
-		return
-	}
-	agentConfig.SandboxConfigID = customAgent.Config.SandboxConfigID
-	switch customAgent.Config.SkillsSelectionMode {
-	case "all":
-		agentConfig.SkillsEnabled = true
-		agentConfig.AllowedSkills = nil
-		logger.Infof(ctx, "SkillsSelectionMode=all: using installed sandbox skills")
-	case "selected":
-		if len(customAgent.Config.SelectedSkills) > 0 {
-			agentConfig.SkillsEnabled = true
-			agentConfig.AllowedSkills = customAgent.Config.SelectedSkills
-			logger.Infof(ctx, "SkillsSelectionMode=selected: enabled %d selected skills: %v",
-				len(customAgent.Config.SelectedSkills), customAgent.Config.SelectedSkills)
-		} else {
-			agentConfig.SkillsEnabled = false
-			logger.Infof(ctx, "SkillsSelectionMode=selected but no skills selected: skills disabled")
-		}
-	case "none", "":
-		agentConfig.SkillsEnabled = false
-		logger.Infof(ctx, "SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
-	default:
-		agentConfig.SkillsEnabled = false
-		logger.Warnf(ctx, "Unknown SkillsSelectionMode=%s: skills disabled", customAgent.Config.SkillsSelectionMode)
-	}
 }
 
 // questionOriginInTargets keeps a suggested question's origin only when this

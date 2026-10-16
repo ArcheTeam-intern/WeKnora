@@ -34,7 +34,7 @@ func TestAgentStreamHandlerToolResultFailureKeepsToolResultType(t *testing.T) {
 	streams := &capturingStreamManager{}
 	h := NewAgentStreamHandler(
 		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
-		&types.Message{}, streams, nil, nil, nil, nil,
+		&types.Message{}, streams, nil,
 	)
 
 	err := h.handleToolResult(context.Background(), event.Event{
@@ -62,7 +62,7 @@ func TestAgentStreamHandlerInternalErrorKeepsErrorType(t *testing.T) {
 	streams := &capturingStreamManager{}
 	h := NewAgentStreamHandler(
 		context.Background(), "sess-1", "msg-1", "req-1", 1, time.Now(),
-		&types.Message{}, streams, nil, nil, nil, nil,
+		&types.Message{}, streams, nil,
 	)
 
 	err := h.handleError(context.Background(), event.Event{
