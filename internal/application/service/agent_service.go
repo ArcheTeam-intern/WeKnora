@@ -205,7 +205,6 @@ func (s *agentService) CreateAgentEngine(
 	return engine, nil
 }
 
-
 // resolveKBAndDocInfos loads knowledge base metadata and selected document info for prompt.
 func (s *agentService) resolveKBAndDocInfos(
 	ctx context.Context,
@@ -813,6 +812,3 @@ func (s *agentService) getSelectedDocumentInfos(ctx context.Context, knowledgeID
 	logger.Infof(ctx, "Loaded %d selected documents metadata for prompt", len(selectedDocs))
 	return selectedDocs, nil
 }
-
-
-

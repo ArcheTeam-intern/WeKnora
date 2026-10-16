@@ -92,7 +92,6 @@ func RegisterInitializationRoutes(r *gin.RouterGroup, handler *handler.Initializ
 	g.apiKeyRoute(r, http.MethodPost, "/initialization/extract/fabri-text", apiKeyManageModels(apiKeyFullAccess()), g.Admin(), handler.FabriText)
 }
 
-
 // RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
 //
 // Vector stores are tenant-level infrastructure; reads are Viewer+, all

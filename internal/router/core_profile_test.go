@@ -20,20 +20,20 @@ type stubEndpointService struct{ interfaces.MCPEndpointService }
 // SERVER entry point stay wired.
 func TestRemovedModulesReadAsUnsupported(t *testing.T) {
 	params := RouterParams{
-		Config:                      &config.Config{},
-		OrganizationHandler:         &handler.OrganizationHandler{},
-		CustomAgentHandler:          &handler.CustomAgentHandler{},
-		TenantHandler:               &handler.TenantHandler{},
-		VectorStoreHandler:          &handler.VectorStoreHandler{},
-		StorageBackendHandler:       &handler.StorageBackendHandler{},
-		MCPEndpointHandler:          &handler.MCPEndpointHandler{},
-		MCPServer:                   &mcpserver.Server{},
-		MCPEndpointService:          &stubEndpointService{},
-		MessageSuggestionHandler:    &handler.MessageSuggestionHandler{},
-		TenantMemberHandler:         &handler.TenantMemberHandler{},
-		TenantInvitationHandler:     &handler.TenantInvitationHandler{},
-		AuditLogHandler:             &handler.AuditLogHandler{},
-		TenantAPIKeyService:         nil,
+		Config:                   &config.Config{},
+		OrganizationHandler:      &handler.OrganizationHandler{},
+		CustomAgentHandler:       &handler.CustomAgentHandler{},
+		TenantHandler:            &handler.TenantHandler{},
+		VectorStoreHandler:       &handler.VectorStoreHandler{},
+		StorageBackendHandler:    &handler.StorageBackendHandler{},
+		MCPEndpointHandler:       &handler.MCPEndpointHandler{},
+		MCPServer:                &mcpserver.Server{},
+		MCPEndpointService:       &stubEndpointService{},
+		MessageSuggestionHandler: &handler.MessageSuggestionHandler{},
+		TenantMemberHandler:      &handler.TenantMemberHandler{},
+		TenantInvitationHandler:  &handler.TenantInvitationHandler{},
+		AuditLogHandler:          &handler.AuditLogHandler{},
+		TenantAPIKeyService:      nil,
 	}
 
 	removed := []string{

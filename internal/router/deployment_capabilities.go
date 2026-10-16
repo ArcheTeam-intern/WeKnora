@@ -21,10 +21,10 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		// Match RegisterMCPEndpointRoutes / RegisterMCPServerRoutes. The MCP
 		// SERVER surface — the main product's entry point — stays in every
 		// profile.
-		MCPServer: params.MCPEndpointHandler != nil && params.MCPServer != nil && params.MCPEndpointService != nil,
-		API:       params.TenantHandler != nil && params.TenantAPIKeyService != nil,
-		MCP:       false,
-		WebSearch: false,
+		MCPServer:     params.MCPEndpointHandler != nil && params.MCPServer != nil && params.MCPEndpointService != nil,
+		API:           params.TenantHandler != nil && params.TenantAPIKeyService != nil,
+		MCP:           false,
+		WebSearch:     false,
 		VectorStore:   params.VectorStoreHandler != nil,
 		Storage:       params.StorageBackendHandler != nil,
 		Sandbox:       false,

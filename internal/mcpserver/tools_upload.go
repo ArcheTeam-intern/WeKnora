@@ -162,23 +162,23 @@ func (s *Server) handleUploadFile(
 		return errorResult(&ToolError{Code: CodeInternal, Message: stageErr.Error()}), nil
 	}
 	receipt := map[string]any{
-		"upload_id":     record.UploadID,
-		"state":         record.State,
-		"file_name":     record.FileName,
-		"file_size":     record.FileSize,
-		"sha256":        record.SHA256,
-		"replay":        replay,
-		"expires_at":    record.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
-		"idempotency_key": record.IdempotencyKey,
+		"upload_id":         record.UploadID,
+		"state":             record.State,
+		"file_name":         record.FileName,
+		"file_size":         record.FileSize,
+		"sha256":            record.SHA256,
+		"replay":            replay,
+		"expires_at":        record.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+		"idempotency_key":   record.IdempotencyKey,
 		"knowledge_base_id": record.KnowledgeBaseID,
-		"next_step":     "call import_document_file(knowledge_base_id, upload_id) to start parsing",
+		"next_step":         "call import_document_file(knowledge_base_id, upload_id) to start parsing",
 	}
 	return jsonResult(map[string]any{
-		"upload_id": record.UploadID,
-		"replay":    replay,
-		"receipt":   receipt,
-		"hint":      "call import_document_file(knowledge_base_id, upload_id) to start parsing",
-		"raw_size_b64": len(contentB64),
+		"upload_id":      record.UploadID,
+		"replay":         replay,
+		"receipt":        receipt,
+		"hint":           "call import_document_file(knowledge_base_id, upload_id) to start parsing",
+		"raw_size_b64":   len(contentB64),
 		"raw_size_bytes": record.FileSize,
 	})
 }

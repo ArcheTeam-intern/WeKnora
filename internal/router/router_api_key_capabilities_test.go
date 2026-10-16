@@ -300,7 +300,6 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 	}
 }
 
-
 func TestTenantMemberRoutesDeclareManageMembersCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}

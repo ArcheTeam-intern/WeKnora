@@ -14,12 +14,20 @@ func TestGraphSourcesVerifyEachChunkAndBinding(t *testing.T) {
 	}}
 	enrichGraphEdgesWithSourceRefsV2(data, map[string]interface{}{"edges": []map[string]interface{}{edge}}, []*types.KnowledgeBase{{ID: "kb"}})
 	refs := edge["source_refs_v2"].([]types.SourceRefV2)
-	if len(refs) != 3 { t.Fatalf("want per-chunk refs, got %+v", refs) }
-	if refs[0].ProvenanceStatus != "verified" || refs[0].Quote != "one quote" { t.Fatalf("readable source = %+v", refs[0]) }
-	for _, ref := range refs[1:] {
-		if ref.ProvenanceStatus == "verified" || ref.Quote != "" || ref.KnowledgeBaseID == "other" { t.Fatalf("unread/mismatched source leaked evidence: %+v", ref) }
+	if len(refs) != 3 {
+		t.Fatalf("want per-chunk refs, got %+v", refs)
 	}
-	if edge["id"] != "relation" { t.Fatal("relation identity changed") }
+	if refs[0].ProvenanceStatus != "verified" || refs[0].Quote != "one quote" {
+		t.Fatalf("readable source = %+v", refs[0])
+	}
+	for _, ref := range refs[1:] {
+		if ref.ProvenanceStatus == "verified" || ref.Quote != "" || ref.KnowledgeBaseID == "other" {
+			t.Fatalf("unread/mismatched source leaked evidence: %+v", ref)
+		}
+	}
+	if edge["id"] != "relation" {
+		t.Fatal("relation identity changed")
+	}
 }
 
 // TestUnmappedGraphEdgesMustNotClaimAllQueryEvidence is the plan §8 task 6

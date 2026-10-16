@@ -1447,7 +1447,6 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 	})
 }
 
-
 // initDocReaderClient initializes the DocumentReader client (lightweight API).
 func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) {
 	addr := strings.TrimSpace(os.Getenv("DOCREADER_ADDR"))
