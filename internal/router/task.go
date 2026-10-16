@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -315,6 +316,13 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	mux.HandleFunc(types.TypeWikiIngest, params.WikiIngest.Handle)
 	mux.HandleFunc(types.TypeWikiFinalize, params.WikiIngest.Handle)
 
+	// Drain the task types whose feature was removed. Without a handler asynq
+	// answers ErrHandlerNotFound, so a pre-upgrade backlog would retry on
+	// every delivery and finally dead-letter — burning shared worker capacity
+	// for work nobody wants any more. See types.RetiredTaskTypes for the
+	// retirement strategy and for when the guard can be removed.
+	registerRetiredTaskHandlers(mux.HandleFunc)
+
 	// Run the same mux on every pool. Shared and dedicated servers intentionally
 	// overlap, but Redis dequeue is atomic, so each task still executes once.
 	runPool := func(name string, srv *asynq.Server) {
@@ -331,6 +339,48 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	runPool("shared-pool", params.SharedServer)
 	runPool("wiki-pool", params.WikiServer)
 	return mux
+}
+
+// drainedRetiredTasks counts the retired task types this process has drained.
+var drainedRetiredTasks atomic.Uint64
+
+// DrainedRetiredTaskCount reports how many retired tasks this process has
+// drained. The count is process-local — every replica drains its own share of
+// a Redis queue — so it is a "did this installation still have a backlog"
+// signal rather than a cluster total. See types.RetiredTaskTypes.
+func DrainedRetiredTaskCount() uint64 {
+	return drainedRetiredTasks.Load()
+}
+
+// registerRetiredTaskHandlers installs drainRetiredTask for every retired task
+// type through the given registrar. Both execution paths call it — the asynq
+// mux in RunAsynqServer (standard mode) and the SyncTaskExecutor in
+// RegisterSyncHandlers (Lite mode) — so neither path can answer a pre-upgrade
+// task with ErrHandlerNotFound.
+func registerRetiredTaskHandlers(register func(taskType string, handler func(context.Context, *asynq.Task) error)) {
+	for _, retiredType := range types.RetiredTaskTypes {
+		register(retiredType, drainRetiredTask)
+	}
+}
+
+// drainRetiredTask consumes a task whose feature was removed. Returning nil is
+// the whole point: asynq records the task as done, so it is neither retried
+// (which ErrHandlerNotFound would do on every delivery) nor dead-lettered, and
+// it costs one function call of shared worker capacity.
+//
+// It must stay inert. It decodes no payload, writes nothing, and holds no
+// service dependency — the retired payload type is kept only so the historical
+// shape stays documented. Restoring the feature means restoring its service
+// and removing the type from types.RetiredTaskTypes, not extending this
+// handler.
+func drainRetiredTask(ctx context.Context, t *asynq.Task) error {
+	count := drainedRetiredTasks.Add(1)
+	logger.Warnf(ctx,
+		"retired task %q drained without processing: no handler remains for it, "+
+			"so it was completed on first delivery instead of retrying into the dead letter "+
+			"(drained by this process: %d)",
+		t.Type(), count)
+	return nil
 }
 
 // deadLetterKnowledgePayload extracts only the field we need from any

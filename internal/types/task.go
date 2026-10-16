@@ -42,9 +42,10 @@ const (
 	QueueSync           = "sync"
 	QueueMaintenance    = "low"
 	QueueWiki           = "wiki"
-	// QueueMemory carries debounced long-term memory distillation. It sits in
-	// the enrichment pool because it is a background LLM call whose latency
-	// nobody is waiting on.
+	// QueueMemory carried debounced long-term memory distillation. The
+	// distillation service is gone (see RetiredTaskTypes); the queue and its
+	// place in the topology are kept only so a pre-upgrade backlog still
+	// reaches the drain handler instead of failing with ErrHandlerNotFound.
 	QueueMemory = "memory"
 )
 
@@ -253,9 +254,31 @@ const (
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
-	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）
+	// TypeMemoryExtract 长期记忆抽取任务（会话轮次防抖后异步执行）。该功能已退役：
+	// 类型保留只为消费升级前遗留的任务，见 RetiredTaskTypes。
 	TypeMemoryExtract = "memory:extract"
 )
+
+// RetiredTaskTypes lists task types that older releases enqueued and this build
+// no longer implements. They stay declared and their queues stay in the worker
+// topology on purpose: asynq keeps pending and retry tasks in Redis across an
+// upgrade, and a mux without a handler answers ErrHandlerNotFound for each of
+// them, which retries the task on every delivery until it lands in the dead
+// letter — all of it spent on shared worker capacity.
+//
+// Retirement strategy, recorded so it is reversed deliberately rather than by
+// accident: internal/router registers drainRetiredTask for every type listed
+// here, on both execution paths (the asynq mux and the Lite SyncTaskExecutor).
+// The drain handler completes the task on its first delivery — asynq then
+// neither retries it nor dead-letters it — decodes no payload, writes nothing
+// and calls no service, and logs a warning with a running counter so an
+// operator can tell whether an installation still had a backlog. Retiring an
+// entry means deleting it together with the queue definition, this registry
+// entry's payload type and the drain registration, and only once no
+// installation can still hold pre-upgrade tasks.
+var RetiredTaskTypes = []string{
+	TypeMemoryExtract,
+}
 
 // MemoryExtractPayload carries everything the background distillation task
 // needs. Scope (tenant + subject) travels in the payload rather than being

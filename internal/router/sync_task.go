@@ -264,5 +264,9 @@ func RegisterSyncHandlers(params SyncTaskParams) {
 	params.Executor.RegisterHandler(types.TypeDataSourceSync, params.DataSourceService.ProcessSync)
 	params.Executor.RegisterHandler(types.TypeWikiIngest, params.WikiIngest.Handle)
 	params.Executor.RegisterHandler(types.TypeWikiFinalize, params.WikiIngest.Handle)
+	// Retired task types get the same drain handler the asynq mux uses. Lite
+	// cannot hold a backlog across restarts, but a task enqueued and executed
+	// in the same process must not fail with "no handler registered for type".
+	registerRetiredTaskHandlers(params.Executor.RegisterHandler)
 	logger.Infof(context.Background(), "[SyncTask] All task handlers registered (Lite mode, no Redis)")
 }
