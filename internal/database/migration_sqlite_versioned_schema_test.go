@@ -69,7 +69,13 @@ var versionedSQLiteColumns = map[string][]string{
 	}, // 000028
 }
 
-const expectedSQLiteMigrationVersion = 33
+// expectedSQLiteMigrationVersion is the version the runner must reach after
+// Up(): the highest numbered migration in migrations/sqlite. 000034 and
+// 000035 landed with the MCP server work (bd0c5621a) and left this constant
+// at 33; bump it in the same change that adds a migration. It is deliberately
+// hand-written rather than derived from the directory: a deleted migration
+// must fail here instead of silently lowering the expectation.
+const expectedSQLiteMigrationVersion = 35
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
