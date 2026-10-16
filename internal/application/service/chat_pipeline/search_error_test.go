@@ -257,59 +257,6 @@ func (s *partialSearchKnowledgeBaseService) HybridSearch(
 	return []*types.SearchResult{{ID: "chunk-good", Content: "可用结果", KnowledgeID: "knowledge-good"}}, nil
 }
 
-type stubWebSearchService struct {
-	interfaces.WebSearchService
-	results []*types.WebSearchResult
-}
-
-func (s *stubWebSearchService) Search(
-	_ context.Context, _ string, _ *types.WebSearchConfig, _ string,
-) ([]*types.WebSearchResult, error) {
-	return s.results, nil
-}
-
-func TestSearchKeepsWebResultsWhenKnowledgeBaseFails(t *testing.T) {
-	rootCause := errors.New("kb store unavailable")
-	plugin := &PluginSearch{
-		knowledgeBaseService: &failingSearchKnowledgeBaseService{err: rootCause},
-		webSearchService: &stubWebSearchService{
-			results: []*types.WebSearchResult{{
-				URL:     "https://example.com/doc",
-				Title:   "Web hit",
-				Content: "web content",
-			}},
-		},
-		tenantService: &struct{ interfaces.TenantService }{},
-	}
-	chatManage := &types.ChatManage{
-		PipelineRequest: types.PipelineRequest{
-			SearchTargets: types.SearchTargets{{
-				Type:            types.SearchTargetTypeKnowledgeBase,
-				KnowledgeBaseID: "kb-1",
-			}},
-			EmbeddingTopK:       10,
-			WebSearchEnabled:    true,
-			WebSearchProviderID: "provider-1",
-		},
-		PipelineState: types.PipelineState{RewriteQuery: "并发检索"},
-	}
-	nextCalled := false
-
-	err := plugin.OnEvent(context.Background(), types.CHUNK_SEARCH, chatManage, func() *PluginError {
-		nextCalled = true
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("expected web results to keep pipeline alive, got %#v", err)
-	}
-	if !nextCalled {
-		t.Fatal("expected pipeline to continue with web results")
-	}
-	if len(chatManage.SearchResult) != 1 || chatManage.SearchResult[0].ID != "https://example.com/doc" {
-		t.Fatalf("expected web search result, got %#v", chatManage.SearchResult)
-	}
-}
-
 type wikiOnlySearchKnowledgeBaseService struct {
 	interfaces.KnowledgeBaseService
 	embedErr     error

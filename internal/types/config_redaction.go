@@ -145,19 +145,6 @@ func CredentialsConfigForResponse(cfg *CredentialsConfig, maskSecrets bool) *Cre
 	return &out
 }
 
-// MergeWebSearchConfigForUpdate applies preserve semantics to secret fields on
-// tenant KV PUT.
-func MergeWebSearchConfigForUpdate(incoming, existing *WebSearchConfig) *WebSearchConfig {
-	out := *EffectiveWebSearchConfig(incoming)
-	var prev WebSearchConfig
-	if existing != nil {
-		prev = *EffectiveWebSearchConfig(existing)
-	}
-	out.APIKey = PreserveIfRedacted(out.APIKey, prev.APIKey)
-	out.ProxyURL = PreserveIfRedacted(out.ProxyURL, prev.ProxyURL)
-	return &out
-}
-
 // MergeParserEngineConfigForUpdate applies preserve semantics to secret fields
 // on tenant KV PUT.
 func MergeParserEngineConfigForUpdate(incoming, existing *ParserEngineConfig) *ParserEngineConfig {

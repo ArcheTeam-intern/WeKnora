@@ -264,6 +264,9 @@ type CustomAgentConfig struct {
 
 	// ===== Web Search Settings =====
 	// Whether web search is enabled
+	// WebSearchEnabled / WebSearchMaxResults / WebSearchProviderID are retired:
+	// public web search was removed from this build. They stay so stored agent
+	// configs keep decoding and re-encoding unchanged; nothing reads them.
 	WebSearchEnabled bool `yaml:"web_search_enabled" json:"web_search_enabled"`
 	// Maximum web search results
 	WebSearchMaxResults int `yaml:"web_search_max_results" json:"web_search_max_results"`
@@ -562,9 +565,6 @@ func (a *CustomAgent) EnsureDefaults() {
 	}
 	if a.Config.MaxIterations < 0 {
 		a.Config.MaxIterations = UnlimitedMaxIterations
-	}
-	if a.Config.WebSearchMaxResults == 0 {
-		a.Config.WebSearchMaxResults = 5
 	}
 	if a.Config.HistoryTurns == 0 {
 		a.Config.HistoryTurns = 5

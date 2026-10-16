@@ -68,9 +68,6 @@ type RouterParams struct {
 	MCPServiceHandler            *handler.MCPServiceHandler
 	MCPCredentialsHandler        *handler.MCPCredentialsHandler
 	MCPOAuthHandler              *handler.MCPOAuthHandler
-	WebSearchHandler             *handler.WebSearchHandler
-	WebSearchProviderHandler     *handler.WebSearchProviderHandler
-	WebSearchCredentialsHandler  *handler.WebSearchProviderCredentialsHandler
 	VectorStoreHandler           *handler.VectorStoreHandler
 	StorageBackendHandler        *handler.StorageBackendHandler
 	StorageBackendResolver       interfaces.StorageBackendResolver
@@ -322,10 +319,10 @@ func NewRouter(params RouterParams) *gin.Engine {
 		if reach.MCPClientToolbox {
 			RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
 		}
-		if reach.PublicWebSearch {
-			RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
-			RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
-		}
+		// Public web search was physically removed from this build: no search
+		// routes, no provider-credential routes, no web tools in the agent
+		// runtime. The stored tenants.web_search_config column is left alone
+		// (types.Tenant.WebSearchConfig is a compat field).
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)

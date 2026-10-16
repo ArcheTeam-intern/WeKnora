@@ -190,7 +190,6 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 	sections := BuildSystemPromptSections(
 		e.knowledgeBasesInfo,
-		e.config.WebSearchEnabled,
 		e.systemPromptOptions(ctx),
 		e.systemPromptTemplate,
 	)
@@ -341,7 +340,6 @@ func (e *AgentEngine) Execute(
 			"message_id":          messageID,
 			"max_iterations":      e.config.MaxIterations,
 			"parallel_tool_calls": e.config.ParallelToolCalls,
-			"web_search":          e.config.WebSearchEnabled,
 			"multi_turn":          e.config.MultiTurnEnabled,
 			"knowledge_base_ids":  kbIDs,
 			"allowed_tools":       e.config.AllowedTools,

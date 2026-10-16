@@ -3165,7 +3165,6 @@ func (s *installAgentService) CreateAgentEngine(
 	_ rerank.Reranker,
 	_ *event.EventBus,
 	_ string,
-	_ string,
 ) (interfaces.AgentEngine, error) {
 	s.fx.engineConfig = config
 	s.fx.engineModel = chatModel

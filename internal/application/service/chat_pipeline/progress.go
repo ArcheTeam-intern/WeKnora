@@ -3,7 +3,6 @@ package chatpipeline
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
@@ -16,8 +15,6 @@ const (
 	queryUnderstandProgressTool = "query_understand"
 
 	retrievalSourceKnowledge = "knowledge"
-	retrievalSourceWeb       = "web"
-	retrievalSourceMixed     = "mixed"
 )
 
 // StageProgress tracks an in-flight pipeline progress tool_call.
@@ -44,8 +41,6 @@ func IsConsolidatedRetrievalStage(stage types.EventType, chatManage *types.ChatM
 	switch stage {
 	case types.CHUNK_SEARCH_PARALLEL, types.CHUNK_RERANK, types.CHUNK_MERGE, types.FILTER_TOP_K:
 		return chatManage.NeedsRetrieval()
-	case types.WEB_FETCH:
-		return chatManage.WebSearchEnabled
 	case types.DATA_ANALYSIS:
 		return chatManage.DataAnalysisEnabled && chatManage.NeedsRetrieval()
 	default:
@@ -84,7 +79,7 @@ func BeginRetrievalProgress(ctx context.Context, chatManage *types.ChatManage) *
 
 	toolCallID := uuid.New().String()
 	args := map[string]any{
-		"search_source": retrievalSearchSource(chatManage),
+		"search_source": retrievalSourceKnowledge,
 	}
 	if chatManage.RewriteQuery != "" {
 		args["query"] = chatManage.RewriteQuery
@@ -182,7 +177,7 @@ func EndRetrievalProgress(
 		return
 	}
 
-	count, docCount, webCount := retrievalResultBreakdown(chatManage)
+	count, docCount := retrievalResultBreakdown(chatManage)
 
 	// ErrSearchNothing means retrieval short-circuited the pipeline into the
 	// fallback answer: nothing survived filtering, and the fallback prompt gets
@@ -195,20 +190,10 @@ func EndRetrievalProgress(
 	candidateCount := 0
 	if stageErr == ErrSearchNothing {
 		candidateCount = count
-		count, docCount, webCount = 0, 0, 0
+		count, docCount = 0, 0
 	}
 
-	searchSource := retrievalSearchSource(chatManage)
-	if count > 0 {
-		switch {
-		case docCount > 0 && webCount > 0:
-			searchSource = retrievalSourceMixed
-		case webCount > 0:
-			searchSource = retrievalSourceWeb
-		default:
-			searchSource = retrievalSourceKnowledge
-		}
-	}
+	searchSource := retrievalSourceKnowledge
 	success := stageErr == nil || stageErr == ErrSearchNothing
 	output := ""
 	if success {
@@ -240,36 +225,11 @@ func EndRetrievalProgress(
 			Data: map[string]interface{}{
 				"count":           count,
 				"doc_count":       docCount,
-				"web_count":       webCount,
 				"search_source":   searchSource,
 				"candidate_count": candidateCount,
 			},
 		},
 	})
-}
-
-func hasKBRetrievalTargets(chatManage *types.ChatManage) bool {
-	if chatManage == nil {
-		return false
-	}
-	return types.HasKnowledgeRetrievalScope(
-		chatManage.SearchTargets,
-		chatManage.KnowledgeBaseIDs,
-		chatManage.KnowledgeIDs,
-	)
-}
-
-func retrievalSearchSource(chatManage *types.ChatManage) string {
-	hasKB := hasKBRetrievalTargets(chatManage)
-	hasWeb := chatManage != nil && chatManage.WebSearchEnabled
-	switch {
-	case hasKB && hasWeb:
-		return retrievalSourceMixed
-	case hasWeb:
-		return retrievalSourceWeb
-	default:
-		return retrievalSourceKnowledge
-	}
 }
 
 func retrievalResults(chatManage *types.ChatManage) []*types.SearchResult {
@@ -283,24 +243,16 @@ func retrievalResults(chatManage *types.ChatManage) []*types.SearchResult {
 	}
 }
 
-func retrievalResultBreakdown(chatManage *types.ChatManage) (total, docCount, webCount int) {
+// retrievalResultBreakdown counts the current turn's retrieved rows. Every row
+// is knowledge: web results used to be counted separately, and public web
+// search is retired.
+func retrievalResultBreakdown(chatManage *types.ChatManage) (total, docCount int) {
 	for _, result := range retrievalResults(chatManage) {
 		if result == nil {
 			continue
 		}
 		total++
-		if isWebSearchResult(result) {
-			webCount++
-		} else {
-			docCount++
-		}
+		docCount++
 	}
-	return total, docCount, webCount
-}
-
-func isWebSearchResult(result *types.SearchResult) bool {
-	if strings.EqualFold(result.ChunkType, "web_search") {
-		return true
-	}
-	return strings.EqualFold(result.KnowledgeSource, "web_search")
+	return total, docCount
 }

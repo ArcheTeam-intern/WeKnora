@@ -310,7 +310,6 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 	RegisterEvaluationRoutes(v1, &handler.EvaluationHandler{}, g)
 	RegisterSystemRoutes(v1, &handler.SystemHandler{}, g)
 	RegisterMCPServiceRoutes(v1, &handler.MCPServiceHandler{}, &handler.MCPCredentialsHandler{}, &handler.MCPOAuthHandler{}, g)
-	RegisterWebSearchProviderRoutes(v1, &handler.WebSearchProviderHandler{}, &handler.WebSearchProviderCredentialsHandler{}, g)
 	RegisterVectorStoreRoutes(v1, &handler.VectorStoreHandler{}, g)
 	RegisterStorageBackendRoutes(v1, &handler.StorageBackendHandler{}, g)
 	RegisterSandboxConfigRoutes(v1, &handler.SandboxConfigHandler{}, &handler.SandboxSkillHandler{}, g)
@@ -338,7 +337,6 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
 		},
-		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},
 		{http.MethodGet, "/api/v1/datasource", types.APIKeyCapabilityManageDataSources},

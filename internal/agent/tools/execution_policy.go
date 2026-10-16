@@ -6,7 +6,7 @@ package tools
 func CanRunConcurrently(name string) bool {
 	switch name {
 	case ToolSearchKnowledge, ToolReadDocument, ToolListDocuments,
-		ToolQueryKnowledgeGraph, ToolSearchMemory, ToolDataSchema, ToolWebSearch, ToolWebFetch,
+		ToolQueryKnowledgeGraph, ToolSearchMemory, ToolDataSchema,
 		ToolReadFile, ToolListSandboxFiles,
 		ToolWikiSearch, ToolWikiReadPage, ToolWikiReadIssue:
 		return true

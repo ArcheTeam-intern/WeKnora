@@ -44,13 +44,13 @@ NOTE that you should not use this tool if there is only one trivial task to do. 
 <example>
 User: Compare WeKnora with other RAG frameworks like LangChain and LlamaIndex.
 Assistant: I'll help you compare WeKnora with other RAG frameworks. Let me create a retrieval plan to gather information about each framework.
-*Creates a todo list with retrieval tasks: 1) Search knowledge base for WeKnora features and architecture, 2) Use web_search to find LangChain documentation and features, 3) Use web_search to find LlamaIndex documentation and features, 4) Retrieve detailed comparison points for each framework*
+*Creates a todo list with retrieval tasks: 1) Search the knowledge base for WeKnora features and architecture, 2) Search the knowledge base for the LangChain comparison material, 3) Search the knowledge base for the LlamaIndex comparison material, 4) Retrieve detailed comparison points for each framework*
 *Note: Summary and synthesis will be handled by thinking tool after all retrieval tasks are completed*
 Assistant: Let me start by searching the knowledge base for detailed WeKnora information.
 
 <reasoning>
 The assistant used todo_write tool correctly because:
-1. The task requires multiple retrieval operations (searching KB for WeKnora, web search for LangChain and LlamaIndex)
+1. The task requires multiple retrieval operations (searching the knowledge base for WeKnora, LangChain and LlamaIndex material)
 2. Each retrieval task is specific and actionable
 3. The todo list focuses on WHAT to retrieve, not HOW to summarize
 4. Summary and synthesis will be handled separately by thinking tool after all retrieval is complete
@@ -61,13 +61,13 @@ The assistant used todo_write tool correctly because:
 <example>
 User: I need to research the latest developments in vector databases for RAG applications.
 Assistant: I'll help you research vector databases for RAG. Let me create a retrieval plan to gather comprehensive information.
-*Creates todo list with retrieval tasks: 1) Search knowledge base for vector database information, 2) Use web_search to find latest vector database technologies, 3) Retrieve information about performance comparisons, 4) Gather information about integration approaches*
+*Creates todo list with retrieval tasks: 1) Search the knowledge base for vector database information, 2) Search the knowledge base for the latest vector database material, 3) Retrieve information about performance comparisons, 4) Gather information about integration approaches*
 *Note: After completing all retrieval tasks, thinking tool will synthesize the findings into a comprehensive answer*
 Assistant: Let me start by searching the knowledge base for vector database information.
 
 <reasoning>
 The assistant used todo_write tool correctly because:
-1. The research task requires multiple retrieval operations (KB search, web search for latest info)
+1. The research task requires multiple retrieval operations (several knowledge base searches)
 2. Each task focuses on retrieving specific information
 3. The todo list tracks retrieval progress, not synthesis
 4. Summary and analysis will be handled by thinking tool after retrieval is complete
@@ -209,7 +209,6 @@ func generatePlanOutput(task string, steps []PlanStep) string {
 		output += "Suggested retrieval workflow (focused on retrieval tasks, excluding summarization):\n"
 		output += "1. Use search_knowledge to locate the relevant documents and passages\n"
 		output += "2. Use read_document to read the key documents in full\n"
-		output += "3. Use web_search to get supplementary information (if needed)\n"
 		output += "\nNote: Summarization and synthesis are handled by the thinking tool. Do not add summarization tasks here.\n"
 		return output
 	}

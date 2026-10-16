@@ -105,7 +105,7 @@ func TestGetTenantKVViewerForbiddenForSecretKeys(t *testing.T) {
 	tenant := secretTenantFixture()
 	engine := newTenantHandlerTestEngine(t, types.TenantRoleViewer, tenant)
 
-	for _, key := range []string{"web-search-config", "parser-engine-config", "storage-engine-config"} {
+	for _, key := range []string{"parser-engine-config", "storage-engine-config"} {
 		t.Run(key, func(t *testing.T) {
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest(http.MethodGet, "/tenants/kv/"+key, nil)

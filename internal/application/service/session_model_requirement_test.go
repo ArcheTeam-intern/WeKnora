@@ -257,15 +257,3 @@ func TestResolveChatModelIDIgnoresOverrideForSharedAgents(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "agent-chat", modelID)
 }
-
-// Quick-answer mode follows the same rule as agent mode: the request switch
-// only opts a turn in and cannot enable search the agent turns off.
-func TestResolveWebSearchEnabled(t *testing.T) {
-	agent := func(enabled bool) *types.CustomAgent {
-		return &types.CustomAgent{Config: types.CustomAgentConfig{WebSearchEnabled: enabled}}
-	}
-	assert.False(t, resolveWebSearchEnabled(&types.QARequest{CustomAgent: agent(false), WebSearchEnabled: true}))
-	assert.False(t, resolveWebSearchEnabled(&types.QARequest{CustomAgent: agent(true), WebSearchEnabled: false}))
-	assert.True(t, resolveWebSearchEnabled(&types.QARequest{CustomAgent: agent(true), WebSearchEnabled: true}))
-	assert.True(t, resolveWebSearchEnabled(&types.QARequest{WebSearchEnabled: true}), "no agent keeps the switch")
-}

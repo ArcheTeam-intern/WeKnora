@@ -142,27 +142,25 @@ func generateEventID(suffix string) string {
 // (see service.LoadAgentHistory and chat_pipeline history loading) — there is no
 // separate cross-turn cache layer.
 type sessionService struct {
-	cfg                   *config.Config                         // Application configuration
-	sessionRepo           interfaces.SessionRepository           // Repository for session data
-	messageRepo           interfaces.MessageRepository           // Repository for message data
-	knowledgeBaseService  interfaces.KnowledgeBaseService        // Service for knowledge base operations
-	modelService          interfaces.ModelService                // Service for model operations
-	tenantService         interfaces.TenantService               // Service for tenant operations
-	eventManager          *chatpipeline.EventManager             // Event manager for chat pipeline
-	agentService          interfaces.AgentService                // Service for agent operations
-	knowledgeService      interfaces.KnowledgeService            // Service for knowledge operations
-	chunkService          interfaces.ChunkService                // Service for chunk operations
-	webSearchStateRepo    interfaces.WebSearchStateService       // Service for web search state
-	webSearchProviderRepo interfaces.WebSearchProviderRepository // Repository for web search provider entities
-	kbShareService        interfaces.KBShareService              // Service for KB sharing operations
-	suggestionRepo        interfaces.MessageSuggestionRepository
-	sandboxMgr            sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
-	sandboxResolver       sandbox.TenantSandboxResolver
-	sandboxPinner         *SessionSandboxPinner
-	sandboxPolicy         WorkspaceSandboxPolicy
-	hostSandbox           sandbox.Manager
-	hostDesktop           bool
-	hostSkillTree         HostSkillTree
+	cfg                  *config.Config                  // Application configuration
+	sessionRepo          interfaces.SessionRepository    // Repository for session data
+	messageRepo          interfaces.MessageRepository    // Repository for message data
+	knowledgeBaseService interfaces.KnowledgeBaseService // Service for knowledge base operations
+	modelService         interfaces.ModelService         // Service for model operations
+	tenantService        interfaces.TenantService        // Service for tenant operations
+	eventManager         *chatpipeline.EventManager      // Event manager for chat pipeline
+	agentService         interfaces.AgentService         // Service for agent operations
+	knowledgeService     interfaces.KnowledgeService     // Service for knowledge operations
+	chunkService         interfaces.ChunkService         // Service for chunk operations
+	kbShareService       interfaces.KBShareService       // Service for KB sharing operations
+	suggestionRepo       interfaces.MessageSuggestionRepository
+	sandboxMgr           sandbox.Manager // Default sandbox backend; used to reclaim per-session MicroVMs on delete
+	sandboxResolver      sandbox.TenantSandboxResolver
+	sandboxPinner        *SessionSandboxPinner
+	sandboxPolicy        WorkspaceSandboxPolicy
+	hostSandbox          sandbox.Manager
+	hostDesktop          bool
+	hostSkillTree        HostSkillTree
 	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
 	// this turn actually invoke". They are repositories rather than
 	// TenantSkillService because that service depends on this one.
@@ -186,8 +184,6 @@ func NewSessionService(cfg *config.Config,
 	tenantService interfaces.TenantService,
 	eventManager *chatpipeline.EventManager,
 	agentService interfaces.AgentService,
-	webSearchStateRepo interfaces.WebSearchStateService,
-	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbShareService interfaces.KBShareService,
 	suggestionRepo interfaces.MessageSuggestionRepository,
 	sandboxMgr sandbox.Manager,
@@ -200,30 +196,28 @@ func NewSessionService(cfg *config.Config,
 	busyGate *SessionBusyGate,
 ) interfaces.SessionService {
 	return &sessionService{
-		cfg:                   cfg,
-		sessionRepo:           sessionRepo,
-		messageRepo:           messageRepo,
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		modelService:          modelService,
-		tenantService:         tenantService,
-		eventManager:          eventManager,
-		agentService:          agentService,
-		webSearchStateRepo:    webSearchStateRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-		kbShareService:        kbShareService,
-		suggestionRepo:        suggestionRepo,
-		sandboxMgr:            sandboxMgr,
-		sandboxResolver:       sandboxResolver,
-		sandboxPinner:         sandboxPinner,
-		sandboxPolicy:         sandboxPolicy,
-		hostSandbox:           hostSandbox.Manager,
-		hostDesktop:           hostSandbox.Desktop,
-		hostSkillTree:         hostSandbox.SkillTree,
-		sandboxConfigRepo:     sandboxConfigRepo,
-		tenantSkillRepo:       tenantSkillRepo,
-		busyGate:              busyGate,
+		cfg:                  cfg,
+		sessionRepo:          sessionRepo,
+		messageRepo:          messageRepo,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		chunkService:         chunkService,
+		modelService:         modelService,
+		tenantService:        tenantService,
+		eventManager:         eventManager,
+		agentService:         agentService,
+		kbShareService:       kbShareService,
+		suggestionRepo:       suggestionRepo,
+		sandboxMgr:           sandboxMgr,
+		sandboxResolver:      sandboxResolver,
+		sandboxPinner:        sandboxPinner,
+		sandboxPolicy:        sandboxPolicy,
+		hostSandbox:          hostSandbox.Manager,
+		hostDesktop:          hostSandbox.Desktop,
+		hostSkillTree:        hostSandbox.SkillTree,
+		sandboxConfigRepo:    sandboxConfigRepo,
+		tenantSkillRepo:      tenantSkillRepo,
+		busyGate:             busyGate,
 	}
 }
 
@@ -553,11 +547,6 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// again. A dedicated GC job or explicit hard-delete API is the right
 	// place to reclaim storage — not this soft-delete path.
 
-	// Cleanup temporary KB stored in Redis for this session
-	if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
-		logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
-	}
-
 	if s.suggestionRepo != nil {
 		if err := s.suggestionRepo.DeleteBySessionID(ctx, tenantID, id); err != nil {
 			logger.Warnf(ctx, "Failed to delete suggestions for session %s: %v", id, err)
@@ -627,9 +616,6 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 			}
 		}(id)
 
-		if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, id); err != nil {
-			logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", id, err)
-		}
 		// Artifact blobs are kept alongside soft-deleted messages — see
 		// DeleteSession for the rationale.
 	}
@@ -687,9 +673,6 @@ func (s *sessionService) DeleteAllSessions(ctx context.Context) error {
 				}
 			}(session.ID)
 
-			if err := s.webSearchStateRepo.DeleteWebSearchTempKBState(ctx, session.ID); err != nil {
-				logger.Warnf(ctx, "Failed to cleanup temporary KB for session %s: %v", session.ID, err)
-			}
 			// Artifact blobs are kept alongside soft-deleted messages — see
 			// DeleteSession for the rationale.
 		}

@@ -30,7 +30,7 @@ func TestGroundingGuidanceSurvivesTemplateSelection(t *testing.T) {
 		{name: "saved custom", custom: "Create the requested slides using the selected skill."},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			prompt := BuildSystemPromptWithOptions(tc.kbs, false, &BuildSystemPromptOptions{Config: cfg}, tc.custom)
+			prompt := BuildSystemPromptWithOptions(tc.kbs, &BuildSystemPromptOptions{Config: cfg}, tc.custom)
 			require.Contains(t, prompt, "consult relevant available sources before drafting unsupported content")
 			require.Contains(t, prompt, "presentations, reports, tutorials, and technical instructions")
 			require.Contains(t, prompt, "Reading a generator's instructions or successfully running its script does not verify the subject matter")
@@ -42,21 +42,21 @@ func TestGroundingGuidanceSurvivesTemplateSelection(t *testing.T) {
 		})
 	}
 	// The legacy builder cannot infer tools, but still needs the evidence policy.
-	require.Contains(t, BuildSystemPrompt(nil, false, "Custom"), "Content grounding")
+	require.Contains(t, BuildSystemPrompt(nil, "Custom"), "Content grounding")
 }
 
 func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
 		registered []string
-		webFlag    bool
 		want       []string
 		absent     []string
 	}{
 		{
-			"skill only with stale flags",
+			// A registry holding retired or unrelated tools must not add web
+			// bullets: public web search is gone from the runtime entirely.
+			"retired names stay silent",
 			[]string{tools.ToolReadFile, tools.ToolShellExec},
-			true,
 			nil,
 			[]string{
 				"Available knowledge tools:", "web_search is available", "web_fetch is available",
@@ -66,7 +66,6 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 		{
 			"rag",
 			[]string{tools.ToolSearchKnowledge, tools.ToolReadDocument},
-			false,
 			[]string{
 				"Available knowledge tools: search_knowledge, read_document",
 				"search them before answering a question about a topic, even one that reads like general knowledge",
@@ -76,25 +75,16 @@ func TestGroundingUsesRegistryInsteadOfConfiguration(t *testing.T) {
 		{
 			"wiki",
 			[]string{tools.ToolWikiReadPage, tools.ToolWikiSearch},
-			false,
 			[]string{"Available knowledge tools: wiki_search, wiki_read_page"},
 			[]string{"search_knowledge", "web_search is available"},
 		},
 		{
-			"registered web",
-			[]string{tools.ToolWebSearch, tools.ToolWebFetch},
-			false,
-			[]string{"web_search is available", "web_fetch is available"},
-			[]string{"Available knowledge tools:"},
-		},
-		{
-			"no tools", nil, false, nil,
+			"no tools", nil, nil,
 			[]string{"Available knowledge tools:", "web_search is available", "web_fetch is available"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			engine := newTestEngine(t, &mockChat{})
-			engine.config.WebSearchEnabled = tc.webFlag
 			engine.config.AllowedTools = []string{tools.ToolSearchKnowledge, tools.ToolWebSearch}
 			engine.toolRegistry = tools.NewToolRegistry()
 			for _, name := range tc.registered {

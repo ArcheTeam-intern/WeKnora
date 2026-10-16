@@ -73,7 +73,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
-	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
@@ -177,7 +176,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPEndpointRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
-	must(container.Provide(service.NewWebSearchStateService))
 	must(container.Provide(repository.NewDataSourceRepository))
 	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
@@ -275,15 +273,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMCPEndpointService))
 	must(container.Provide(mcpserver.NewServer))
 
-	// Web search service (needed by AgentService)
-	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
-	must(container.Provide(infra_web_search.NewRegistry))
-	if !productProfileIsKnowledgeCore(container) {
-		// Registering web search providers queries the default provider at
-		// startup; the knowledge-core profile retires public web search.
-		must(container.Invoke(registerWebSearchProviders))
-	}
-	must(container.Provide(repository.NewWebSearchProviderRepository))
+	// Public web search was physically removed from this build (registry,
+	// providers, provider repository, search service and the temp-KB state
+	// service). Nothing starts a provider connection any more.
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(repository.NewStorageBackendRepository))
 	must(container.Provide(repository.NewResourceRepository))
@@ -292,8 +284,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// TenantStoreOwnership adapter used by the retriever factory functions
 	// to verify that a resolved VectorStore belongs to the caller's tenant.
 	must(container.Provide(retriever.NewVectorStoreRepoOwnership))
-	must(container.Provide(service.NewWebSearchService))
-	must(container.Provide(service.NewWebSearchProviderService))
 	must(container.Provide(NewEngineFactory))
 	// StoreRegistry: same instance as RetrieveEngineRegistry, exposed as StoreRegistry interface.
 	// NewRetrieveEngineRegistry always returns *retriever.RetrieveEngineRegistry which implements both.
@@ -479,7 +469,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(chatpipeline.NewEventManager))
 	must(container.Invoke(chatpipeline.NewPluginSearch))
 	must(container.Invoke(chatpipeline.NewPluginRerank))
-	must(container.Invoke(chatpipeline.NewPluginWebFetch))
 	must(container.Invoke(chatpipeline.NewPluginMerge))
 	must(container.Invoke(chatpipeline.NewPluginDataAnalysis))
 	must(container.Invoke(chatpipeline.NewPluginIntoChatMessage))
@@ -556,10 +545,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
-	must(container.Provide(handler.NewWebSearchProviderCredentialsHandler))
 	must(container.Provide(handler.NewDataSourceCredentialsHandler))
-	must(container.Provide(handler.NewWebSearchHandler))
-	must(container.Provide(handler.NewWebSearchProviderHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
@@ -1782,26 +1768,6 @@ func NewDuckDB() (*sql.DB, error) {
 	}
 
 	return sqlDB, nil
-}
-
-// registerWebSearchProviders registers all web search provider types to the registry.
-// Each provider type is registered with its factory function that accepts parameters.
-// Provider instances are created on-demand when tenants configure them.
-func registerWebSearchProviders(registry *infra_web_search.Registry) {
-	registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-	registry.Register("google", infra_web_search.NewGoogleProvider)
-	registry.Register("bing", infra_web_search.NewBingProvider)
-	registry.Register("tavily", infra_web_search.NewTavilyProvider)
-	registry.Register("ollama", infra_web_search.NewOllamaProvider)
-	registry.Register("baidu", infra_web_search.NewBaiduProvider)
-	registry.Register("searxng", infra_web_search.NewSearxngProvider)
-	registry.Register("keenable", infra_web_search.NewKeenableProvider)
-	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
-	registry.Register("exa", infra_web_search.NewExaProvider)
-	registry.Register("metaso", infra_web_search.NewMetasoProvider)
-	registry.Register("bocha", infra_web_search.NewBochaProvider)
-	registry.Register("brave", infra_web_search.NewBraveProvider)
-	registry.Register("serply", infra_web_search.NewSerplyProvider)
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.

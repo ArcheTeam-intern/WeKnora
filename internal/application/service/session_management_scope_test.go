@@ -58,7 +58,6 @@ func TestSessionManagementScope(t *testing.T) {
 					svc, db := newTestSessionService(t)
 					require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
 					svc.messageRepo = deleteForkMessageRepo{}
-					svc.webSearchStateRepo = deleteForkWebSearchState{}
 					ctx := context.WithValue(
 						testSessionScopeContext(1, "admin-user"), types.TenantRoleContextKey, caller.role,
 					)
@@ -133,8 +132,6 @@ func TestBatchDeleteSessionsManagementScopeMixedIDs(t *testing.T) {
 			svc, db := newTestSessionService(t)
 			require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
 			svc.messageRepo = deleteForkMessageRepo{}
-			cleanup := &sessionManagementCleanupState{}
-			svc.webSearchStateRepo = cleanup
 			ctx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, role)
 			rows := []types.Session{
 				{TenantID: 1, UserID: "alice", Title: "own"},
@@ -146,11 +143,6 @@ func TestBatchDeleteSessionsManagementScopeMixedIDs(t *testing.T) {
 			require.NoError(t, svc.BatchDeleteSessions(ctx, []string{
 				rows[0].ID, rows[1].ID, rows[2].ID, rows[3].ID, "missing",
 			}))
-			expectedCleanup := []string{rows[0].ID}
-			if role.HasPermission(types.TenantRoleAdmin) {
-				expectedCleanup = append(expectedCleanup, rows[1].ID)
-			}
-			require.ElementsMatch(t, expectedCleanup, cleanup.ids)
 			for i, row := range rows {
 				var stored types.Session
 				require.NoError(t, db.Unscoped().First(&stored, "id = ?", row.ID).Error)
@@ -168,8 +160,6 @@ func TestSessionManagementRejectsOtherUsersWebSessions(t *testing.T) {
 				svc, db := newTestSessionService(t)
 				require.NoError(t, db.AutoMigrate(&testListSessionsIMChannelSession{}))
 				svc.messageRepo = deleteForkMessageRepo{}
-				cleanup := &sessionManagementCleanupState{}
-				svc.webSearchStateRepo = cleanup
 				ctx := context.WithValue(testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, role)
 				row := &types.Session{TenantID: 1, UserID: "bob", Title: "private web"}
 				require.NoError(t, db.Create(row).Error)
@@ -187,7 +177,6 @@ func TestSessionManagementRejectsOtherUsersWebSessions(t *testing.T) {
 					err = svc.BatchDeleteSessions(ctx, []string{row.ID})
 				}
 				require.ErrorIs(t, err, apperrors.ErrSessionNotFound)
-				require.Empty(t, cleanup.ids)
 				var stored types.Session
 				require.NoError(t, db.First(&stored, "id = ?", row.ID).Error)
 				require.Equal(t, row.Title, stored.Title)
@@ -195,16 +184,6 @@ func TestSessionManagementRejectsOtherUsersWebSessions(t *testing.T) {
 			})
 		}
 	}
-}
-
-type sessionManagementCleanupState struct {
-	interfaces.WebSearchStateService
-	ids []string
-}
-
-func (s *sessionManagementCleanupState) DeleteWebSearchTempKBState(_ context.Context, id string) error {
-	s.ids = append(s.ids, id)
-	return nil
 }
 
 func TestSessionManagementPropagatesStorageErrorsBeforeCleanup(t *testing.T) {
@@ -223,8 +202,6 @@ func TestSessionManagementPropagatesStorageErrorsBeforeCleanup(t *testing.T) {
 					targetID:          rows[1].ID, stage: stage, err: storageErr,
 				}
 				svc.messageRepo = deleteForkMessageRepo{}
-				cleanup := &sessionManagementCleanupState{}
-				svc.webSearchStateRepo = cleanup
 				ctx := context.WithValue(
 					testSessionScopeContext(1, "alice"), types.TenantRoleContextKey, types.TenantRoleAdmin,
 				)
@@ -239,7 +216,6 @@ func TestSessionManagementPropagatesStorageErrorsBeforeCleanup(t *testing.T) {
 					err = svc.BatchDeleteSessions(ctx, []string{rows[0].ID, rows[1].ID})
 				}
 				require.ErrorIs(t, err, storageErr)
-				require.Empty(t, cleanup.ids)
 				for _, row := range rows {
 					var stored types.Session
 					require.NoError(t, db.First(&stored, "id = ?", row.ID).Error)

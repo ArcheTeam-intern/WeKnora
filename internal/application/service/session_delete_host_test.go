@@ -96,13 +96,12 @@ func newSessionServiceForHostDeleteTest(
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Session{}))
 	return &sessionService{
-		sessionRepo:        repository.NewSessionRepository(db),
-		messageRepo:        deleteForkMessageRepo{},
-		webSearchStateRepo: deleteForkWebSearchState{},
-		sandboxPinner:      NewSessionSandboxPinner(db),
-		sandboxResolver:    resolver,
-		hostSandbox:        host,
-		forkSnapshots:      &fakeForkSessionSnapshotDeleter{},
+		sessionRepo:     repository.NewSessionRepository(db),
+		messageRepo:     deleteForkMessageRepo{},
+		sandboxPinner:   NewSessionSandboxPinner(db),
+		sandboxResolver: resolver,
+		hostSandbox:     host,
+		forkSnapshots:   &fakeForkSessionSnapshotDeleter{},
 	}, db
 }
 

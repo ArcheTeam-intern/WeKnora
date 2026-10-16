@@ -3,18 +3,24 @@ package types
 import (
 	"database/sql/driver"
 	"encoding/json"
-	"time"
 )
 
-// WebSearchConfig represents the web search configuration for a tenant
+// Public web search was retired from this build: the provider registry, the
+// provider service/repository and its credential routes, the tenant KV key
+// that wrote this config, the WEB_FETCH pipeline stage and both agent tools are
+// gone. What stays is the persisted shape, because existing rows still carry
+// it and a code change must not make stored data unreadable:
+//
+//   - tenants.web_search_config (WebSearchConfig, still returned redacted by
+//     the tenant read DTO)
+//   - web_search_providers rows (no Go type any more; the table is untouched)
+//
+// It is a data shape plus the masking helpers the tenant DTO needs. Nothing
+// starts a search, resolves a provider or acts on any field.
 type WebSearchConfig struct {
-	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
+	// Deprecated: the old single-provider fields, kept so stored rows decode.
 	Provider string `json:"provider,omitempty"`
-	// Deprecated: Use WebSearchProviderEntity.Parameters.APIKey instead.
-	APIKey string `json:"api_key,omitempty"`
-
-	// Per-call Agent filters; never persisted in tenant configuration.
-	Filters WebSearchFilters `json:"-"`
+	APIKey   string `json:"api_key,omitempty"`
 
 	MaxResults        int      `json:"max_results"`        // 最大搜索结果数
 	IncludeDate       bool     `json:"include_date"`       // 是否包含日期
@@ -25,25 +31,24 @@ type WebSearchConfig struct {
 	EmbeddingDimension int    `json:"embedding_dimension,omitempty"` // 嵌入维度（用于RAG压缩）
 	RerankModelID      string `json:"rerank_model_id,omitempty"`     // 重排模型ID（用于RAG压缩）
 	DocumentFragments  int    `json:"document_fragments,omitempty"`  // 文档片段数量（用于RAG压缩）
-	ProxyURL           string `json:"proxy_url,omitempty"`           // Optional per-request proxy override; normally empty — use WebSearchProviderEntity.Parameters.proxy_url. Merged at call time when set.
+	ProxyURL           string `json:"proxy_url,omitempty"`           // 旧版每请求代理覆盖，随功能退役
 }
 
-const (
-	DefaultWebSearchMaxResults        = 10
-	DefaultWebSearchCompressionMethod = "none"
-)
+const DefaultWebSearchCompressionMethod = "none"
 
-// DefaultWebSearchConfig returns the shared default tenant-level web search configuration.
+// DefaultWebSearchConfig returns the stored-shape defaults. It exists only so
+// the read DTO renders a complete object for a row that never set the column.
 func DefaultWebSearchConfig() *WebSearchConfig {
 	return &WebSearchConfig{
-		MaxResults:        DefaultWebSearchMaxResults,
+		MaxResults:        10,
 		IncludeDate:       false,
 		CompressionMethod: DefaultWebSearchCompressionMethod,
 		Blacklist:         []string{},
 	}
 }
 
-// EffectiveWebSearchConfig normalizes a possibly empty config to the effective runtime config.
+// EffectiveWebSearchConfig normalizes a possibly empty stored config for
+// rendering. No runtime path acts on the result any more.
 func EffectiveWebSearchConfig(cfg *WebSearchConfig) *WebSearchConfig {
 	if cfg == nil {
 		return DefaultWebSearchConfig()
@@ -51,7 +56,7 @@ func EffectiveWebSearchConfig(cfg *WebSearchConfig) *WebSearchConfig {
 
 	normalized := *cfg
 	if normalized.MaxResults <= 0 {
-		normalized.MaxResults = DefaultWebSearchMaxResults
+		normalized.MaxResults = 10
 	}
 	if normalized.CompressionMethod == "" {
 		normalized.CompressionMethod = DefaultWebSearchCompressionMethod
@@ -78,27 +83,4 @@ func (c *WebSearchConfig) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, c)
-}
-
-// WebSearchResult represents a single web search result
-type WebSearchResult struct {
-	Title   string `json:"title"`   // 搜索结果标题
-	URL     string `json:"url"`     // 结果URL
-	Snippet string `json:"snippet"` // 摘要片段
-	Content string `json:"content"` // 完整内容（可选，需要额外抓取）
-	Source  string `json:"source"`  // 来源（如：duckduckgo等）
-	// Provider-reported age, without inventing an exact publication date.
-	Age string `json:"age,omitempty"`
-
-	PublishedAt *time.Time `json:"published_at,omitempty"` // 发布时间（如果有）
-}
-
-// WebSearchProviderInfo represents information about a web search provider
-type WebSearchProviderInfo struct {
-	ID             string `json:"id"`                // 提供商ID
-	Name           string `json:"name"`              // 提供商名称
-	Free           bool   `json:"free"`              // 是否免费
-	RequiresAPIKey bool   `json:"requires_api_key"`  // 是否需要API密钥
-	Description    string `json:"description"`       // 描述
-	APIURL         string `json:"api_url,omitempty"` // API地址（可选）
 }

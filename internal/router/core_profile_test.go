@@ -19,14 +19,12 @@ type stubEndpointService struct{ interfaces.MCPEndpointService }
 // graph) must stay open.
 func TestKnowledgeCoreReachabilityClosesNonCoreRoutes(t *testing.T) {
 	full := reachabilityFor(&config.Config{})
-	if !full.PublicWebSearch ||
-		!full.MCPClientToolbox || !full.ExecutionSandbox || !full.Skills {
+	if !full.MCPClientToolbox || !full.ExecutionSandbox || !full.Skills {
 		t.Fatalf("the default profile must keep every remaining route group: %+v", full)
 	}
 
 	core := reachabilityFor(&config.Config{ProductProfile: config.ProductProfileKnowledgeCore})
-	if core.PublicWebSearch ||
-		core.MCPClientToolbox || core.ExecutionSandbox || core.Skills {
+	if core.MCPClientToolbox || core.ExecutionSandbox || core.Skills {
 		t.Fatalf("knowledge-core must close every remaining non-core route group: %+v", core)
 	}
 
@@ -50,31 +48,29 @@ func TestKnowledgeCoreReachabilityClosesNonCoreRoutes(t *testing.T) {
 // not registered, the UI would offer settings pages that answer 404.
 func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 	params := RouterParams{
-		Config:                      &config.Config{ProductProfile: config.ProductProfileKnowledgeCore},
-		OrganizationHandler:         &handler.OrganizationHandler{},
-		CustomAgentHandler:          &handler.CustomAgentHandler{},
-		TenantHandler:               &handler.TenantHandler{},
-		VectorStoreHandler:          &handler.VectorStoreHandler{},
-		StorageBackendHandler:       &handler.StorageBackendHandler{},
-		MCPEndpointHandler:          &handler.MCPEndpointHandler{},
-		MCPServer:                   &mcpserver.Server{},
-		MCPEndpointService:          &stubEndpointService{},
-		MCPServiceHandler:           &handler.MCPServiceHandler{},
-		MCPCredentialsHandler:       &handler.MCPCredentialsHandler{},
-		MCPOAuthHandler:             &handler.MCPOAuthHandler{},
-		WebSearchHandler:            &handler.WebSearchHandler{},
-		WebSearchProviderHandler:    &handler.WebSearchProviderHandler{},
-		WebSearchCredentialsHandler: &handler.WebSearchProviderCredentialsHandler{},
-		SandboxConfigHandler:        &handler.SandboxConfigHandler{},
-		MessageSuggestionHandler:    &handler.MessageSuggestionHandler{},
-		TenantMemberHandler:         &handler.TenantMemberHandler{},
-		TenantInvitationHandler:     &handler.TenantInvitationHandler{},
-		AuditLogHandler:             &handler.AuditLogHandler{},
+		Config:                   &config.Config{ProductProfile: config.ProductProfileKnowledgeCore},
+		OrganizationHandler:      &handler.OrganizationHandler{},
+		CustomAgentHandler:       &handler.CustomAgentHandler{},
+		TenantHandler:            &handler.TenantHandler{},
+		VectorStoreHandler:       &handler.VectorStoreHandler{},
+		StorageBackendHandler:    &handler.StorageBackendHandler{},
+		MCPEndpointHandler:       &handler.MCPEndpointHandler{},
+		MCPServer:                &mcpserver.Server{},
+		MCPEndpointService:       &stubEndpointService{},
+		MCPServiceHandler:        &handler.MCPServiceHandler{},
+		MCPCredentialsHandler:    &handler.MCPCredentialsHandler{},
+		MCPOAuthHandler:          &handler.MCPOAuthHandler{},
+		SandboxConfigHandler:     &handler.SandboxConfigHandler{},
+		MessageSuggestionHandler: &handler.MessageSuggestionHandler{},
+		TenantMemberHandler:      &handler.TenantMemberHandler{},
+		TenantInvitationHandler:  &handler.TenantInvitationHandler{},
+		AuditLogHandler:          &handler.AuditLogHandler{},
 	}
 
 	caps := deploymentCapabilitiesFromRouter(params).Capabilities
-	// IM and embed are physically removed, so they read as unsupported in every
-	// profile; the rest are still only closed by the profile switch.
+	// IM, embed and public web search are physically removed, so they read as
+	// unsupported in every profile; the rest are still only closed by the
+	// profile switch.
 	for _, key := range []string{
 		"integrations.im", "integrations.embed", "settings.mcp", "settings.websearch", "settings.sandbox",
 	} {
@@ -91,16 +87,17 @@ func TestKnowledgeCoreCapabilitiesReportNonCoreAbsent(t *testing.T) {
 	}
 
 	// Under the default profile the still-present features come back, so the
-	// closures above are deliberate and not missing wiring. IM and embed do not
-	// come back in any profile: they are deleted, not gated.
+	// closures above are deliberate and not missing wiring. IM, embed and
+	// public web search do not come back in any profile: they are deleted,
+	// not gated.
 	params.Config = &config.Config{}
 	fullCaps := deploymentCapabilitiesFromRouter(params).Capabilities
-	for _, key := range []string{"settings.mcp", "settings.websearch", "settings.sandbox"} {
+	for _, key := range []string{"settings.mcp", "settings.sandbox"} {
 		if !fullCaps[key].Supported {
 			t.Fatalf("the full profile must keep %s available: %+v", key, fullCaps[key])
 		}
 	}
-	for _, key := range []string{"integrations.im", "integrations.embed"} {
+	for _, key := range []string{"integrations.im", "integrations.embed", "settings.websearch"} {
 		if fullCaps[key].Supported {
 			t.Fatalf("%s is removed from the build and must not be reported as supported: %+v", key, fullCaps[key])
 		}

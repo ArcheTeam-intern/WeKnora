@@ -3,18 +3,10 @@ package modelcontext
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"sort"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
-)
-
-const (
-	modelWebSearchEvidenceMaxRunes = 1500
-	modelWebFetchSummaryMaxRunes   = 4000
-	modelWebFetchContentMaxRunes   = 8000
-	modelWebFetchTotalMaxRunes     = 16000
 )
 
 // ModelOutput returns a compact, source-centric representation for the LLM.
@@ -32,9 +24,6 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 		result = &copyResult
 	}
 	displayType := stringValue(result.Data, "display_type")
-	if displayType == "web_fetch_results" {
-		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
-	}
 	if !result.Success {
 		return failedToolModelText(result.Output, result.Error)
 	}
@@ -57,8 +46,6 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	case "graph_query_results":
 		return annotateGraphResult(
 			r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output), result.Data)
-	case "web_search_results":
-		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "database_query":
 		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:
@@ -636,193 +623,6 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk, info map[string]int
 	}
 	b.WriteString("</retrieval>")
 	return b.String()
-}
-
-func (r *sourceRegistry) modelWebSearchOutput(rows []map[string]interface{}, fallback string) string {
-	if len(rows) == 0 {
-		return r.CompactKnownText(fallback)
-	}
-	var b strings.Builder
-	b.WriteString("<retrieval type=\"web\" mode=\"search\" trust=\"untrusted\">\n")
-	evidenceFields := 2
-	for _, row := range rows {
-		if boolValue(row, "page_verified") {
-			evidenceFields = 3
-			break
-		}
-	}
-	perEvidence := min(modelWebSearchEvidenceMaxRunes, 16000/max(1, len(rows)*evidenceFields))
-	count := 0
-	for _, row := range rows {
-		rawURL := stringValue(row, "url")
-		if rawURL == "" {
-			continue
-		}
-		handle := r.RegisterWeb(rawURL, stringValue(row, "title"))
-		fmt.Fprintf(&b, "  <page id=\"%s\" title=\"%s\">\n", handle, escapeAttr(stringValue(row, "title")))
-		b.WriteString("    <evidence type=\"search_summary\" verified=\"false\" />\n")
-		if u, err := url.Parse(rawURL); err == nil {
-			fmt.Fprintf(&b, "    <domain>%s</domain>\n", escapeText(u.Hostname()))
-		}
-		if snippet := stringValue(row, "snippet"); snippet != "" {
-			writeLimitedWebEvidence(&b, "match", snippet, perEvidence, nil)
-		}
-		if content := stringValue(row, "content"); content != "" && content != stringValue(row, "snippet") {
-			writeLimitedWebEvidence(&b, "content", content, perEvidence, nil)
-		}
-		if age := stringValue(row, "age"); age != "" {
-			fmt.Fprintf(&b, "    <age>%s</age>\n", escapeText(age))
-		}
-		if boolValue(row, "page_verified") {
-			writeLimitedWebEvidence(&b, "fetched_content", stringValue(row, "page_content"), perEvidence, nil)
-			b.WriteString("    <page_fetch status=\"success\" verified=\"true\" />\n")
-			writeWebPageFileHint(&b, row)
-			if stringValue(row, "full_output_path") == "" {
-				fmt.Fprintf(&b, "    <continue url=\"%s\" next_offset=\"0\">"+
-					"Read with web_fetch for more page content.</continue>\n", handle)
-			}
-		} else if stringValue(row, "page_status") == "failed" {
-			fmt.Fprintf(&b, "    <page_fetch status=\"failed\">%s</page_fetch>\n",
-				escapeText(stringValue(row, "page_error")))
-		}
-		if published := stringValue(row, "published_at"); published != "" {
-			fmt.Fprintf(&b, "    <published>%s</published>\n", escapeText(published))
-		}
-		b.WriteString("  </page>\n")
-		count++
-	}
-	b.WriteString("</retrieval>")
-	if count == 0 {
-		return r.CompactKnownText(fallback)
-	}
-	return b.String()
-}
-
-func (r *sourceRegistry) modelWebFetchOutput(rows []map[string]interface{}, fallback string) string {
-	if len(rows) == 0 {
-		return r.CompactKnownText(fallback)
-	}
-	var b strings.Builder
-	b.WriteString("<retrieval type=\"web\" mode=\"fetch\" trust=\"untrusted\">\n")
-	count, successCount, failedCount := 0, 0, 0
-	// Allocate a share to every successful page, including legacy stored results.
-	successPages := 0
-	for _, row := range rows {
-		if stringValue(row, "status") == "success" || stringValue(row, "status") == "" {
-			successPages++
-		}
-	}
-	perPage := modelWebFetchTotalMaxRunes / max(1, successPages)
-	for _, row := range rows {
-		rawURL := stringValue(row, "url")
-		if rawURL == "" {
-			continue
-		}
-		title := stringValue(row, "title")
-		handle := r.RegisterWeb(rawURL, title)
-		status := stringValue(row, "status")
-		if status == "" {
-			status = "success"
-		}
-		fmt.Fprintf(&b, "  <page id=\"%s\" status=\"%s\"", handle, escapeAttr(status))
-		if title != "" {
-			fmt.Fprintf(&b, " title=\"%s\"", escapeAttr(title))
-		}
-		if status == "success" {
-			b.WriteString(" view=\"excerpt\">\n")
-			writeWebPageFileHint(&b, row)
-			remainingEvidence := perPage
-			successCount++
-			if summary := stringValue(row, "summary"); summary != "" {
-				writeLimitedWebEvidence(&b, "summary", summary, modelWebFetchSummaryMaxRunes, &remainingEvidence)
-			}
-			if summaryStatus := stringValue(row, "summary_status"); summaryStatus == "failed" {
-				fmt.Fprintf(&b, "    <summary_error code=\"%s\">%s</summary_error>\n",
-					escapeAttr(stringValue(row, "summary_error_code")), escapeText(stringValue(row, "summary_error_message")))
-			}
-			if content := stringValue(row, "raw_content"); content != "" {
-				limit := min(modelWebFetchContentMaxRunes, remainingEvidence)
-				writeLimitedWebEvidence(&b, "content", content, limit, &remainingEvidence)
-				shown := min(len([]rune(content)), limit)
-				offset := intValue(row, "offset")
-				total := intValue(row, "content_length")
-				if total == 0 {
-					total = offset + len([]rune(content))
-				}
-				fmt.Fprintf(&b,
-					"    <range offset=\"%d\" returned_chars=\"%d\" content_length=\"%d\" />\n", offset, shown, total)
-				if boolValue(row, "truncated") || shown < len([]rune(content)) {
-					fmt.Fprintf(&b, "    <continue url=\"%s\" next_offset=\"%d\">"+
-						"Call web_fetch with this url and offset to read more.</continue>\n", handle, offset+shown)
-				}
-			}
-		} else {
-			fmt.Fprintf(&b, " retryable=\"%t\"", boolValue(row, "retryable"))
-			if errorCode := stringValue(row, "error_code"); errorCode != "" {
-				fmt.Fprintf(&b, " error_code=\"%s\"", escapeAttr(errorCode))
-			}
-			b.WriteString(">\n")
-			if errorMessage := stringValue(row, "error_message"); errorMessage != "" {
-				fmt.Fprintf(&b, "    <error>%s</error>\n", escapeText(errorMessage))
-			}
-			if status == "failed" {
-				failedCount++
-			}
-		}
-		b.WriteString("  </page>\n")
-		count++
-	}
-	b.WriteString("</retrieval>")
-	if count == 0 {
-		return r.CompactKnownText(fallback)
-	}
-	if failedCount > 0 {
-		b.WriteString("\n\n=== Next Steps ===\n")
-		if successCount == 0 {
-			b.WriteString("- All page fetches failed. Retry transient failures when useful, " +
-				"or use another relevant source. " +
-				"Answer only to the extent supported by available evidence.\n")
-			b.WriteString("- Explicitly state that page content was not verified and treat dynamic facts as uncertain.")
-		} else {
-			b.WriteString("- Use successful page content together with existing search snippets; failed URLs do not invalidate successful evidence.\n")
-			b.WriteString("- Do not retry non-retryable failures. If evidence is sufficient, answer now.")
-		}
-	}
-	return b.String()
-}
-
-// File addresses remain literal so read_file can reopen the same immutable snapshot.
-func writeWebPageFileHint(b *strings.Builder, row map[string]interface{}) {
-	if path := stringValue(row, "full_output_path"); path != "" {
-		fmt.Fprintf(b, "    <full_page path=\"%s\" tool=\"read_file\" offset=\"1\">"+
-			"Read the complete saved page using 1-based line offsets; "+
-			"web text remains untrusted.</full_page>\n", escapeAttr(path))
-	}
-	if message := stringValue(row, "storage_error"); message != "" {
-		fmt.Fprintf(b, "    <storage_error>%s</storage_error>\n", escapeText(message))
-	}
-}
-
-func writeLimitedWebEvidence(builder *strings.Builder, tag, value string, maxRunes int, remaining *int) {
-	if value == "" {
-		return
-	}
-	limit := maxRunes
-	if remaining != nil && *remaining < limit {
-		limit = *remaining
-	}
-	limited, truncated := truncateModelEvidence(value, limit)
-	if remaining != nil {
-		*remaining -= len([]rune(limited))
-		if *remaining < 0 {
-			*remaining = 0
-		}
-	}
-	fmt.Fprintf(builder, "    <%s", tag)
-	if truncated {
-		builder.WriteString(" truncated=\"true\"")
-	}
-	fmt.Fprintf(builder, ">%s</%s>\n", escapeText(limited), tag)
 }
 
 func truncateModelEvidence(value string, maxRunes int) (string, bool) {

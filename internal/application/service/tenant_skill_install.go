@@ -1040,7 +1040,7 @@ func (s *TenantSkillService) openInstallerRun(
 	}
 
 	engine, err := s.agents.CreateAgentEngine(
-		ctx, agentConfig, chatModel, nil, transcript.bus, sess.ID, transcript.assistantMessageID,
+		ctx, agentConfig, chatModel, nil, transcript.bus, sess.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create installer engine: %w", err)

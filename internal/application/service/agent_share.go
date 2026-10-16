@@ -106,13 +106,12 @@ func receiverAgentView(agent *types.CustomAgent) *types.CustomAgent {
 // tenant. callerTenantRole flows through every read path so the 3-D
 // cap (tenant Viewer → at most OrgRoleViewer) lands consistently.
 type agentShareService struct {
-	shareRepo             interfaces.AgentShareRepository
-	disabledRepo          interfaces.TenantDisabledSharedAgentRepository
-	orgRepo               interfaces.OrganizationRepository
-	agentRepo             interfaces.CustomAgentRepository
-	userRepo              interfaces.UserRepository
-	webSearchProviderRepo interfaces.WebSearchProviderRepository
-	kbRepo                interfaces.KnowledgeBaseRepository
+	shareRepo    interfaces.AgentShareRepository
+	disabledRepo interfaces.TenantDisabledSharedAgentRepository
+	orgRepo      interfaces.OrganizationRepository
+	agentRepo    interfaces.CustomAgentRepository
+	userRepo     interfaces.UserRepository
+	kbRepo       interfaces.KnowledgeBaseRepository
 }
 
 // NewAgentShareService creates a new agent share service
@@ -122,17 +121,15 @@ func NewAgentShareService(
 	orgRepo interfaces.OrganizationRepository,
 	agentRepo interfaces.CustomAgentRepository,
 	userRepo interfaces.UserRepository,
-	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	kbRepo interfaces.KnowledgeBaseRepository,
 ) interfaces.AgentShareService {
 	return &agentShareService{
-		shareRepo:             shareRepo,
-		disabledRepo:          disabledRepo,
-		orgRepo:               orgRepo,
-		agentRepo:             agentRepo,
-		userRepo:              userRepo,
-		webSearchProviderRepo: webSearchProviderRepo,
-		kbRepo:                kbRepo,
+		shareRepo:    shareRepo,
+		disabledRepo: disabledRepo,
+		orgRepo:      orgRepo,
+		agentRepo:    agentRepo,
+		userRepo:     userRepo,
+		kbRepo:       kbRepo,
 	}
 }
 
@@ -140,7 +137,6 @@ func (s *agentShareService) sharedAgentInfo(
 	ctx context.Context,
 	share *types.AgentShare,
 	effective types.OrgMemberRole,
-	webSearchReadyCache map[string]bool,
 ) *types.SharedAgentInfo {
 	info := &types.SharedAgentInfo{
 		Agent:          share.Agent,
@@ -162,35 +158,7 @@ func (s *agentShareService) sharedAgentInfo(
 			info.SharedByUsername = u.Username
 		}
 	}
-	cacheKey := fmt.Sprintf("%d:%t:%s", share.SourceTenantID, share.Agent.Config.WebSearchEnabled, share.Agent.Config.WebSearchProviderID)
-	if ready, ok := webSearchReadyCache[cacheKey]; ok {
-		info.WebSearchReady = ready
-	} else {
-		info.WebSearchReady = s.isAgentWebSearchReady(ctx, share.Agent, share.SourceTenantID)
-		webSearchReadyCache[cacheKey] = info.WebSearchReady
-	}
 	return info
-}
-
-// isAgentWebSearchReady resolves only an availability bit in the source
-// workspace. Returning source provider rows would leak configuration, while
-// comparing provider IDs with the receiver workspace produces false negatives.
-func (s *agentShareService) isAgentWebSearchReady(
-	ctx context.Context,
-	agent *types.CustomAgent,
-	sourceTenantID uint64,
-) bool {
-	if agent == nil || !agent.Config.WebSearchEnabled || s.webSearchProviderRepo == nil {
-		return false
-	}
-	var provider *types.WebSearchProviderEntity
-	var err error
-	if agent.Config.WebSearchProviderID != "" {
-		provider, err = s.webSearchProviderRepo.GetByID(ctx, sourceTenantID, agent.Config.WebSearchProviderID)
-	} else {
-		provider, err = s.webSearchProviderRepo.GetDefault(ctx, sourceTenantID)
-	}
-	return err == nil && provider != nil
 }
 
 // ShareAgent shares an agent to an organization. Permission is forced to
@@ -326,7 +294,6 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, tenantID uint6
 	}
 
 	agentInfoMap := make(map[string]*types.SharedAgentInfo)
-	webSearchReadyCache := make(map[string]bool)
 	for _, share := range shares {
 		if share.SourceTenantID == tenantID {
 			continue
@@ -340,7 +307,7 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, tenantID uint6
 		}
 		effective := types.MinOrgRole(share.Permission, tm.Role)
 		effective = applyTenantRoleCap(effective, callerTenantRole)
-		info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+		info := s.sharedAgentInfo(ctx, share, effective)
 		info.Agent = receiverAgentView(info.Agent)
 		key := fmt.Sprintf("%s_%d", share.AgentID, share.SourceTenantID)
 		existing, exists := agentInfoMap[key]
@@ -392,7 +359,6 @@ func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, 
 	}
 
 	result := make([]*types.OrganizationSharedAgentItem, 0, len(shares))
-	webSearchReadyCache := make(map[string]bool)
 	for _, share := range shares {
 		if share.Agent == nil || (share.SourceTenantID != tenantID && isBuiltinAgent(share.Agent)) {
 			continue
@@ -401,7 +367,7 @@ func (s *agentShareService) ListSharedAgentsInOrganization(ctx context.Context, 
 		effective := types.MinOrgRole(share.Permission, tm.Role)
 		effective = applyTenantRoleCap(effective, callerTenantRole)
 
-		info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+		info := s.sharedAgentInfo(ctx, share, effective)
 		if share.SourceTenantID != tenantID {
 			info.Agent = receiverAgentView(info.Agent)
 		}
@@ -456,7 +422,6 @@ func (s *agentShareService) ListSharedAgentsInOrganizations(ctx context.Context,
 			disabledSet[fmt.Sprintf("%s_%d", d.AgentID, d.SourceTenantID)] = true
 		}
 	}
-	webSearchReadyCache := make(map[string]bool)
 	for orgID, list := range byOrg {
 		tm := members[orgID]
 		result := make([]*types.OrganizationSharedAgentItem, 0, len(list))
@@ -466,7 +431,7 @@ func (s *agentShareService) ListSharedAgentsInOrganizations(ctx context.Context,
 			}
 			effective := types.MinOrgRole(share.Permission, tm.Role)
 			effective = applyTenantRoleCap(effective, callerTenantRole)
-			info := s.sharedAgentInfo(ctx, share, effective, webSearchReadyCache)
+			info := s.sharedAgentInfo(ctx, share, effective)
 			if share.SourceTenantID != tenantID {
 				info.Agent = receiverAgentView(info.Agent)
 			}

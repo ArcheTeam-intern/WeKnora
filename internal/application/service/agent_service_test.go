@@ -171,7 +171,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 		}
 		config.EnableSkillInstallMode(types.BuiltinSkillInstallerID, sandbox.SkillsImageRoot+"/pptx")
 
-		engine, err := svc.CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+		engine, err := svc.CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -204,7 +204,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   false,
 			AllowedTools:    []string{tools.ToolShellExec, tools.ToolThinking},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel, nil, nil, "sess-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -234,7 +234,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   false,
 			AllowedTools:    []string{tools.ToolThinking},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel, nil, nil, "sess-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -265,7 +265,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 			SandboxConfigID: "cfg-remote",
 			SkillsEnabled:   true,
 			SkillDirs:       []string{t.TempDir()},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel, nil, nil, "sess-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -302,7 +302,7 @@ func TestCreateAgentEngineOpensSandboxToolsOnlyForInstallMode(t *testing.T) {
 				Name: "pdf-tools", Description: "PDF helpers",
 				Status: types.SkillStatusReady, Enabled: true,
 			}},
-		}, chatModel, nil, nil, "sess-1", "msg-1")
+		}, chatModel, nil, nil, "sess-1")
 
 		require.NoError(t, err)
 		_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -391,7 +391,7 @@ func TestCreateAgentEngineShellFollowsSkillsEnabledWithoutInstalledSkills(t *tes
 		SkillsEnabled:   true,
 		// No SkillDirs and no TenantSkills: skills are enabled, but the sandbox
 		// image carries none.
-	}, chatModel, nil, nil, "sess-1", "msg-1")
+	}, chatModel, nil, nil, "sess-1")
 
 	require.NoError(t, err)
 	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
@@ -650,7 +650,7 @@ func TestCreateAgentEngineInjectsHostWorkspaceIntoPromptAndTools(t *testing.T) {
 	engine, err := svc.CreateAgentEngine(ctx, &types.AgentConfig{
 		SkillsEnabled: false,
 		AllowedTools:  []string{tools.ToolShellExec},
-	}, chatModel, nil, nil, "sess-1", "msg-1")
+	}, chatModel, nil, nil, "sess-1")
 	require.NoError(t, err)
 	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
 	require.NoError(t, err)

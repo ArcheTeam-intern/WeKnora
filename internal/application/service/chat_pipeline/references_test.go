@@ -71,7 +71,11 @@ func TestPrepareMessagesWithModelContextReplacesSystemPromptContextAndHistoryCit
 	require.NotContains(t, messages[2].Content, "old-chunk")
 }
 
-func TestPrepareMessagesWithModelContextKeepsWebSeparateFromChunks(t *testing.T) {
+// Public web search is retired: a row that still carries the legacy web
+// markers — a stored reference replayed into a turn — is rendered as an
+// ordinary knowledge chunk now. No web page block and no wN handle may come
+// back from data alone.
+func TestPrepareMessagesWithModelContextRendersLegacyWebRowsAsChunks(t *testing.T) {
 	manage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{Query: "question", SummaryConfig: types.SummaryConfig{Prompt: "system"}},
 		PipelineState: types.PipelineState{
@@ -86,14 +90,10 @@ func TestPrepareMessagesWithModelContextKeepsWebSeparateFromChunks(t *testing.T)
 		},
 	}
 
-	messages, refs := prepareMessagesWithModelContext(context.Background(), manage)
-	require.Contains(t, messages[1].Content, `<retrieval type="web" mode="search" trust="untrusted">`)
-	require.Contains(t, messages[1].Content, `<page id="w1" title="Example">`)
-	require.NotContains(t, messages[1].Content, `<chunk id="c1"`)
-	require.Equal(t,
-		`<web url="https://example.com/page" title="Example" />`,
-		refs.DecodeOutputText(`<ref id="w1"/>`),
-	)
+	messages, _ := prepareMessagesWithModelContext(context.Background(), manage)
+	require.NotContains(t, messages[1].Content, `<retrieval type="web"`)
+	require.NotContains(t, messages[1].Content, `<page id=`)
+	require.Contains(t, messages[1].Content, "web content")
 }
 
 func TestPrepareMessagesWithModelContextCompactsHistoryWithoutCurrentRetrieval(t *testing.T) {

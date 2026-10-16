@@ -15,7 +15,6 @@ type PluginSearchParallel struct {
 	knowledgeBaseService interfaces.KnowledgeBaseService
 	knowledgeService     interfaces.KnowledgeService
 	config               *config.Config
-	webSearchService     interfaces.WebSearchService
 	tenantService        interfaces.TenantService
 	sessionService       interfaces.SessionService
 
@@ -36,26 +35,20 @@ func NewPluginSearchParallel(
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	config *config.Config,
-	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
 	sessionService interfaces.SessionService,
-	webSearchStateService interfaces.WebSearchStateService,
-	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 	graphRepository interfaces.RetrieveGraphRepository,
 	chunkRepository interfaces.ChunkRepository,
 	knowledgeRepository interfaces.KnowledgeRepository,
 ) *PluginSearchParallel {
 	// Create internal plugins without registering them
 	searchPlugin := &PluginSearch{
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		config:                config,
-		webSearchService:      webSearchService,
-		tenantService:         tenantService,
-		sessionService:        sessionService,
-		webSearchStateService: webSearchStateService,
-		webSearchProviderRepo: webSearchProviderRepo,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		chunkService:         chunkService,
+		config:               config,
+		tenantService:        tenantService,
+		sessionService:       sessionService,
 	}
 
 	searchEntityPlugin := &PluginSearchEntity{
@@ -68,7 +61,6 @@ func NewPluginSearchParallel(
 		knowledgeBaseService: knowledgeBaseService,
 		knowledgeService:     knowledgeService,
 		config:               config,
-		webSearchService:     webSearchService,
 		tenantService:        tenantService,
 		sessionService:       sessionService,
 		graphRepo:            graphRepository,

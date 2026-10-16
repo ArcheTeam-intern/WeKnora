@@ -6,52 +6,40 @@ import (
 
 func TestResolveSystemPrompt(t *testing.T) {
 	tests := []struct {
-		name             string
-		config           *AgentConfig
-		webSearchEnabled bool
-		want             string
+		name   string
+		config *AgentConfig
+		want   string
 	}{
 		{
-			name:             "nil config returns empty",
-			config:           nil,
-			webSearchEnabled: false,
-			want:             "",
+			name:   "nil config returns empty",
+			config: nil,
+			want:   "",
 		},
 		{
-			name:             "unified SystemPrompt returned",
-			config:           &AgentConfig{SystemPrompt: "my prompt"},
-			webSearchEnabled: false,
-			want:             "my prompt",
+			name:   "unified SystemPrompt returned",
+			config: &AgentConfig{SystemPrompt: "my prompt"},
+			want:   "my prompt",
 		},
 		{
-			name: "deprecated web-disabled fallback",
+			// Public web search is retired: the deprecated "web enabled" field
+			// is never selected, the web-disabled one is the fallback.
+			name: "deprecated fallback picks the web-disabled variant",
 			config: &AgentConfig{
 				SystemPromptWebDisabled: "no-web",
 				SystemPromptWebEnabled:  "with-web",
 			},
-			webSearchEnabled: false,
-			want:             "no-web",
+			want: "no-web",
 		},
 		{
-			name: "deprecated web-enabled fallback",
-			config: &AgentConfig{
-				SystemPromptWebDisabled: "no-web",
-				SystemPromptWebEnabled:  "with-web",
-			},
-			webSearchEnabled: true,
-			want:             "with-web",
-		},
-		{
-			name:             "empty config returns empty",
-			config:           &AgentConfig{},
-			webSearchEnabled: false,
-			want:             "",
+			name:   "empty config returns empty",
+			config: &AgentConfig{},
+			want:   "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := tt.config.ResolveSystemPrompt(tt.webSearchEnabled)
+			got := tt.config.ResolveSystemPrompt()
 			if got != tt.want {
 				t.Errorf("ResolveSystemPrompt() = %q, want %q", got, tt.want)
 			}
@@ -70,7 +58,7 @@ func TestUseCustomSystemPromptFlag(t *testing.T) {
 	}
 
 	// ResolveSystemPrompt should still return the prompt
-	got := cfg.ResolveSystemPrompt(false)
+	got := cfg.ResolveSystemPrompt()
 	if got != "custom prompt" {
 		t.Errorf("expected 'custom prompt', got %q", got)
 	}

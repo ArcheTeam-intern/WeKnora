@@ -265,10 +265,6 @@ type SharedAgentInfo struct {
 	SharedAt         time.Time     `json:"shared_at"`
 	SharedByUserID   string        `json:"shared_by_user_id,omitempty"`
 	SharedByUsername string        `json:"shared_by_username,omitempty"`
-	// WebSearchReady is resolved against the source workspace without exposing
-	// its provider list or credentials. Receivers must not compare the agent's
-	// provider ID with their own workspace resources.
-	WebSearchReady bool `json:"web_search_ready"`
 	// DisabledByMe: current tenant has hidden this shared agent from their conversation dropdown (per-user preference)
 	DisabledByMe bool `json:"disabled_by_me"`
 }
@@ -497,11 +493,10 @@ type AgentShareResponse struct {
 	MyPermission     string    `json:"my_permission,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 	// Agent scope summary for list display (from agent config when available)
-	ScopeKB        string `json:"scope_kb,omitempty"`       // "all" | "selected" | "none"
-	ScopeKBCount   int    `json:"scope_kb_count,omitempty"` // when selected
-	ScopeWebSearch bool   `json:"scope_web_search,omitempty"`
-	ScopeMCP       string `json:"scope_mcp,omitempty"`       // "all" | "selected" | "none"
-	ScopeMCPCount  int    `json:"scope_mcp_count,omitempty"` // when selected
+	ScopeKB       string `json:"scope_kb,omitempty"`        // "all" | "selected" | "none"
+	ScopeKBCount  int    `json:"scope_kb_count,omitempty"`  // when selected
+	ScopeMCP      string `json:"scope_mcp,omitempty"`       // "all" | "selected" | "none"
+	ScopeMCPCount int    `json:"scope_mcp_count,omitempty"` // when selected
 	// Agent avatar (emoji or icon name) for list display
 	AgentAvatar string `json:"agent_avatar,omitempty"`
 }

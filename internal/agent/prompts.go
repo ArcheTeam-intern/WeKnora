@@ -370,30 +370,27 @@ func sandboxArtifactReferenceGuidance() string {
 	return builder.String()
 }
 
-// renderPromptPlaceholdersWithStatus renders placeholders including web search status
+// renderPromptPlaceholdersWithStatus renders placeholders including the web
+// search status. Public web search was retired, so {{web_search_status}}
+// always renders "Disabled": templates may keep the placeholder, but a stored
+// agent config can no longer claim the capability.
 // Supported placeholders:
 //   - {{knowledge_bases}}
-//   - {{web_search_status}} -> "Enabled" or "Disabled"
+//   - {{web_search_status}} -> always "Disabled"
 //   - {{current_time}} -> current time string
 //   - {{language}} -> user language name (e.g. "Chinese (Simplified)", "English")
 //   - {{skills}} -> formatted skills metadata (if any)
 func renderPromptPlaceholdersWithStatus(
 	template string,
 	knowledgeBases []*KnowledgeBaseInfo,
-	webSearchEnabled bool,
 	currentTime string,
 	language string,
 ) string {
 	// Knowledge bases need special formatting, so handle it first
 	result := renderPromptPlaceholders(template, knowledgeBases)
 
-	status := "Disabled"
-	if webSearchEnabled {
-		status = "Enabled"
-	}
-
 	result = types.RenderPromptPlaceholders(result, types.PlaceholderValues{
-		"web_search_status": status,
+		"web_search_status": "Disabled",
 		"current_time":      currentTime,
 		"language":          language,
 		"skills":            "", // Remove {{skills}} placeholder; skills are appended separately if present
@@ -418,20 +415,18 @@ type BuildSystemPromptOptions struct {
 // This is the main function to use - it uses a unified template with dynamic web search status
 func BuildSystemPrompt(
 	knowledgeBases []*KnowledgeBaseInfo,
-	webSearchEnabled bool,
 	systemPromptTemplate ...string,
 ) string {
-	return BuildSystemPromptWithOptions(knowledgeBases, webSearchEnabled, nil, systemPromptTemplate...)
+	return BuildSystemPromptWithOptions(knowledgeBases, nil, systemPromptTemplate...)
 }
 
 // BuildSystemPromptWithOptions builds the system prompt with additional options like skills
 func BuildSystemPromptWithOptions(
 	knowledgeBases []*KnowledgeBaseInfo,
-	webSearchEnabled bool,
 	options *BuildSystemPromptOptions,
 	systemPromptTemplate ...string,
 ) string {
-	sections := BuildSystemPromptSections(knowledgeBases, webSearchEnabled, options, systemPromptTemplate...)
+	sections := BuildSystemPromptSections(knowledgeBases, options, systemPromptTemplate...)
 	return renderSystemPromptSections(sections)
 }
 
@@ -457,7 +452,6 @@ type SystemPromptSection struct {
 // always come from the active engine, never from editable template text.
 func BuildSystemPromptSections(
 	knowledgeBases []*KnowledgeBaseInfo,
-	webSearchEnabled bool,
 	options *BuildSystemPromptOptions,
 	systemPromptTemplate ...string,
 ) []SystemPromptSection {
@@ -484,10 +478,9 @@ func BuildSystemPromptSections(
 	language := ""
 	if options != nil {
 		language = options.Language
-		webSearchEnabled = slices.Contains(options.SelectedTools, "web_search")
 	}
 	sections := []SystemPromptSection{
-		{"base", renderPromptPlaceholdersWithStatus(template, knowledgeBases, webSearchEnabled, currentTime, language)},
+		{"base", renderPromptPlaceholdersWithStatus(template, knowledgeBases, currentTime, language)},
 		{"steering", steerGuidance},
 		{"runtime_contract", runtimePromptContract},
 	}

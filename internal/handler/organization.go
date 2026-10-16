@@ -1543,7 +1543,6 @@ func (h *OrganizationHandler) ListOrgAgentShares(c *gin.Context) {
 			} else {
 				resp.ScopeKB = "none"
 			}
-			resp.ScopeWebSearch = cfg.WebSearchEnabled
 			if cfg.MCPSelectionMode != "" {
 				resp.ScopeMCP = cfg.MCPSelectionMode
 				if cfg.MCPSelectionMode == "selected" && len(cfg.MCPServices) > 0 {

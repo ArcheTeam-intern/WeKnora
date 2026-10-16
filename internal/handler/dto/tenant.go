@@ -11,15 +11,18 @@ import (
 // TenantResponse is the viewer-safe tenant profile shape. Secret-bearing
 // columns are omitted or redacted unless the caller has Admin+.
 type TenantResponse struct {
-	ID                  uint64                     `json:"id"`
-	Name                string                     `json:"name"`
-	Description         string                     `json:"description"`
-	Status              string                     `json:"status"`
-	RetrieverEngines    types.RetrieverEngines     `json:"retriever_engines"`
-	Business            string                     `json:"business"`
-	StorageQuota        int64                      `json:"storage_quota"`
-	StorageUsed         int64                      `json:"storage_used"`
-	ContextConfig       *types.ContextConfig       `json:"context_config,omitempty"`
+	ID               uint64                 `json:"id"`
+	Name             string                 `json:"name"`
+	Description      string                 `json:"description"`
+	Status           string                 `json:"status"`
+	RetrieverEngines types.RetrieverEngines `json:"retriever_engines"`
+	Business         string                 `json:"business"`
+	StorageQuota     int64                  `json:"storage_quota"`
+	StorageUsed      int64                  `json:"storage_used"`
+	ContextConfig    *types.ContextConfig   `json:"context_config,omitempty"`
+	// WebSearchConfig is a compat read of the stored tenants.web_search_config
+	// column: public web search was removed from this build, so the KV route
+	// that used to write it is gone and nothing acts on the value.
 	WebSearchConfig     *types.WebSearchConfig     `json:"web_search_config,omitempty"`
 	ParserEngineConfig  *types.ParserEngineConfig  `json:"parser_engine_config,omitempty"`
 	Credentials         *types.CredentialsConfig   `json:"credentials,omitempty"`

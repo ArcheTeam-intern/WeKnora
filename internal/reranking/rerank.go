@@ -359,14 +359,12 @@ func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.Sear
 // come from entity lookups, not similarity search), so the model score stands
 // in for it rather than a made-up constant.
 func CompositeScore(r *types.SearchResult, modelScore, baseScore float64) float64 {
-	sourceWeight := 1.0
-	if strings.EqualFold(r.KnowledgeSource, "web_search") {
-		sourceWeight = 0.95
-	}
 	if r.MatchType == types.MatchTypeGraph {
 		baseScore = modelScore
 	}
-	composite := 0.6*modelScore + 0.3*baseScore + 0.1*sourceWeight
+	// The source weight is a flat 1.0: web results used to carry 0.95, and
+	// public web search is retired.
+	composite := 0.6*modelScore + 0.3*baseScore + 0.1
 	return math.Min(math.Max(composite, 0), 1)
 }
 

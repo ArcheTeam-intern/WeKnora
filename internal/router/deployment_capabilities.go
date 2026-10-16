@@ -9,7 +9,8 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 	reach := reachabilityFor(params.Config)
 
 	// IM delivery and web-embed publishing were physically removed from this
-	// build, so their capabilities read as unsupported in every profile. The
+	// build, and public web search joined them in the web-search deletion
+	// batch, so those capabilities read as unsupported in every profile. The
 	// other non-core features are still only gated by the product profile, so a
 	// capability follows both the profile switch and the wiring: reporting a
 	// gated feature as supported would put menus and settings in the SPA for
@@ -27,9 +28,7 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		MCP: reach.MCPClientToolbox && params.MCPServiceHandler != nil &&
 			params.MCPCredentialsHandler != nil &&
 			params.MCPOAuthHandler != nil,
-		WebSearch: reach.PublicWebSearch && params.WebSearchHandler != nil &&
-			params.WebSearchProviderHandler != nil &&
-			params.WebSearchCredentialsHandler != nil,
+		WebSearch:     false,
 		VectorStore:   params.VectorStoreHandler != nil,
 		Storage:       params.StorageBackendHandler != nil,
 		Sandbox:       reach.ExecutionSandbox && params.SandboxConfigHandler != nil,

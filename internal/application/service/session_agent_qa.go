@@ -226,7 +226,6 @@ func (s *sessionService) AgentQA(
 		rerankModel,
 		eventBus,
 		sessionID,
-		req.AssistantMessageID,
 	)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create agent engine: %v", err)
@@ -307,10 +306,7 @@ func (s *sessionService) buildAgentConfig(
 	agentConfig := &types.AgentConfig{
 		MaxIterations:               customAgent.Config.MaxIterations,
 		Temperature:                 customAgent.Config.Temperature,
-		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
 		LocalBrowserEnabled:         req.LocalBrowserEnabled,
-		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
-		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
 		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
 		MemoryEnabled:               customAgent.Config.MemoryEnabled,
 		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
@@ -402,23 +398,8 @@ func (s *sessionService) buildAgentConfig(
 		agentConfig.SystemPrompt = systemPrompt
 	}
 
-	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v, WebSearchEnabled=%v",
-		agentConfig.MaxIterations, agentConfig.Temperature, agentConfig.AllowedTools, agentConfig.WebSearchEnabled)
-
-	// Set web search max results from tenant config if not set (default: 5)
-	if agentConfig.WebSearchMaxResults == 0 {
-		agentConfig.WebSearchMaxResults = 5
-		if tenantInfo.WebSearchConfig != nil && tenantInfo.WebSearchConfig.MaxResults > 0 {
-			agentConfig.WebSearchMaxResults = tenantInfo.WebSearchConfig.MaxResults
-		}
-	}
-
-	// Resolve web search provider ID: agent-level > tenant default (is_default=true)
-	if agentConfig.WebSearchProviderID == "" {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantInfo.ID); err == nil && defaultProvider != nil {
-			agentConfig.WebSearchProviderID = defaultProvider.ID
-		}
-	}
+	logger.Infof(ctx, "Custom agent config applied: MaxIterations=%d, Temperature=%.2f, AllowedTools=%v",
+		agentConfig.MaxIterations, agentConfig.Temperature, agentConfig.AllowedTools)
 
 	logger.Infof(ctx, "Merged agent config from tenant %d and session %s", tenantInfo.ID, req.Session.ID)
 

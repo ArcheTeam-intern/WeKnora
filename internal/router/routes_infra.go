@@ -207,48 +207,6 @@ func RegisterMCPServiceRoutes(
 	}
 }
 
-// RegisterWebSearchRoutes registers web search routes
-func RegisterWebSearchRoutes(r *gin.RouterGroup, webSearchHandler *handler.WebSearchHandler, g *rbacGuards) {
-	// Web search providers — Viewer+ (read-only listing of provider catalog).
-	webSearch := r.Group("/web-search")
-	{
-		webSearch.GET("/providers", g.Viewer(), webSearchHandler.GetProviders)
-	}
-}
-
-// RegisterWebSearchProviderRoutes registers CRUD routes for web search
-// provider configurations.
-//
-// Provider rows hold external service credentials (Bing, Tavily, Google,
-// etc.); reads are Viewer+, all mutations / connection tests (which
-// probe external systems with stored credentials) and the per-field
-// credential subresource are Admin+.
-func RegisterWebSearchProviderRoutes(
-	r *gin.RouterGroup,
-	h *handler.WebSearchProviderHandler,
-	credHandler *handler.WebSearchProviderCredentialsHandler,
-	g *rbacGuards,
-) {
-	providers := g.apiKeyGroup(r.Group("/web-search-providers"), apiKeyManageWebSearch(apiKeyFullAccess()))
-	{
-		// List available provider types (metadata for UI forms) — Viewer+
-		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
-		// Test with raw credentials (no persistence) — Admin+
-		providers.POST("/test", g.Admin(), h.TestProviderRaw)
-		// CRUD
-		providers.POST("", g.Admin(), h.CreateProvider)
-		providers.GET("", g.Viewer(), h.ListProviders)
-		providers.GET("/:id", g.Viewer(), h.GetProvider)
-		providers.PUT("/:id", g.Admin(), h.UpdateProvider)
-		providers.DELETE("/:id", g.Admin(), h.DeleteProvider)
-		// Per-field credential subresource — Admin+
-		providers.PUT("/:id/credentials", g.Admin(), credHandler.Put)
-		providers.DELETE("/:id/credentials/:field", g.Admin(), credHandler.DeleteField)
-		// Test existing saved provider — Admin+
-		providers.POST("/:id/test", g.Admin(), h.TestProviderByID)
-	}
-}
-
 // RegisterVectorStoreRoutes registers CRUD routes for vector store configurations.
 //
 // Vector stores are tenant-level infrastructure; reads are Viewer+, all

@@ -102,7 +102,6 @@ type agentService struct {
 	mcpManager            *mcp.MCPManager
 	eventBus              *event.EventBus
 	db                    *gorm.DB
-	webSearchService      interfaces.WebSearchService
 	knowledgeBaseService  interfaces.KnowledgeBaseService
 	knowledgeService      interfaces.KnowledgeService
 	fileService           interfaces.FileService
@@ -136,7 +135,6 @@ func NewAgentService(
 	mcpManager *mcp.MCPManager,
 	eventBus *event.EventBus,
 	db *gorm.DB,
-	webSearchService interfaces.WebSearchService,
 	duckdb *sql.DB,
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
@@ -166,7 +164,6 @@ func NewAgentService(
 		mcpManager:           mcpManager,
 		eventBus:             eventBus,
 		db:                   db,
-		webSearchService:     webSearchService,
 		duckdb:               duckdb,
 		wikiPageService:      wikiPageService,
 		tenantService:        tenantService,
@@ -197,7 +194,7 @@ func (s *agentService) CreateAgentEngine(
 	chatModel chat.Chat,
 	rerankModel rerank.Reranker,
 	eventBus *event.EventBus,
-	sessionID, assistantMessageID string,
+	sessionID string,
 ) (interfaces.AgentEngine, error) {
 	logger.Infof(ctx, "Creating agent engine with custom EventBus")
 
@@ -229,7 +226,6 @@ func (s *agentService) CreateAgentEngine(
 	// capability independently of the existing SkillsEnabled execution gate.
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
-	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
 	// Advertise cached service summaries independently of @mentions. Concrete
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)
@@ -240,7 +236,7 @@ func (s *agentService) CreateAgentEngine(
 	// 4. Resolve system prompt template
 	systemPromptTemplate := ""
 	if config.UseCustomSystemPrompt || config.SystemPrompt != "" {
-		systemPromptTemplate = config.ResolveSystemPrompt(config.WebSearchEnabled)
+		systemPromptTemplate = config.ResolveSystemPrompt()
 	}
 
 	// 5. Create engine
@@ -1112,10 +1108,9 @@ func (s *agentService) registerTools(
 			tools.ToolWikiUpdateIssue: true,
 		}
 
-		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
-		if !config.WebSearchEnabled {
-			kbTools[tools.ToolTodoWrite] = true
-		}
+		// No knowledge targets at all: also disable todo_write (not useful for
+		// simple chat).
+		kbTools[tools.ToolTodoWrite] = true
 
 		for _, toolName := range allowedTools {
 			if !kbTools[toolName] {
@@ -1126,14 +1121,10 @@ func (s *agentService) registerTools(
 		logger.Infof(ctx, "Pure Agent Mode: Knowledge base tools filtered out, remaining: %v", allowedTools)
 	}
 
-	// Web capabilities follow the runtime switch even if a saved allowlist names them.
+	// Public web search is retired: both tools are dropped even when a stored
+	// allowlist or a preset still names them, and nothing re-adds them.
 	allowedTools = withoutString(allowedTools, tools.ToolWebSearch)
 	allowedTools = withoutString(allowedTools, tools.ToolWebFetch)
-	// If web search is enabled, add web_search to allowedTools
-	if config.WebSearchEnabled {
-		allowedTools = append(allowedTools, tools.ToolWebSearch)
-		allowedTools = append(allowedTools, tools.ToolWebFetch)
-	}
 
 	// Long-term memory is retired: the tool is dropped even when a stored
 	// allowlist still names it — a preset, an API caller, or a config saved
@@ -1216,7 +1207,6 @@ func (s *agentService) registerTools(
 	// Deduplicate while preserving original order.
 	allowedTools = dedupStrings(allowedTools)
 
-	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 	// Register each allowed tool
 	for _, toolName := range allowedTools {
 		var toolToRegister types.Tool
@@ -1249,18 +1239,6 @@ func (s *agentService) registerTools(
 				WithGraph(s.graphRepo, chunkRepo)
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
-		case tools.ToolWebSearch:
-			toolToRegister = tools.NewWebSearchTool(
-				s.webSearchService,
-				config.WebSearchMaxResults,
-				config.WebSearchProviderID,
-			)
-			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
-
-		case tools.ToolWebFetch:
-			toolToRegister = tools.NewWebFetchTool()
-			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
-
 		case tools.ToolDataAnalysis:
 			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
 				WithSearchTargets(config.SearchTargets)

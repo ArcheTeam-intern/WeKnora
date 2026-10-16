@@ -22,12 +22,13 @@ func TestEveryBuiltInToolDeclaresAModelHandlePolicy(t *testing.T) {
 		ToolReadDocument,
 		ToolListDocuments,
 		ToolQueryKnowledgeGraph,
+		// search_memory is retired but keeps an explicit (empty) policy entry,
+		// so the built-in list still names it. web_search and web_fetch no
+		// longer have policies at all: nothing can register them.
 		ToolSearchMemory,
 		ToolDatabaseQuery,
 		ToolDataAnalysis,
 		ToolDataSchema,
-		ToolWebSearch,
-		ToolWebFetch,
 		ToolReadFile,
 		ToolListSandboxFiles,
 		ToolWriteSandboxFile,

@@ -33,18 +33,8 @@ func prepareMessagesWithModelContext(
 	ordered := expandCitationSources(orderedPipelineReferences(chatManage))
 	knowledgeResults := make([]*types.SearchResult, 0, len(ordered))
 	knowledgeRows := make([]map[string]interface{}, 0, len(ordered))
-	webRows := make([]map[string]interface{}, 0)
 	for _, result := range ordered {
 		if result == nil {
-			continue
-		}
-		if isPipelineWebReference(result) {
-			webRows = append(webRows, map[string]interface{}{
-				"url":          result.ID,
-				"title":        firstPipelineTitle(result),
-				"snippet":      result.Content,
-				"published_at": result.Metadata["published_at"],
-			})
 			continue
 		}
 		knowledgeResults = append(knowledgeResults, result)
@@ -79,15 +69,6 @@ func prepareMessagesWithModelContext(
 			Data:    data,
 		}))
 	}
-	if len(webRows) > 0 {
-		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
-			Success: true,
-			Data: map[string]interface{}{
-				"display_type": "web_search_results",
-				"results":      webRows,
-			},
-		}))
-	}
 	modelContexts := strings.Join(contextParts, "\n")
 	if strings.TrimSpace(modelContexts) == "" {
 		modelContexts = "Retrieved source bodies could not be verified. Do not cite or infer facts from " +
@@ -111,14 +92,6 @@ func prepareMessagesWithModelContext(
 		messages[last].Content += registry.ImageSourcesNote(ids, len(chatManage.Images))
 	}
 	return messages, registry
-}
-
-func isPipelineWebReference(result *types.SearchResult) bool {
-	if result == nil {
-		return false
-	}
-	return strings.EqualFold(result.ChunkType, string(types.ChunkTypeWebSearch)) ||
-		strings.EqualFold(result.KnowledgeSource, "web_search")
 }
 
 func orderedPipelineReferences(chatManage *types.ChatManage) []*types.SearchResult {

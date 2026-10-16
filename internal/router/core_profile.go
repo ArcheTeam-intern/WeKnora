@@ -8,13 +8,12 @@ import "github.com/Tencent/WeKnora/internal/config"
 // the knowledge-core profile is a security posture, so "which entry points are
 // reachable" has to be assertable without booting gin or a database.
 //
-// IM delivery and web-embed publishing are no longer listed here: they were
-// physically removed, so no profile registers them. The remaining switches
-// still gate routes for modules that are only closed, not deleted yet — each
-// switch is dropped from this table in the batch that removes its module.
+// IM delivery, web-embed publishing and public web search are no longer listed
+// here: they were physically removed, so no profile registers them. The
+// remaining switches still gate routes for modules that are only closed, not
+// deleted yet — each switch is dropped from this table in the batch that
+// removes its module.
 type coreProfileReachability struct {
-	// PublicWebSearch covers web search and web search provider credentials.
-	PublicWebSearch bool
 	// MCPClientToolbox covers the third-party MCP client surface (toolbox,
 	// OAuth and approvals). The MCP SERVER surface — the main product's entry
 	// point — is not part of this switch and stays reachable in both profiles.
@@ -36,7 +35,6 @@ func reachabilityFor(cfg *config.Config) coreProfileReachability {
 		return coreProfileReachability{}
 	}
 	return coreProfileReachability{
-		PublicWebSearch:  true,
 		MCPClientToolbox: true,
 		ExecutionSandbox: true,
 		Skills:           true,

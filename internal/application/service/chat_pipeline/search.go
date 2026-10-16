@@ -9,22 +9,18 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/searchutil"
-	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 // PluginSearch implements search functionality for chat pipeline
 type PluginSearch struct {
-	knowledgeBaseService  interfaces.KnowledgeBaseService
-	knowledgeService      interfaces.KnowledgeService
-	chunkService          interfaces.ChunkService
-	config                *config.Config
-	webSearchService      interfaces.WebSearchService
-	tenantService         interfaces.TenantService
-	sessionService        interfaces.SessionService
-	webSearchStateService interfaces.WebSearchStateService
-	webSearchProviderRepo interfaces.WebSearchProviderRepository
+	knowledgeBaseService interfaces.KnowledgeBaseService
+	knowledgeService     interfaces.KnowledgeService
+	chunkService         interfaces.ChunkService
+	config               *config.Config
+	tenantService        interfaces.TenantService
+	sessionService       interfaces.SessionService
 }
 
 func NewPluginSearch(eventManager *EventManager,
@@ -32,22 +28,16 @@ func NewPluginSearch(eventManager *EventManager,
 	knowledgeService interfaces.KnowledgeService,
 	chunkService interfaces.ChunkService,
 	config *config.Config,
-	webSearchService interfaces.WebSearchService,
 	tenantService interfaces.TenantService,
 	sessionService interfaces.SessionService,
-	webSearchStateService interfaces.WebSearchStateService,
-	webSearchProviderRepo interfaces.WebSearchProviderRepository,
 ) *PluginSearch {
 	res := &PluginSearch{
-		knowledgeBaseService:  knowledgeBaseService,
-		knowledgeService:      knowledgeService,
-		chunkService:          chunkService,
-		config:                config,
-		webSearchService:      webSearchService,
-		tenantService:         tenantService,
-		sessionService:        sessionService,
-		webSearchStateService: webSearchStateService,
-		webSearchProviderRepo: webSearchProviderRepo,
+		knowledgeBaseService: knowledgeBaseService,
+		knowledgeService:     knowledgeService,
+		chunkService:         chunkService,
+		config:               config,
+		tenantService:        tenantService,
+		sessionService:       sessionService,
 	}
 	eventManager.Register(res)
 	return res
@@ -62,13 +52,13 @@ func (p *PluginSearch) ActivationEvents() []types.EventType {
 func (p *PluginSearch) OnEvent(ctx context.Context,
 	eventType types.EventType, chatManage *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	// Check if we have search targets or web search enabled
+	// Check if we have search targets
 	hasKBTargets := types.HasKnowledgeRetrievalScope(
 		chatManage.SearchTargets,
 		chatManage.KnowledgeBaseIDs,
 		chatManage.KnowledgeIDs,
 	)
-	if !hasKBTargets && !chatManage.WebSearchEnabled {
+	if !hasKBTargets {
 		pipelineError(ctx, "Search", "kb_not_found", map[string]interface{}{
 			"session_id": chatManage.SessionID,
 		})
@@ -80,10 +70,9 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		"rewrite_query":  chatManage.RewriteQuery,
 		"search_targets": len(chatManage.SearchTargets),
 		"tenant_id":      chatManage.TenantID,
-		"web_enabled":    chatManage.WebSearchEnabled,
 	})
 
-	// Run KB search and web search concurrently
+	// Run KB search
 	pipelineInfo(ctx, "Search", "plan", map[string]interface{}{
 		"search_targets":    len(chatManage.SearchTargets),
 		"embedding_top_k":   chatManage.EmbeddingTopK,
@@ -95,7 +84,7 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 	allResults := make([]*types.SearchResult, 0)
 	var kbSearchErr error
 
-	wg.Add(2)
+	wg.Add(1)
 	// Goroutine 1: Knowledge base search using SearchTargets
 	go func() {
 		defer wg.Done()
@@ -104,17 +93,6 @@ func (p *PluginSearch) OnEvent(ctx context.Context,
 		if len(kbResults) > 0 {
 			mu.Lock()
 			allResults = append(allResults, kbResults...)
-			mu.Unlock()
-		}
-	}()
-
-	// Goroutine 2: Web search (if enabled)
-	go func() {
-		defer wg.Done()
-		webResults := p.searchWebIfEnabled(ctx, chatManage)
-		if len(webResults) > 0 {
-			mu.Lock()
-			allResults = append(allResults, webResults...)
 			mu.Unlock()
 		}
 	}()
@@ -599,76 +577,4 @@ func (p *PluginSearch) searchSingleTarget(
 	*results = append(*results, res...)
 	mu.Unlock()
 	return nil
-}
-
-// searchWebIfEnabled executes web search when enabled and returns converted results
-func (p *PluginSearch) searchWebIfEnabled(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
-	if !chatManage.WebSearchEnabled || p.webSearchService == nil || p.tenantService == nil {
-		return nil
-	}
-	tenant, _ := types.TenantInfoFromContext(ctx)
-	providerID := chatManage.WebSearchProviderID
-
-	if providerID == "" {
-		pipelineWarn(ctx, "Search", "web_config_missing", map[string]interface{}{
-			"tenant_id": chatManage.TenantID,
-		})
-		return nil
-	}
-
-	webConfig := types.EffectiveWebSearchConfig(nil)
-	if tenant != nil {
-		webConfig = types.EffectiveWebSearchConfig(tenant.WebSearchConfig)
-	}
-
-	// Apply agent-level web search overrides
-	if chatManage.WebSearchMaxResults > 0 {
-		webConfig.MaxResults = chatManage.WebSearchMaxResults
-	}
-
-	pipelineInfo(ctx, "Search", "web_request", map[string]interface{}{
-		"tenant_id":   chatManage.TenantID,
-		"provider_id": providerID,
-	})
-	webCtx, webSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "web_search",
-		Input: map[string]interface{}{
-			"provider_id": providerID,
-			"query":       chatManage.RewriteQuery,
-			"max_results": webConfig.MaxResults,
-		},
-	})
-	webResults, err := p.webSearchService.Search(webCtx, providerID, webConfig, chatManage.RewriteQuery)
-	webSpan.Finish(map[string]interface{}{
-		"hit_count": len(webResults),
-	}, nil, err)
-	if err != nil {
-		pipelineWarn(ctx, "Search", "web_search_error", map[string]interface{}{
-			"tenant_id": chatManage.TenantID,
-			"error":     err.Error(),
-		})
-		return nil
-	}
-	// Build questions using RewriteQuery only
-	// questions := []string{strings.TrimSpace(chatManage.RewriteQuery)}
-	// Load session-scoped temp KB state from Redis using WebSearchStateRepository
-	// tempKBID, seen, ids := p.webSearchStateService.GetWebSearchTempKBState(ctx, chatManage.SessionID)
-	// compressed, kbID, newSeen, newIDs, err := p.webSearchService.CompressWithRAG(
-	// 	ctx, chatManage.SessionID, tempKBID, questions, webResults, webConfig,
-	// 	p.knowledgeBaseService, p.knowledgeService, seen, ids,
-	// )
-	// if err != nil {
-	// 	pipelineWarn(ctx, "Search", "web_compress_error", map[string]interface{}{
-	// 		"error": err.Error(),
-	// 	})
-	// } else {
-	// 	webResults = compressed
-	// 	// Persist temp KB state back into Redis using WebSearchStateRepository
-	// 	p.webSearchStateService.SaveWebSearchTempKBState(ctx, chatManage.SessionID, kbID, newSeen, newIDs)
-	// }
-	res := searchutil.ConvertWebSearchResults(webResults)
-	pipelineInfo(ctx, "Search", "web_hits", map[string]interface{}{
-		"hit_count": len(res),
-	})
-	return res
 }

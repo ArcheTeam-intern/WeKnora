@@ -112,16 +112,19 @@ type AgentConfig struct {
 	KnowledgeIDs   []string `json:"knowledge_ids"`           // Accessible knowledge IDs (individual documents)
 	SystemPrompt   string   `json:"system_prompt,omitempty"` // Unified system prompt (uses web_search_status placeholder for dynamic behavior)
 	// Deprecated: Use SystemPrompt instead. Kept for backward compatibility during migration.
-	SystemPromptWebEnabled  string        `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
-	SystemPromptWebDisabled string        `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
-	UseCustomSystemPrompt   bool          `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
-	LocalBrowserEnabled     bool          `json:"-"`                                    // Per-turn local_browser gate
-	WebSearchEnabled        bool          `json:"web_search_enabled"`                   // Whether web search tool is enabled
-	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
-	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
-	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
-	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
+	SystemPromptWebEnabled  string `json:"system_prompt_web_enabled,omitempty"`  // Deprecated: Custom prompt when web search is enabled
+	SystemPromptWebDisabled string `json:"system_prompt_web_disabled,omitempty"` // Deprecated: Custom prompt when web search is disabled
+	UseCustomSystemPrompt   bool   `json:"use_custom_system_prompt"`             // Whether to use custom system prompt instead of default
+	LocalBrowserEnabled     bool   `json:"-"`                                    // Per-turn local_browser gate
+	// Retired with public web search: kept so a stored config round-trips, but
+	// registerTools strips both tools from every allowlist and no runtime reads
+	// these fields any more.
+	WebSearchEnabled    bool          `json:"web_search_enabled"`               // Retired: public web search was removed from this build
+	WebSearchMaxResults int           `json:"web_search_max_results"`           // Retired: public web search was removed from this build
+	WebSearchProviderID string        `json:"web_search_provider_id,omitempty"` // Retired: public web search was removed from this build
+	MultiTurnEnabled    bool          `json:"multi_turn_enabled"`               // Whether multi-turn conversation is enabled
+	MemoryEnabled       *bool         `json:"memory_enabled,omitempty"`         // nil inherits workspace
+	SearchTargets       SearchTargets `json:"-"`                                // Pre-computed unified search targets (runtime only)
 	// MCP service selection
 	MCPSelectionMode string   `json:"mcp_selection_mode"` // MCP selection mode: "all", "selected", "none"
 	MCPServices      []string `json:"mcp_services"`       // Selected MCP service IDs (when mode is "selected")
@@ -315,9 +318,12 @@ func (c *SessionAgentConfig) Scan(value interface{}) error {
 	return json.Unmarshal(b, c)
 }
 
-// ResolveSystemPrompt returns the prompt template for the given web search state.
-// It uses the unified SystemPrompt field, falling back to deprecated fields for backward compatibility.
-func (c *AgentConfig) ResolveSystemPrompt(webSearchEnabled bool) string {
+// ResolveSystemPrompt returns the prompt template in use.
+// It uses the unified SystemPrompt field, falling back to deprecated stored
+// fields for backward compatibility. Public web search is retired, so the
+// deprecated "web enabled" variant is never selected any more; the
+// web-disabled one is what a stored agent without web search carries.
+func (c *AgentConfig) ResolveSystemPrompt() string {
 	if c == nil {
 		return ""
 	}
@@ -327,15 +333,9 @@ func (c *AgentConfig) ResolveSystemPrompt(webSearchEnabled bool) string {
 		return c.SystemPrompt
 	}
 
-	// Fallback to deprecated fields for backward compatibility
-	if webSearchEnabled {
-		if c.SystemPromptWebEnabled != "" {
-			return c.SystemPromptWebEnabled
-		}
-	} else {
-		if c.SystemPromptWebDisabled != "" {
-			return c.SystemPromptWebDisabled
-		}
+	// Fallback to the deprecated field for backward compatibility
+	if c.SystemPromptWebDisabled != "" {
+		return c.SystemPromptWebDisabled
 	}
 
 	return ""

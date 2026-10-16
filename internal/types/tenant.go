@@ -102,7 +102,8 @@ type Tenant struct {
 	StorageUsed int64 `yaml:"storage_used"        json:"storage_used"        gorm:"default:0"`
 	// Global Context configuration for this workspace (default for all sessions)
 	ContextConfig *ContextConfig `yaml:"context_config"      json:"context_config"      gorm:"type:jsonb"`
-	// Global WebSearch configuration for this workspace
+	// WebSearchConfig is a stored compat column: public web search was removed
+	// from this build, so nothing writes or acts on it. See web_search.go.
 	WebSearchConfig *WebSearchConfig `yaml:"web_search_config"   json:"web_search_config"   gorm:"type:jsonb"`
 	// Parser engine config overrides (MinerU endpoint, API key, etc.). Used when parsing documents; overrides env.
 	ParserEngineConfig *ParserEngineConfig `yaml:"parser_engine_config" json:"parser_engine_config" gorm:"type:jsonb"`

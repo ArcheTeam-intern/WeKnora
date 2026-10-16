@@ -26,14 +26,6 @@ func (s *sessionService) KnowledgeQA(
 	req *types.QARequest,
 	eventBus *event.EventBus,
 ) error {
-	webSearchEnabled := resolveWebSearchEnabled(req)
-	logger.Infof(
-		ctx,
-		"Knowledge base question answering parameters, session ID: %s, query: %s, webSearchEnabled: %v",
-		req.Session.ID,
-		req.Query,
-		webSearchEnabled,
-	)
 	// IM/MCP call KnowledgeQA without executeQA's send-side lease, so hold one
 	// for the pipeline. HTTP send already took it before persisting the turn
 	// and says so on the request; taking a second would double every rewind
@@ -145,11 +137,6 @@ func (s *sessionService) KnowledgeQA(
 			EnableQueryExpansion:    s.cfg.Conversation.EnableQueryExpansion,
 			RewritePromptSystem:     s.cfg.Conversation.RewritePromptSystem,
 			RewritePromptUser:       s.cfg.Conversation.RewritePromptUser,
-			WebSearchEnabled:        webSearchEnabled,
-			WebSearchProviderID:     s.resolveWebSearchProviderID(ctx, req, retrievalTenantID),
-			WebSearchMaxResults:     s.resolveWebSearchMaxResults(ctx, req),
-			WebFetchEnabled:         s.resolveWebFetchEnabled(req),
-			WebFetchTopN:            s.resolveWebFetchTopN(req),
 			TenantID:                retrievalTenantID,
 			Images:                  req.ImageURLs,
 			VLMModelID:              vlmModelID,
@@ -176,18 +163,12 @@ func (s *sessionService) KnowledgeQA(
 		req.ReasoningEffort, &chatManage.SummaryConfig.Thinking, &chatManage.SummaryConfig.ReasoningEffort,
 	)
 
-	// An agent may opt out of long-term memory. The preference is per-request
-	// rather than per-user, so it travels in the context that the recall
-	// plugin reads.
-	if req.CustomAgent != nil {
-	}
-
-	// Determine pipeline based on the effective knowledge retrieval scope and
-	// web search setting. Tag-only mentions leave the raw KB/knowledge ID slices
-	// empty but produce SearchTargets, so the unified targets must participate in
-	// this decision or the request is incorrectly downgraded to pure chat.
+	// Determine pipeline based on the effective knowledge retrieval scope.
+	// Tag-only mentions leave the raw KB/knowledge ID slices empty but produce
+	// SearchTargets, so the unified targets must participate in this decision
+	// or the request is incorrectly downgraded to pure chat.
 	hasKB := types.HasKnowledgeRetrievalScope(searchTargets, knowledgeBaseIDs, knowledgeIDs)
-	needsRAG := hasKB || webSearchEnabled
+	needsRAG := hasKB
 	hasHistory := chatManage.MaxRounds > 0
 
 	var pipeline []types.EventType
@@ -217,7 +198,6 @@ func (s *sessionService) KnowledgeQA(
 			Add(types.QUERY_UNDERSTAND).
 			Add(types.CHUNK_SEARCH_PARALLEL).
 			Add(types.CHUNK_RERANK).
-			AddIf(webSearchEnabled, types.WEB_FETCH).
 			Add(types.CHUNK_MERGE).
 			Add(types.FILTER_TOP_K).
 			AddIf(chatManage.DataAnalysisEnabled, types.DATA_ANALYSIS).
@@ -226,8 +206,8 @@ func (s *sessionService) KnowledgeQA(
 			Build()
 	}
 
-	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, webSearch=%v, history=%v",
-		len(pipeline), hasKB, webSearchEnabled, hasHistory)
+	logger.Infof(ctx, "Assembled pipeline (%d stages), hasKB=%v, history=%v",
+		len(pipeline), hasKB, hasHistory)
 
 	// Start knowledge QA event processing (set session tenant so pipeline session/message lookups use session owner)
 	ctx = context.WithValue(ctx, types.SessionTenantIDContextKey, req.Session.TenantID)
@@ -1357,60 +1337,4 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 	} else {
 		logger.Infof(ctx, "Fallback answer event emitted successfully")
 	}
-}
-
-// resolveWebSearchProviderID returns the web search provider ID to use for a pipeline request.
-// Priority: agent config > tenant default (is_default=true)
-func (s *sessionService) resolveWebSearchProviderID(ctx context.Context, req *types.QARequest, tenantID uint64) string {
-	// 1. Agent-level override
-	if req.CustomAgent != nil && req.CustomAgent.Config.WebSearchProviderID != "" {
-		return req.CustomAgent.Config.WebSearchProviderID
-	}
-	// 2. Tenant default
-	if s.webSearchProviderRepo != nil {
-		if defaultProvider, err := s.webSearchProviderRepo.GetDefault(ctx, tenantID); err == nil && defaultProvider != nil {
-			return defaultProvider.ID
-		}
-	}
-	return ""
-}
-
-// resolveWebSearchEnabled combines the request switch with the agent's own
-// setting, as agent mode does: the switch only opts a turn in, so a client
-// cannot turn on a search (and spend the agent workspace's provider quota)
-// that the agent disables. Requests without an agent keep the switch.
-func resolveWebSearchEnabled(req *types.QARequest) bool {
-	if req.CustomAgent != nil {
-		return req.CustomAgent.Config.WebSearchEnabled && req.WebSearchEnabled
-	}
-	return req.WebSearchEnabled
-}
-
-// resolveWebFetchEnabled returns whether auto web fetch is enabled for this request.
-func (s *sessionService) resolveWebFetchEnabled(req *types.QARequest) bool {
-	if req.CustomAgent != nil {
-		return req.CustomAgent.Config.WebFetchEnabled
-	}
-	return false
-}
-
-// resolveWebFetchTopN returns how many pages to fetch after rerank.
-func (s *sessionService) resolveWebFetchTopN(req *types.QARequest) int {
-	if req.CustomAgent != nil && req.CustomAgent.Config.WebFetchTopN > 0 {
-		return req.CustomAgent.Config.WebFetchTopN
-	}
-	return 3
-}
-
-// resolveWebSearchMaxResults returns the max results for web search.
-// Priority: agent config > tenant default > default (10)
-func (s *sessionService) resolveWebSearchMaxResults(ctx context.Context, req *types.QARequest) int {
-	if req.CustomAgent != nil && req.CustomAgent.Config.WebSearchMaxResults > 0 {
-		return req.CustomAgent.Config.WebSearchMaxResults
-	}
-	tenantInfo, _ := types.TenantInfoFromContext(ctx)
-	if tenantInfo != nil {
-		return types.EffectiveWebSearchConfig(tenantInfo.WebSearchConfig).MaxResults
-	}
-	return types.DefaultWebSearchMaxResults
 }

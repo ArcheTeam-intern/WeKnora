@@ -305,10 +305,6 @@ func apiKeyManageStorageBackends(base middleware.APIKeyRoutePolicy) middleware.A
 	return base.WithCapability(types.APIKeyCapabilityManageStorageBackends)
 }
 
-func apiKeyManageWebSearch(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
-	return base.WithCapability(types.APIKeyCapabilityManageWebSearch)
-}
-
 func apiKeyRunEvaluations(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityRunEvaluations)
 }

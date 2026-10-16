@@ -13,7 +13,7 @@ import (
 // argument; it is JSON-escaped already because it is spliced into the raw
 // schema literal below.
 const thinkingThoughtDescription = "Your current thinking step. Write in natural, user-friendly language. " +
-	"NEVER mention tool names (like \\\"search_knowledge\\\", \\\"read_document\\\", \\\"web_search\\\", etc.). " +
+	"NEVER mention tool names (like \\\"search_knowledge\\\", \\\"read_document\\\", etc.). " +
 	"Instead, describe actions in plain language (e.g., \\\"I'll search for key terms\\\" instead of " +
 	"\\\"I'll use search_knowledge\\\"). Focus on WHAT you're trying to find and WHY, not HOW (which tools you'll use)."
 
@@ -59,7 +59,7 @@ Each thought can build on, question, or revise previous insights as understandin
   * Hypothesis verification
   
   **CRITICAL - User-Friendly Thinking**: Write your thoughts in natural, user-friendly language.
-  NEVER mention tool names (like "search_knowledge", "read_document", "web_search", etc.) in your thinking process.
+  NEVER mention tool names (like "search_knowledge", "read_document", etc.) in your thinking process.
   Instead, describe your actions in plain language:
   - ❌ BAD: "I'll use search_knowledge in keyword mode, then read_document for the details"
   - ✅ GOOD: "I'll start by searching for key terms in the knowledge base, then explore related concepts"

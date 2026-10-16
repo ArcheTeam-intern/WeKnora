@@ -21,14 +21,6 @@ func (deleteForkMessageRepo) GetKnowledgeIDsBySessionID(context.Context, string)
 	return nil, nil
 }
 
-type deleteForkWebSearchState struct {
-	interfaces.WebSearchStateService
-}
-
-func (deleteForkWebSearchState) DeleteWebSearchTempKBState(context.Context, string) error {
-	return nil
-}
-
 func newSessionServiceForForkDeleteTest(t *testing.T) (*sessionService, *gorm.DB, *fakeForkSessionSnapshotDeleter) {
 	t.Helper()
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
@@ -36,10 +28,9 @@ func newSessionServiceForForkDeleteTest(t *testing.T) (*sessionService, *gorm.DB
 	require.NoError(t, db.AutoMigrate(&types.Session{}, &types.ForkSnapshotLease{}))
 	snapshots := &fakeForkSessionSnapshotDeleter{}
 	svc := &sessionService{
-		sessionRepo:        repository.NewSessionRepository(db),
-		messageRepo:        deleteForkMessageRepo{},
-		webSearchStateRepo: deleteForkWebSearchState{},
-		forkSnapshots:      snapshots,
+		sessionRepo:   repository.NewSessionRepository(db),
+		messageRepo:   deleteForkMessageRepo{},
+		forkSnapshots: snapshots,
 	}
 	return svc, db, snapshots
 }

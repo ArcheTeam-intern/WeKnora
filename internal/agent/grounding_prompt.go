@@ -51,17 +51,6 @@ func formatGroundingGuidance(names []string) string {
 			"Directory entries are routing hints, not retrieved evidence; do not exhaust unrelated " +
 			"bases. Choose an available search or reader appropriate to the scope.\n")
 	}
-	if slices.Contains(names, tools.ToolWebSearch) {
-		b.WriteString("- web_search is available: use it when relevant local evidence is missing, " +
-			"insufficient, or needs external/current verification. Prefer authoritative sources and " +
-			"verify the requested version and prerequisites. Do not send private source content to " +
-			"external search.\n")
-	}
-	if slices.Contains(names, tools.ToolWebFetch) {
-		b.WriteString("- web_fetch is available: read relevant supplied or discovered URLs when " +
-			"their content is needed to support claims; a search snippet alone may omit essential " +
-			"conditions.\n")
-	}
 	if slices.Contains(names, tools.ToolDiscoverMCPTools) {
 		b.WriteString("- Connected MCP services may provide relevant evidence or actions. Use the " +
 			"selected service when applicable; a service description or a discovered tool is not " +

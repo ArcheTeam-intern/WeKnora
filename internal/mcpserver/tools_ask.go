@@ -395,9 +395,8 @@ func (s *Server) runQA(
 			UserMessageID:      userMsg.ID,
 			CustomAgent:        agent,
 			KnowledgeBaseIDs:   kbIDs,
-			// Web search is never enabled from the MCP surface: the builtin
-			// quick-answer agent turns it on by default, which would make an
-			// otherwise read-only endpoint reach the public internet.
+			// Public web search is retired entirely; the field stays set to
+			// false so the request shape is explicit about it.
 			WebSearchEnabled: false,
 		}
 		var runErr error

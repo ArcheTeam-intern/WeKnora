@@ -52,7 +52,7 @@ type AgentService interface {
 		chatModel chat.Chat,
 		rerankModel rerank.Reranker,
 		eventBus *event.EventBus,
-		sessionID, assistantMessageID string,
+		sessionID string,
 	) (AgentEngine, error)
 
 	// ValidateConfig validates an agent configuration

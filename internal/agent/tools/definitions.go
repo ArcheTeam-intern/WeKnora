@@ -23,8 +23,11 @@ const (
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
 	ToolDataSchema          = "data_schema"
-	ToolWebSearch           = "web_search"
-	ToolWebFetch            = "web_fetch"
+	// Public web search is retired. The names stay so a stored agent allowlist
+	// that still lists them can be stripped by name (see agent_service.go),
+	// but nothing registers them and no model schema offers them.
+	ToolWebSearch = "web_search"
+	ToolWebFetch  = "web_fetch"
 	// Unified reading: workspace access follows sandbox file capability;
 	// skill resources follow SkillsEnabled and do not require a sandbox.
 	ToolReadFile = "read_file"
@@ -35,7 +38,7 @@ const (
 	// patches an existing file without regenerating it.
 	//
 	// Deliberately absent from AvailableToolDefinitions and
-	// DefaultAllowedTools, like search_memory and web_search: the sandbox
+	// DefaultAllowedTools, like search_memory: the sandbox
 	// switch already decides whether a run has a workspace at all, and
 	// registerSandboxFileTools registers these from that capability rather
 	// than from the allowlist. A checkbox would have been a lie — clearing
@@ -115,12 +118,10 @@ func DefaultAllowedTools() []string {
 		// Looking up what this user asked before is only ever a read of their
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
-		// ToolSearchMemory is deliberately absent here and from
-		// AvailableToolDefinitions. Like web_search it is not chosen from this
-		// list at all: registerTools injects it whenever the workspace, the
-		// user and the agent all allow memory, and strips it whenever they do
-		// not. Adding it here would let a stale allowlist decide something the
-		// memory switches already decide.
+		// ToolSearchMemory, ToolWebSearch and ToolWebFetch are deliberately
+		// absent here and from AvailableToolDefinitions: all three are retired,
+		// registerTools strips them from every allowlist, and listing them
+		// would let a stale config pretend the capability came back.
 		// Graph, SQL, data analysis and explicit planning are opt-in. Existing
 		// agents keep their explicit allowlists; domain presets select extras.
 	}
