@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -155,6 +156,29 @@ func structuredOf(result *mcp.CallToolResult) map[string]any {
 		return payload
 	}
 	return nil
+}
+
+// structuredValue normalises a nested value of a structured payload into its
+// generic shape (map[string]any, []any or a scalar). The legacy handlers wrap
+// typed structs straight into the payload map — documentStatusReport on the
+// document status, documentSummary on the import result, ParserEngineRule
+// slices on the process config — and a plain map assertion misses them, which
+// is how the core surface reported "unknown" phases and an empty document id.
+// JSON is the shape the MCP client receives anyway, so the round-trip cannot
+// change what a caller observes; it only makes the Go-side read match it.
+func structuredValue(value any) any {
+	if value == nil {
+		return nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	var normalised any
+	if err := json.Unmarshal(raw, &normalised); err != nil {
+		return nil
+	}
+	return normalised
 }
 
 // coreErrorResult converts a failure from an underlying handler into the core

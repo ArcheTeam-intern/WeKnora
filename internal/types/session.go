@@ -302,10 +302,17 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same agent,
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
-	AgentID             string         `json:"agent_id,omitempty"`
-	AgentEnabled        bool           `json:"agent_enabled"`
-	ModelID             string         `json:"model_id,omitempty"`
-	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	AgentID         string `json:"agent_id,omitempty"`
+	AgentEnabled    bool   `json:"agent_enabled"`
+	ModelID         string `json:"model_id,omitempty"`
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Mode is the QA mode chosen for the most recent ask: "" (uses
+	// endpoint default), "quick-answer" or "smart-reasoning". The core
+	// ask surface uses Mode and ProfileID together with the sorted KB set
+	// to bind a session to its effective scope, so a later ask with a
+	// different mode or profile is refused against the same session id.
+	Mode                string         `json:"mode,omitempty"`
+	ProfileID           string         `json:"profile_id,omitempty"`
 	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
 	TagIDs              []string       `json:"tag_ids,omitempty"`

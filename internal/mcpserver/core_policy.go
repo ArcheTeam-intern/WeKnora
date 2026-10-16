@@ -108,8 +108,8 @@ func resolveCoreAction(tool, action string, args map[string]any) (corePermission
 			"action %q is not supported by %s; supported actions: %s",
 			action, tool, strings.Join(coreActionsFor(tool), ", "))
 	}
-	// Source-specific requirements are additive and must be present before the
-	// aggregated tool touches that source.
+	// Source-specific requirements are additive and must be present before
+	// the aggregated tool touches that source.
 	switch tool {
 	case CoreToolSearch:
 		sources, err := coreStringList(args, "sources")
@@ -127,6 +127,31 @@ func resolveCoreAction(tool, action string, args map[string]any) (corePermission
 					source, tool, strings.Join(coreSearchSources(), ", "))
 			}
 			perm.Tools = append(perm.Tools, extra...)
+		}
+		// match=literal routes the document source to grep_chunks; the
+		// regular search_knowledge does not handle that mode. The endpoint
+		// must explicitly allow grep_chunks, otherwise an attacker who has
+		// only been granted search_knowledge could still bypass that gate
+		// by passing match=literal.
+		//
+		// Any other value is refused here rather than ignored downstream: the
+		// surface implements exactly one match mode, and answering match=regex
+		// with ranked retrieval would silently answer a different question than
+		// the caller asked. Rejecting before the permission derivation keeps the
+		// refusal ahead of any business processing.
+		if raw, ok := args["match"]; ok && raw != nil {
+			match, isString := raw.(string)
+			if !isString {
+				return corePermission{}, invalidArgument("match must be a string")
+			}
+			switch strings.TrimSpace(match) {
+			case "":
+			case "literal":
+				perm.Tools = append(perm.Tools, types.MCPEndpointToolGrepChunks)
+			default:
+				return corePermission{}, invalidArgument(
+					"match %q is not supported by %s; supported values: literal", match, tool)
+			}
 		}
 	case CoreToolRead:
 		source, err := coreStringArg(args, "source_type", "document")
