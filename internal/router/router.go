@@ -113,6 +113,15 @@ func NewRouter(params RouterParams) *gin.Engine {
 		logger.Errorf(context.Background(), "[Router] failed to set trusted proxies: %v", err)
 	}
 
+	// Product profile: the knowledge-core profile closes the non-core
+	// reachability (IM/embed publishing, long-term memory, public web search,
+	// the agent execution sandbox and the third-party MCP toolbox). It gates
+	// ROUTE REGISTRATION only — the knowledge base, parsing, MCP surface,
+	// native QA, wiki and graph keep working, and the providers themselves are
+	// left alone until the physical removal batches. Unset stays "full", so an
+	// existing deployment is unchanged and rollback is a config change.
+	reach := reachabilityFor(params.Config)
+
 	// CORS 中间件应放在最前面。
 	// 注意：通配符 AllowOrigins 下浏览器会拒绝一切带凭据（cookie）的跨域
 	// 请求（CORS 规范禁止 "*" 与 credentials 组合），因此 AllowCredentials
@@ -167,7 +176,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// allowed origins. This is the page-level counterpart to the API Origin
 	// allowlist enforced in EmbedAuth. Registered before the static handler so
 	// it runs for the embed HTML response.
-	if params.EmbedChannelService != nil {
+	if params.EmbedChannelService != nil && reach.Embed {
 		r.Use(embedFrameAncestorsMiddleware(params.EmbedChannelService))
 	}
 
@@ -177,19 +186,21 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	// IM 回调路由（在认证中间件之前注册，使用各平台自身的签名验证）
-	RegisterIMRoutes(r, params.IMHandler)
+	if reach.IM {
+		RegisterIMRoutes(r, params.IMHandler)
 
-	// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
-	RegisterEmbedPublicRoutes(
-		r,
-		params.EmbedChannelHandler,
-		params.EmbedChannelService,
-		params.TenantService,
-		params.RedisClient,
-		params.FileService,
-		params.StorageBackendResolver,
-		params.ResourceCatalog,
-	)
+		// Web embed 公开路由（使用 publish token 鉴权，不走全局 Auth）
+		RegisterEmbedPublicRoutes(
+			r,
+			params.EmbedChannelHandler,
+			params.EmbedChannelService,
+			params.TenantService,
+			params.RedisClient,
+			params.FileService,
+			params.StorageBackendResolver,
+			params.ResourceCatalog,
+		)
+	}
 
 	// Workspace MCP server surface (/mcp/:endpoint_id): bearer-token auth per
 	// endpoint, so it must precede the global Auth middleware. Endpoints that
@@ -211,11 +222,13 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// query ticket — see RegisterSandboxTerminalRoutes; browsers cannot set
 	// auth headers on the WS handshake, so this must precede the global Auth
 	// middleware). The ticket is minted by an authenticated POST.
-	RegisterSandboxTerminalRoutes(r, params.SessionHandler)
-	RegisterSandboxDesktopRoutes(r, params.SessionHandler)
-	r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
-	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
-	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
+	if reach.ExecutionSandbox {
+		RegisterSandboxTerminalRoutes(r, params.SessionHandler)
+		RegisterSandboxDesktopRoutes(r, params.SessionHandler)
+		r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
+		r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
+		r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
+	}
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -313,32 +326,46 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterChatRoutes(v1, params.SessionHandler, rbacGuards)
 		RegisterMessageRoutes(v1, params.MessageHandler, rbacGuards)
 		RegisterModelRoutes(v1, params.ModelHandler, params.ModelCredentialsHandler, rbacGuards)
-		RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
-		RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
-		v1.GET("/me/browser", params.SessionHandler.BrowserSkillAccount)
-		v1.GET("/me/browser/extension", params.SessionHandler.BrowserSkillDownload)
-		v1.POST("/me/browser", params.SessionHandler.BrowserSkillAccount)
+		if reach.ExecutionSandbox {
+			RegisterSandboxConfigRoutes(v1, params.SandboxConfigHandler, params.SandboxSkillHandler, rbacGuards)
+			RegisterMyEnvVarRoutes(v1, params.MeEnvVarHandler)
+			v1.GET("/me/browser", params.SessionHandler.BrowserSkillAccount)
+			v1.GET("/me/browser/extension", params.SessionHandler.BrowserSkillDownload)
+			v1.POST("/me/browser", params.SessionHandler.BrowserSkillAccount)
+		}
 		RegisterEvaluationRoutes(v1, params.EvaluationHandler, rbacGuards)
 		RegisterInitializationRoutes(v1, params.InitializationHandler, rbacGuards)
 		params.SystemHandler.BindDeploymentCapabilities(deploymentCapabilitiesFromRouter(params))
 		RegisterSystemRoutes(v1, params.SystemHandler, rbacGuards)
 		RegisterSystemAdminRoutes(v1, params.SystemHandler, params.AuditLogHandler, rbacGuards)
-		RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
-		RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
-		RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
+		if reach.MCPClientToolbox {
+			RegisterMCPServiceRoutes(v1, params.MCPServiceHandler, params.MCPCredentialsHandler, params.MCPOAuthHandler, rbacGuards)
+		}
+		if reach.PublicWebSearch {
+			RegisterWebSearchRoutes(v1, params.WebSearchHandler, rbacGuards)
+			RegisterWebSearchProviderRoutes(v1, params.WebSearchProviderHandler, params.WebSearchCredentialsHandler, rbacGuards)
+		}
 		RegisterVectorStoreRoutes(v1, params.VectorStoreHandler, rbacGuards)
 		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
-		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
-		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
-		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
+		if reach.Skills {
+			RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
+		}
+		if reach.IM {
+			RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
+		}
+		if reach.Embed {
+			RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
+		}
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
-		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
+		if reach.Memory {
+			RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
+		}
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

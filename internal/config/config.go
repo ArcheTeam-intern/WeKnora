@@ -39,6 +39,51 @@ type Config struct {
 	// against window.location.origin — fine for typical single-origin
 	// deployments. Sourced from FRONTEND_BASE_URL env at startup.
 	FrontendBaseURL string `yaml:"frontend_base_url" json:"frontend_base_url"`
+	// ProductProfile selects which product surface this process serves.
+	// ProductProfileFull (default) keeps every module, so an existing
+	// deployment is unchanged until an operator opts in.
+	// ProductProfileKnowledgeCore closes the non-core reachability — IM and
+	// embed publishing, long-term memory, public web search, the agent
+	// execution sandbox and the third-party MCP toolbox — while keeping the
+	// knowledge base, parsing, MCP surface, native QA, wiki and graph.
+	// Sourced from WEKNORA_PRODUCT_PROFILE (new in this release).
+	ProductProfile string `yaml:"product_profile" json:"product_profile"`
+}
+
+// Product profiles. The zero value behaves like ProductProfileFull, so
+// configuration files written before this variable existed keep working.
+const (
+	ProductProfileFull          = "full"
+	ProductProfileKnowledgeCore = "knowledge-core"
+)
+
+// IsKnowledgeCore reports whether this process serves the knowledge-core
+// profile (no IM/embed publishing, no long-term memory, no public web search,
+// no agent execution sandbox, no third-party MCP toolbox).
+func (c *Config) IsKnowledgeCore() bool {
+	return c != nil && c.ProductProfile == ProductProfileKnowledgeCore
+}
+
+// NormalizeProductProfileForTest exposes the normalization rule to the router
+// package's tests without exporting a second production entry point.
+func NormalizeProductProfileForTest(value string) string {
+	return normalizeProductProfile(value)
+}
+
+// normalizeProductProfile maps a configured value onto a known profile. An
+// unknown value must not silently act like a profile we do not have, so it
+// falls back to full and says so on stdout.
+func normalizeProductProfile(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ProductProfileKnowledgeCore:
+		return ProductProfileKnowledgeCore
+	case "", ProductProfileFull:
+		return ProductProfileFull
+	default:
+		fmt.Printf("[config] WEKNORA_PRODUCT_PROFILE=%q is not a known profile, using %q\n",
+			value, ProductProfileFull)
+		return ProductProfileFull
+	}
 }
 
 // AgentConfig represents the global agent settings.
@@ -584,6 +629,14 @@ func LoadConfig() (*Config, error) {
 			}
 			return ""
 		})
+	}
+
+	// Product profile: env wins over the YAML value, and an unknown value is
+	// reported and treated as full rather than quietly changing behaviour.
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_PRODUCT_PROFILE")); value != "" {
+		cfg.ProductProfile = normalizeProductProfile(value)
+	} else {
+		cfg.ProductProfile = normalizeProductProfile(cfg.ProductProfile)
 	}
 
 	// Validate configuration values

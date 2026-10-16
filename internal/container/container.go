@@ -292,7 +292,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Web search service (needed by AgentService)
 	logger.Debugf(ctx, "[Container] Registering web search registry and providers...")
 	must(container.Provide(infra_web_search.NewRegistry))
-	must(container.Invoke(registerWebSearchProviders))
+	if !productProfileIsKnowledgeCore(container) {
+		// Registering web search providers queries the default provider at
+		// startup; the knowledge-core profile retires public web search.
+		must(container.Invoke(registerWebSearchProviders))
+	}
 	must(container.Provide(repository.NewWebSearchProviderRepository))
 	must(container.Provide(repository.NewVectorStoreRepository))
 	must(container.Provide(repository.NewStorageBackendRepository))
@@ -513,7 +517,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// it), but Invoke constructs the whole chain. SessionService needs
 	// *chatpipeline.EventManager, which only exists after the pipeline
 	// block above — starting the reaper any earlier panics.
-	must(container.Invoke(startTenantSkillReaper))
+	if !productProfileIsKnowledgeCore(container) {
+		must(container.Invoke(startTenantSkillReaper))
+	}
 	logger.Debugf(ctx, "[Container] Tenant skill reaper registered")
 	must(container.Provide(func(
 		sessions interfaces.SessionRepository,
@@ -524,7 +530,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 			sessions, service.NewResolverForkSnapshotDeleter(resolver, mgr),
 		)
 	}))
-	must(container.Invoke(startForkSnapshotReaper))
+	if !productProfileIsKnowledgeCore(container) {
+		must(container.Invoke(startForkSnapshotReaper))
+	}
 	logger.Debugf(ctx, "[Container] Fork snapshot reaper registered")
 
 	// HTTP handlers layer
@@ -587,10 +595,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
-	// IM integration
+	// IM integration. The knowledge-core profile does not build the IM
+	// service chain at all: registering it starts outbound platform
+	// connections, which hiding a menu cannot undo.
 	logger.Debugf(ctx, "[Container] Registering IM integration...")
-	must(container.Provide(imPkg.NewService))
-	must(container.Invoke(registerIMService))
+	if !productProfileIsKnowledgeCore(container) {
+		must(container.Provide(imPkg.NewService))
+		must(container.Invoke(registerIMService))
+	}
 	must(container.Provide(handler.NewIMHandler))
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewMCPEndpointHandler))

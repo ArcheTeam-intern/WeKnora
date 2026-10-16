@@ -1031,6 +1031,23 @@ func (s *agentService) registerTools(
 	if config.SharedAgentReadOnly {
 		allowedTools = withoutWikiWriteTools(allowedTools)
 	}
+	// Knowledge-core profile: whatever the stored agent configuration asks for,
+	// the reachable tool set is the knowledge surface only. Retired
+	// capabilities (web search/fetch, memory, conversation-history search,
+	// shell, sandbox files, skills, browser) are dropped here, so an old custom
+	// agent cannot re-enable them by keeping them in its allowlist. An agent
+	// left with nothing is refused below rather than silently granted the
+	// defaults.
+	if s.cfg != nil && s.cfg.IsKnowledgeCore() {
+		before := len(allowedTools)
+		allowedTools = tools.FilterToolsForCoreProfile(allowedTools)
+		logger.Infof(ctx, "knowledge-core profile: agent tools filtered from %d to %d entries",
+			before, len(allowedTools))
+		if len(allowedTools) == 0 {
+			return fmt.Errorf("this agent's tools are all retired by the knowledge-core profile; " +
+				"update the agent to use retrieval, reading, wiki or graph tools")
+		}
+	}
 
 	// ---- Capability detection from SearchTargets ----
 	var hasVectorKB bool
