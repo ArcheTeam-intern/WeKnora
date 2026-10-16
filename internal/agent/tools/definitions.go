@@ -19,7 +19,6 @@ const (
 	ToolReadDocument        = "read_document"
 	ToolListDocuments       = "list_documents"
 	ToolQueryKnowledgeGraph = "query_knowledge_graph"
-	ToolSearchConversations = "search_conversations"
 	ToolSearchMemory        = "search_memory"
 	ToolDatabaseQuery       = "database_query"
 	ToolDataAnalysis        = "data_analysis"
@@ -92,11 +91,6 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolReadDocument, Label: "阅读文档", Description: "读取文档元数据与分块内容，支持分页和文内查找"},
 		{Name: ToolListDocuments, Label: "浏览文档列表", Description: "分页列出知识库中的文档"},
 		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
-		{
-			Name:        ToolSearchConversations,
-			Label:       "回顾历史对话",
-			Description: "在用户自己的历史会话中查找之前聊过的内容",
-		},
 		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
 		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
@@ -121,7 +115,6 @@ func DefaultAllowedTools() []string {
 		// Looking up what this user asked before is only ever a read of their
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
-		ToolSearchConversations,
 		// ToolSearchMemory is deliberately absent here and from
 		// AvailableToolDefinitions. Like web_search it is not chosen from this
 		// list at all: registerTools injects it whenever the workspace, the

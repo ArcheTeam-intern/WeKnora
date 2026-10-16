@@ -41,13 +41,7 @@ type MessageService interface {
 	// ClearSessionMessages deletes all messages in a session, along with their chat history KB entries
 	ClearSessionMessages(ctx context.Context, sessionID string) error
 
-	// SearchMessages searches messages by keyword and/or vector similarity across the caller's own sessions.
-	// Uses the chat history knowledge base for vector search instead of in-memory computation.
-	SearchMessages(ctx context.Context, params *types.MessageSearchParams) (*types.MessageSearchResult, error)
 
-	// IndexMessageToKB indexes a message (Q&A pair) into the chat history knowledge base asynchronously.
-	// Called after assistant message is created to enable future vector search.
-	IndexMessageToKB(ctx context.Context, userQuery string, assistantAnswer string, messageID string, sessionID string)
 
 	// DeleteMessageKnowledge deletes the Knowledge entry associated with a message from the chat history KB.
 	DeleteMessageKnowledge(ctx context.Context, knowledgeID string)
@@ -55,8 +49,6 @@ type MessageService interface {
 	// DeleteSessionKnowledge deletes all Knowledge entries for messages in a session from the chat history KB.
 	DeleteSessionKnowledge(ctx context.Context, sessionID string)
 
-	// GetChatHistoryKBStats returns statistics about the chat history knowledge base (indexed message count, etc.)
-	GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error)
 
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power

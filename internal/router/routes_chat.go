@@ -14,19 +14,9 @@ import (
 // (e.g. revoked accounts retained in the tenant for audit) cannot
 // reach the endpoints at all once RBAC is on.
 func RegisterMessageRoutes(r *gin.RouterGroup, handler *handler.MessageHandler, g *rbacGuards) {
-	// Message history is tenant-wide and not attributable to a KB, so it is
-	// a full-access surface for API keys by default. The narrow
-	// exceptions are explicit capabilities:
-	//   - chat: load/delete messages inside the caller's own session, where
-	//     ownership is enforced by the message service.
-	//   - message_history: search/read tenant chat-history metadata without
-	//     granting every other full-access API.
 	messages := g.apiKeyGroup(r.Group("/messages"), apiKeyFullAccess())
 	chatMessages := messages.With(apiKeyChat(apiKeyFullAccess()))
-	historyMessages := messages.With(apiKeyMessageHistory(apiKeyFullAccess()))
 	{
-		historyMessages.POST("/search", g.Viewer(), handler.SearchMessages)
-		historyMessages.GET("/chat-history-stats", g.Viewer(), handler.GetChatHistoryKBStats)
 		chatMessages.GET("/:session_id/load", g.Viewer(), handler.LoadMessages)
 		chatMessages.DELETE("/:session_id/:id", g.Viewer(), handler.DeleteMessage)
 	}

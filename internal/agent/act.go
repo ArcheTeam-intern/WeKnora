@@ -175,7 +175,6 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolKnowledgeSearch:     "知识搜索",
 	agenttools.LegacyToolListKnowledgeChunks: "查看文档分块",
 	agenttools.LegacyToolGetDocumentInfo:     "获取文档信息",
-	agenttools.ToolSearchConversations:       "回顾历史对话",
 	agenttools.ToolSearchMemory:              "查询长期记忆",
 	agenttools.ToolDatabaseQuery:             "查询数据",
 	agenttools.ToolDataAnalysis:              "数据分析",

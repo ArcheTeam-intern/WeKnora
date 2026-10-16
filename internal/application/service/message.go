@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
 	"sort"
 	"strings"
@@ -336,8 +335,6 @@ func (s *messageService) ClearSessionMessages(ctx context.Context, sessionID str
 	logger.Infof(ctx, "All messages cleared for session: %s", sessionID)
 	return nil
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Chat History Knowledge Base — Configuration-driven (via Tenant.ChatHistoryConfig)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -353,8 +350,6 @@ func (s *messageService) getChatHistoryConfig(ctx context.Context) *types.ChatHi
 	}
 	return tenant.ChatHistoryConfig
 }
-
-// getRetrievalConfig reads the global retrieval configuration from the tenant's settings.
 // Returns an empty config (with defaults) if not configured.
 func (s *messageService) getRetrievalConfig(ctx context.Context) *types.RetrievalConfig {
 	tenant, ok := types.TenantInfoFromContext(ctx)
@@ -365,79 +360,6 @@ func (s *messageService) getRetrievalConfig(ctx context.Context) *types.Retrieva
 		return &types.RetrievalConfig{}
 	}
 	return tenant.RetrievalConfig
-}
-
-// IndexMessageToKB indexes a message (Q&A pair) into the chat history knowledge base asynchronously.
-// It creates a Knowledge entry (passage) containing both the user query and assistant answer,
-// then links the message to the Knowledge entry via the knowledge_id field.
-// The KB ID is read from the tenant's ChatHistoryConfig — if not configured, indexing is skipped.
-func (s *messageService) IndexMessageToKB(ctx context.Context, userQuery string, assistantAnswer string, messageID string, sessionID string) {
-	// Strip thinking content (<think>...</think>) before indexing to avoid
-	// polluting the knowledge base with intermediate reasoning that would
-	// degrade retrieval quality.
-	assistantAnswer = regThinkIndex.ReplaceAllString(assistantAnswer, "")
-	assistantAnswer = strings.TrimSpace(assistantAnswer)
-
-	if strings.TrimSpace(userQuery) == "" && assistantAnswer == "" {
-		return
-	}
-
-	cfg := s.getChatHistoryConfig(ctx)
-	if cfg == nil {
-		// Say why, otherwise an operator who enabled indexing in the UI sees
-		// "indexed messages: 0" with nothing in the logs to explain it: the
-		// stats endpoint only checks Enabled, while indexing additionally
-		// requires an embedding model and an auto-created KB.
-		logger.Infof(ctx, "Skipping message index for message %s: %s",
-			messageID, describeChatHistorySkip(ctx))
-		return
-	}
-
-	logger.Infof(ctx, "Indexing message to chat history KB %s, message ID: %s, session ID: %s", cfg.KnowledgeBaseID, messageID, sessionID)
-
-	// Build passage content: combine Q&A for better semantic search
-	var passages []string
-	passage := fmt.Sprintf("[Session: %s]\nQ: %s\nA: %s", sessionID, userQuery, assistantAnswer)
-	passages = append(passages, passage)
-
-	// Use async (non-sync) passage creation so it doesn't block the response
-	knowledge, err := s.knowService.CreateKnowledgeFromPassage(ctx, cfg.KnowledgeBaseID, passages, "")
-	if err != nil {
-		logger.Warnf(ctx, "Failed to index message to chat history KB: %v", err)
-		return
-	}
-
-	// Link the message to the knowledge entry
-	if err := s.messageRepo.UpdateMessageKnowledgeID(ctx, messageID, knowledge.ID); err != nil {
-		logger.Warnf(ctx, "Failed to update message knowledge_id: %v", err)
-		return
-	}
-
-	logger.Infof(ctx, "Message indexed to chat history KB: knowledge_id=%s, message_id=%s", knowledge.ID, messageID)
-}
-
-// describeChatHistorySkip reports which chat-history precondition is missing,
-// for the log line emitted when indexing is skipped. ChatHistoryConfig.
-// IsConfigured requires Enabled plus a selected embedding model plus an
-// auto-created KB, so "enabled" alone is not enough to index.
-func describeChatHistorySkip(ctx context.Context) string {
-	tenant, ok := types.TenantInfoFromContext(ctx)
-	if !ok {
-		return "no tenant in context"
-	}
-	cfg := tenant.ChatHistoryConfig
-	switch {
-	case cfg == nil:
-		return "chat history config not set"
-	case !cfg.Enabled:
-		return "chat history indexing disabled"
-	case cfg.EmbeddingModelID == "":
-		return "enabled but no embedding model selected"
-	case cfg.KnowledgeBaseID == "":
-		return "enabled but chat history knowledge base not created yet"
-	default:
-		return "chat history config incomplete"
-	}
 }
 
 // DeleteMessageKnowledge deletes the Knowledge entry associated with a message from the chat history KB.
@@ -469,44 +391,6 @@ func (s *messageService) DeleteSessionKnowledge(ctx context.Context, sessionID s
 	if err := deleteReferencedKnowledge(ctx, s.knowService, "", knowledgeIDs); err != nil {
 		logger.Warnf(ctx, "Failed to batch delete chat history knowledge for session %s: %v", sessionID, err)
 	}
-}
-
-// GetChatHistoryKBStats returns statistics about the chat history knowledge base.
-func (s *messageService) GetChatHistoryKBStats(ctx context.Context) (*types.ChatHistoryKBStats, error) {
-	tenantID := types.MustTenantIDFromContext(ctx)
-	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get tenant: %w", err)
-	}
-
-	stats := &types.ChatHistoryKBStats{}
-	cfg := tenant.ChatHistoryConfig
-	if cfg == nil || !cfg.Enabled {
-		return stats, nil
-	}
-
-	stats.Enabled = true
-	stats.EmbeddingModelID = cfg.EmbeddingModelID
-	stats.KnowledgeBaseID = cfg.KnowledgeBaseID
-
-	if cfg.KnowledgeBaseID == "" {
-		return stats, nil
-	}
-
-	// Fetch KB info and fill counts (KnowledgeCount is gorm:"-", needs FillKnowledgeBaseCounts)
-	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, cfg.KnowledgeBaseID)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to get chat history KB %s: %v", cfg.KnowledgeBaseID, err)
-		return stats, nil
-	}
-	if err := s.kbService.FillKnowledgeBaseCounts(ctx, kb); err != nil {
-		logger.Warnf(ctx, "Failed to fill chat history KB counts %s: %v", cfg.KnowledgeBaseID, err)
-	}
-	stats.KnowledgeBaseName = kb.Name
-	stats.IndexedMessageCount = kb.KnowledgeCount
-	stats.HasIndexedMessages = kb.KnowledgeCount > 0
-
-	return stats, nil
 }
 
 // GetSessionArtifacts returns every skill-produced artifact recorded against
@@ -580,207 +464,6 @@ func normalizeArtifactFileTypes(in []string) []string {
 	return out
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Message Search (Hybrid: Keyword + KB Vector Search)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// SearchMessages searches messages by keyword and/or vector similarity across all sessions of the current tenant.
-// Vector search is delegated to the chat history knowledge base's HybridSearch (configured via ChatHistoryConfig).
-func (s *messageService) SearchMessages(ctx context.Context, params *types.MessageSearchParams) (*types.MessageSearchResult, error) {
-	logger.Infof(ctx, "Start searching messages, query: %s, mode: %s", params.Query, params.Mode)
-
-	tenantID := types.MustTenantIDFromContext(ctx)
-
-	// Conversation search is scoped to the person asking, exactly as the
-	// session list is. Sessions are per-user state, and a workspace-wide
-	// keyword search over them let any viewer read a colleague's private
-	// conversations, which is not something a search box should be able to do.
-	if params.OwnerID == "" {
-		params.OwnerID = types.SessionOwnerIDFromContext(ctx)
-	}
-
-	// Set defaults
-	if params.Mode == "" {
-		params.Mode = types.MessageSearchModeHybrid
-	}
-	if params.Limit <= 0 {
-		params.Limit = 20
-	}
-
-	var keywordResults []*types.MessageWithSession
-	var vectorResults []*types.MessageSearchResultItem
-	var err error
-
-	// Step 1: Keyword search (dialect-aware LIKE in the repository)
-	if params.Mode == types.MessageSearchModeKeyword || params.Mode == types.MessageSearchModeHybrid {
-		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(
-			ctx, tenantID, params.OwnerID, params.Query, params.SessionIDs, params.Limit*3)
-		if err != nil {
-			logger.Errorf(ctx, "Keyword search failed: %v", err)
-			return nil, err
-		}
-		logger.Infof(ctx, "Keyword search found %d results", len(keywordResults))
-	}
-
-	// Step 2: Vector search via chat history knowledge base (if configured)
-	if params.Mode == types.MessageSearchModeVector || params.Mode == types.MessageSearchModeHybrid {
-		vectorResults, err = s.vectorSearchViaKB(ctx, params)
-		if err != nil {
-			logger.Warnf(ctx, "Vector search via KB failed, falling back to keyword-only: %v", err)
-			if params.Mode == types.MessageSearchModeVector {
-				return nil, err
-			}
-		} else {
-			logger.Infof(ctx, "Vector search found %d results", len(vectorResults))
-		}
-	}
-
-	// Step 3: Merge results based on mode
-	var items []*types.MessageSearchResultItem
-
-	switch params.Mode {
-	case types.MessageSearchModeKeyword:
-		items = convertKeywordResults(keywordResults)
-	case types.MessageSearchModeVector:
-		items = vectorResults
-	case types.MessageSearchModeHybrid:
-		items = rrfMerge(keywordResults, vectorResults)
-	}
-
-	// The vector path resolves hits through a shared knowledge base that does
-	// not know who wrote a message, so ownership is re-checked on the results.
-	items, err = s.restrictToOwnedSessions(ctx, tenantID, params.OwnerID, items)
-	if err != nil {
-		return nil, err
-	}
-
-	// Step 4: Fetch partner messages (Q&A counterparts) to ensure complete pairs
-	items = s.fetchPartnerMessages(ctx, items)
-
-	// Step 5: Group by request_id to merge Q&A pairs
-	grouped := groupByRequestID(items)
-
-	// Apply limit
-	if len(grouped) > params.Limit {
-		grouped = grouped[:params.Limit]
-	}
-
-	result := &types.MessageSearchResult{
-		Items: grouped,
-		Total: len(grouped),
-	}
-
-	logger.Infof(ctx, "Message search completed, returning %d grouped results", result.Total)
-	return result, nil
-}
-
-// restrictToOwnedSessions drops results from sessions the caller does not own.
-func (s *messageService) restrictToOwnedSessions(
-	ctx context.Context, tenantID uint64, ownerID string, items []*types.MessageSearchResultItem,
-) ([]*types.MessageSearchResultItem, error) {
-	if ownerID == "" || len(items) == 0 {
-		return items, nil
-	}
-	sessionIDs := make([]string, 0, len(items))
-	seen := make(map[string]struct{}, len(items))
-	for _, item := range items {
-		if item == nil || item.SessionID == "" {
-			continue
-		}
-		if _, dup := seen[item.SessionID]; dup {
-			continue
-		}
-		seen[item.SessionID] = struct{}{}
-		sessionIDs = append(sessionIDs, item.SessionID)
-	}
-	owned, err := s.messageRepo.OwnedSessionIDs(ctx, tenantID, ownerID, sessionIDs)
-	if err != nil {
-		return nil, err
-	}
-	filtered := make([]*types.MessageSearchResultItem, 0, len(items))
-	for _, item := range items {
-		if item != nil && owned[item.SessionID] {
-			filtered = append(filtered, item)
-		}
-	}
-	return filtered, nil
-}
-
-// vectorSearchViaKB performs vector search using the chat history knowledge base's HybridSearch.
-// The KB ID is read from ChatHistoryConfig, search params from RetrievalConfig.
-func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.MessageSearchParams) ([]*types.MessageSearchResultItem, error) {
-	cfg := s.getChatHistoryConfig(ctx)
-	if cfg == nil {
-		return nil, nil // Chat history KB not configured, skip vector search
-	}
-
-	// Read global retrieval config for search parameters
-	rc := s.getRetrievalConfig(ctx)
-
-	// Use KB HybridSearch with vector-only mode (keyword search is done separately on the messages table)
-	searchParams := types.SearchParams{
-		QueryText:            params.Query,
-		MatchCount:           rc.GetEffectiveEmbeddingTopK(),
-		VectorThreshold:      rc.GetEffectiveVectorThreshold(),
-		DisableKeywordsMatch: true, // We handle keyword search separately on the messages table
-	}
-
-	kbResults, err := s.kbService.HybridSearch(ctx, cfg.KnowledgeBaseID, searchParams)
-	if err != nil {
-		return nil, fmt.Errorf("KB hybrid search failed: %w", err)
-	}
-
-	if len(kbResults) == 0 {
-		return nil, nil
-	}
-
-	// Rerank results if a rerank model is configured
-	kbResults = s.rerankResults(ctx, rc, params.Query, kbResults)
-	if len(kbResults) == 0 {
-		return nil, nil
-	}
-
-	// Map KB search results back to messages via knowledge_id
-	knowledgeIDs := make([]string, 0, len(kbResults))
-	scoreByKnowledgeID := make(map[string]float64)
-	for _, r := range kbResults {
-		knowledgeIDs = append(knowledgeIDs, r.KnowledgeID)
-		scoreByKnowledgeID[r.KnowledgeID] = r.Score
-	}
-
-	// Look up messages by their knowledge_id
-	messages, err := s.messageRepo.GetMessagesByKnowledgeIDs(ctx, knowledgeIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get messages by knowledge IDs: %w", err)
-	}
-
-	// Filter by session IDs if specified
-	sessionFilter := make(map[string]bool)
-	for _, sid := range params.SessionIDs {
-		sessionFilter[sid] = true
-	}
-
-	var results []*types.MessageSearchResultItem
-	for _, msg := range messages {
-		if len(sessionFilter) > 0 && !sessionFilter[msg.SessionID] {
-			continue
-		}
-		score := scoreByKnowledgeID[msg.KnowledgeID]
-		results = append(results, &types.MessageSearchResultItem{
-			MessageWithSession: *msg,
-			Score:              score,
-			MatchType:          "vector",
-		})
-	}
-
-	// Sort by score descending
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Score > results[j].Score
-	})
-
-	return results, nil
-}
-
 // rerankResults applies rerank model to search results if configured.
 // Returns reranked + filtered results, or original results if rerank is unavailable.
 func (s *messageService) rerankResults(ctx context.Context, rc *types.RetrievalConfig, query string, results []*types.SearchResult) []*types.SearchResult {
@@ -829,8 +512,6 @@ func (s *messageService) rerankResults(ctx context.Context, rc *types.RetrievalC
 	logger.Infof(ctx, "Rerank: %d -> %d results (threshold=%.2f, topK=%d)", len(results), len(reranked), threshold, topK)
 	return reranked
 }
-
-// convertKeywordResults converts keyword search results to MessageSearchResultItem
 func convertKeywordResults(results []*types.MessageWithSession) []*types.MessageSearchResultItem {
 	items := make([]*types.MessageSearchResultItem, 0, len(results))
 	for i, msg := range results {
@@ -842,8 +523,6 @@ func convertKeywordResults(results []*types.MessageWithSession) []*types.Message
 	}
 	return items
 }
-
-// rrfMerge merges keyword and vector search results using Reciprocal Rank Fusion (RRF)
 func rrfMerge(keywordResults []*types.MessageWithSession, vectorResults []*types.MessageSearchResultItem) []*types.MessageSearchResultItem {
 	const k = 60.0
 

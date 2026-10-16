@@ -1952,13 +1952,11 @@ func (h *Handler) completeAssistantMessage(
 		return err
 	}
 
-	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.
-	// Use WithoutCancel so the goroutine survives after the HTTP request context is done.
+	// The historical Q&A indexer (SearchMessages / GetChatHistoryKBStats) was
+	// removed in this build; the assistant message has already been persisted
+	// above, and the rest of the post-completion work (follow-up suggestions,
+	// long-term memory) is unchanged.
 	bgCtx := context.WithoutCancel(ctx)
-	if indexCtx, ok := h.sessionTenantInfoContext(bgCtx); ok {
-		go h.messageService.IndexMessageToKB(
-			indexCtx, userQuery, assistantMessage.Content, assistantMessage.ID, assistantMessage.SessionID)
-	}
 	if userQuery != "" && h.suggestionService != nil {
 		go func() {
 			if _, err := h.suggestionService.EnsureFollowUps(

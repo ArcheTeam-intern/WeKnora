@@ -22,7 +22,7 @@ func TestFilterToolsForCoreProfileDropsRetiredCapabilities(t *testing.T) {
 		ToolWebSearch,
 		ToolWebFetch,
 		ToolSearchMemory,
-		ToolSearchConversations,
+
 		ToolShellExec,
 		ToolReadFile,
 		ToolListSandboxFiles,

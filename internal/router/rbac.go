@@ -278,13 +278,6 @@ func apiKeyManageAgents(base middleware.APIKeyRoutePolicy) middleware.APIKeyRout
 	return base.WithCapability(types.APIKeyCapabilityManageAgents)
 }
 
-// apiKeyMessageHistory layers the "message_history" capability on top of a
-// base policy so an explicitly granted key can search or inspect tenant chat
-// history without being promoted to full Owner.
-func apiKeyMessageHistory(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
-	return base.WithCapability(types.APIKeyCapabilityMessageHistory)
-}
-
 func apiKeyManageModels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageModels)
 }

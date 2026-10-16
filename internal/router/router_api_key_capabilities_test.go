@@ -114,37 +114,6 @@ func TestPlatformTenantLifecycleRoutesDeclarePlatformCapabilities(t *testing.T) 
 	}
 }
 
-func TestMessageHistoryRoutesDeclareMessageHistoryCapability(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	g := &rbacGuards{}
-	v1 := gin.New().Group("/api/v1")
-
-	RegisterMessageRoutes(v1, &handler.MessageHandler{}, g)
-
-	cases := []struct {
-		method string
-		path   string
-	}{
-		{http.MethodPost, "/api/v1/messages/search"},
-		{http.MethodGet, "/api/v1/messages/chat-history-stats"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			policy := mustLookupAPIKeyPolicy(t, g, tc.method, tc.path)
-			if !policy.RequireFullAccess {
-				t.Fatal("policy should require full access without a matching capability")
-			}
-			if !policyHasCapability(policy, types.APIKeyCapabilityMessageHistory) {
-				t.Fatalf("policy capabilities = %#v, want message_history", policy.Capabilities)
-			}
-			if policyHasCapability(policy, types.APIKeyCapabilityChat) {
-				t.Fatalf("message-history route must not be granted by chat: %#v", policy.Capabilities)
-			}
-		})
-	}
-}
-
 func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}

@@ -1262,12 +1262,6 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
 				WithKnowledgeScope(s.knowledgeService).
 				WithGraph(s.graphRepo, chunkRepo)
-		case tools.ToolSearchConversations:
-			// The owner is captured from the caller's identity here, not read
-			// from the model's arguments, so no prompt can redirect the search
-			// at somebody else's conversations.
-			toolToRegister = tools.NewSearchConversationsTool(
-				s.messageService, types.SessionOwnerIDFromContext(ctx), sessionID)
 		case tools.ToolSearchMemory:
 			// Reaching this case means the memory switches were already
 			// checked above, where the tool is injected. Which memory space is
