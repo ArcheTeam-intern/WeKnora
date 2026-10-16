@@ -335,32 +335,6 @@ func (s *messageService) ClearSessionMessages(ctx context.Context, sessionID str
 	logger.Infof(ctx, "All messages cleared for session: %s", sessionID)
 	return nil
 }
-// Chat History Knowledge Base — Configuration-driven (via Tenant.ChatHistoryConfig)
-// ─────────────────────────────────────────────────────────────────────────────
-
-// getChatHistoryConfig reads the chat history KB configuration from the tenant's settings.
-// Returns nil if the feature is not configured or disabled.
-func (s *messageService) getChatHistoryConfig(ctx context.Context) *types.ChatHistoryConfig {
-	tenant, ok := types.TenantInfoFromContext(ctx)
-	if !ok {
-		return nil
-	}
-	if tenant.ChatHistoryConfig == nil || !tenant.ChatHistoryConfig.IsConfigured() {
-		return nil
-	}
-	return tenant.ChatHistoryConfig
-}
-// Returns an empty config (with defaults) if not configured.
-func (s *messageService) getRetrievalConfig(ctx context.Context) *types.RetrievalConfig {
-	tenant, ok := types.TenantInfoFromContext(ctx)
-	if !ok {
-		return &types.RetrievalConfig{}
-	}
-	if tenant.RetrievalConfig == nil {
-		return &types.RetrievalConfig{}
-	}
-	return tenant.RetrievalConfig
-}
 
 // DeleteMessageKnowledge deletes the Knowledge entry associated with a message from the chat history KB.
 func (s *messageService) DeleteMessageKnowledge(ctx context.Context, knowledgeID string) {

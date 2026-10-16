@@ -13,8 +13,6 @@ import "github.com/Tencent/WeKnora/internal/config"
 // still gate routes for modules that are only closed, not deleted yet — each
 // switch is dropped from this table in the batch that removes its module.
 type coreProfileReachability struct {
-	// Memory covers the personal long-term memory API.
-	Memory bool
 	// PublicWebSearch covers web search and web search provider credentials.
 	PublicWebSearch bool
 	// MCPClientToolbox covers the third-party MCP client surface (toolbox,
@@ -38,7 +36,6 @@ func reachabilityFor(cfg *config.Config) coreProfileReachability {
 		return coreProfileReachability{}
 	}
 	return coreProfileReachability{
-		Memory:           true,
 		PublicWebSearch:  true,
 		MCPClientToolbox: true,
 		ExecutionSandbox: true,

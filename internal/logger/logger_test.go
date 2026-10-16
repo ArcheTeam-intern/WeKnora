@@ -232,24 +232,6 @@ func TestCloneContextPreservesSandboxTenantID(t *testing.T) {
 	}
 }
 
-// The agent-level memory opt-out is set before setupSSEStream clones, while
-// extraction and the explicit remember route run after. Losing the key here
-// would leave an agent that cannot read memory still writing to it.
-func TestCloneContextPreservesTheAgentMemoryOptOut(t *testing.T) {
-	t.Parallel()
-
-	optedOut := CloneContext(types.WithMemoryDisabled(context.Background()))
-	if types.MemoryAllowedForAgent(optedOut) {
-		t.Fatal("MemoryAllowedForAgent(cloned) = true, want the opt-out to survive the clone")
-	}
-
-	// The absence of the marker still has to read as allowed, so agents that
-	// never touched the switch keep their memory.
-	if !types.MemoryAllowedForAgent(CloneContext(context.Background())) {
-		t.Fatal("MemoryAllowedForAgent(cloned) = false for an unmarked context, want true")
-	}
-}
-
 // Document ingestion detaches mid-flight: knowledge_create hands processChunks
 // to a goroutine on a cloned context, and processChunks vectorises every chunk.
 // If the background mark does not survive, that work stops being visible to the

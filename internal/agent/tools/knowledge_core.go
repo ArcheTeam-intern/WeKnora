@@ -38,7 +38,7 @@ func KnowledgeCoreRetiredTools() []string {
 		ToolWebSearch,
 		ToolWebFetch,
 		ToolSearchMemory,
-			ToolShellExec,
+		ToolShellExec,
 		ToolReadFile,
 		ToolListSandboxFiles,
 		ToolWriteSandboxFile,

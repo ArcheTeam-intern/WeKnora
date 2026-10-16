@@ -41,14 +41,11 @@ type MessageService interface {
 	// ClearSessionMessages deletes all messages in a session, along with their chat history KB entries
 	ClearSessionMessages(ctx context.Context, sessionID string) error
 
-
-
 	// DeleteMessageKnowledge deletes the Knowledge entry associated with a message from the chat history KB.
 	DeleteMessageKnowledge(ctx context.Context, knowledgeID string)
 
 	// DeleteSessionKnowledge deletes all Knowledge entries for messages in a session from the chat history KB.
 	DeleteSessionKnowledge(ctx context.Context, sessionID string)
-
 
 	// GetSessionArtifacts returns every skill-produced MessageArtifact
 	// recorded against any assistant message of the session. Used to power
@@ -84,16 +81,6 @@ type MessageRepository interface {
 	GetMessagesBySessionBeforeTime(
 		ctx context.Context, sessionID string, beforeTime time.Time, limit int,
 	) ([]*types.Message, error)
-	// ListMessagesBySessionAfterTime returns messages created strictly after
-	// afterTime, oldest first. Long-term memory distillation walks forward from
-	// a watermark, so it needs the oldest unprocessed messages rather than the
-	// newest ones: paging from the newest end would skip everything in between
-	// once a session outruns the page size.
-	ListMessagesBySessionAfterTime(
-		ctx context.Context, sessionID string, afterTime time.Time, limit int,
-	) ([]*types.Message, error)
-	// ListMessagesBySessionAfterCursor uses (created_at, id) for lossless paging.
-	ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error)
 	// ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
 	// messages sorting strictly before (before, beforeID), newest first. A zero
 	// cursor starts from the newest message.

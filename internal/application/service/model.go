@@ -482,10 +482,9 @@ func (s *modelService) DeleteModel(ctx context.Context, id string) error {
 		if agentCount == 0 {
 			agentCount = int64(len(usage.Agents))
 		}
-		memoryInUse := len(usage.LongTermMemory.Bindings) > 0
-		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d memory=%t", id, kbCount, agentCount, memoryInUse)
+		logger.Warnf(ctx, "Model %s is in use: kb=%d agent=%d", id, kbCount, agentCount)
 		return apperrors.NewModelInUseError(
-			formatModelInUseMessage(kbCount, agentCount, memoryInUse),
+			formatModelInUseMessage(kbCount, agentCount),
 			usage,
 		)
 	}
@@ -543,31 +542,6 @@ func (s *modelService) getModelUsageDetails(
 		}
 	}
 
-	if s.tenantService == nil {
-		return details, nil
-	}
-	tenant, err := s.tenantService.GetTenantByID(ctx, tenantID)
-	if err != nil {
-		return details, err
-	}
-	if tenant == nil || tenant.MemoryConfig == nil {
-		return details, nil
-	}
-
-	// Both memory model pins have to be checked. Deleting either one leaves
-	// the workspace pointing at a model that no longer exists.
-	if strings.TrimSpace(tenant.MemoryConfig.EmbeddingModelID) == modelID {
-		details.LongTermMemory.Bindings = append(
-			details.LongTermMemory.Bindings,
-			types.ModelUsageBindingEmbeddingModel,
-		)
-	}
-	if strings.TrimSpace(tenant.MemoryConfig.ExtractModelID) == modelID {
-		details.LongTermMemory.Bindings = append(
-			details.LongTermMemory.Bindings,
-			types.ModelUsageBindingExtractModel,
-		)
-	}
 	return details, nil
 }
 
@@ -794,16 +768,13 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 	return sttModel, nil
 }
 
-func formatModelInUseMessage(kbCount, agentCount int64, memory bool) string {
+func formatModelInUseMessage(kbCount, agentCount int64) string {
 	var parts []string
 	if kbCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d knowledge base(s)", kbCount))
 	}
 	if agentCount > 0 {
 		parts = append(parts, fmt.Sprintf("%d agent(s)", agentCount))
-	}
-	if memory {
-		parts = append(parts, "long-term memory")
 	}
 	joined := strings.Join(parts, " and ")
 	return fmt.Sprintf(

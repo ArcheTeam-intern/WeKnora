@@ -29,10 +29,6 @@ type AgentEngine interface {
 		imageURLs ...[]string,
 	) (*types.AgentState, error)
 
-	// SetMemoryPrompt supplies the long-term memory envelope for this run.
-	// It must be called before Execute; an empty string is a no-op.
-	SetMemoryPrompt(prompt string)
-
 	// SetSteerSink enables mid-run message injection for this run. Nil
 	// (default) disables it; when set, the engine drains user-appended
 	// messages at every round boundary and persists accepted ones through

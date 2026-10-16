@@ -9,8 +9,8 @@ import "sort"
 // It is an exhaustive decision table rather than a list of keys to keep,
 // because the two ways of getting this wrong fail in opposite directions and
 // neither default is safe. Dropping a key that carries a RESTRICTION fails
-// open: an agent's memory opt-out or a session's sandbox tenant that goes
-// missing lets background work do what the request forbade. Keeping a key that
+// open: the session's sandbox tenant that goes missing lets background work
+// do what the request forbade. Keeping a key that
 // carries a GRANT fails open the other way: a per-request access decision or a
 // suppressed-audit marker that outlives its request widens what the background
 // work may do. Since no default is universally right, every key states its
@@ -71,13 +71,6 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	RequestIDContextKey:     true,
 	LanguageContextKey:      true,
 	LangfuseTraceContextKey: true,
-
-	// The agent-level opt-out from long-term memory. Recall is gated inside
-	// the QA services, but extraction, the explicit "remember this" route and
-	// document affinity all run from a context descended from a CloneContext.
-	// Dropping this key would let an agent that cannot read memory keep
-	// writing to it.
-	MemoryDisabledContextKey: true,
 
 	// Marks model calls as coming from an asynq worker so the per-model chat
 	// concurrency governor throttles them, leaving interactive chat latency

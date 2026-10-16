@@ -89,7 +89,6 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
-	MemoryHandler                *handler.MemoryHandler
 	HostSandbox                  service.HostSandboxManager
 }
 
@@ -341,9 +340,8 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
-		if reach.Memory {
-			RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
-		}
+		// Long-term memory is retired: no routes, no handler, no distillation
+		// worker. The stored columns stay untouched (see types/memory_compat.go).
 		RegisterChunkerDebugRoutes(v1, rbacGuards)
 
 		// Fail fast if any declared API-key policy points at a route

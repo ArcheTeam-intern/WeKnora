@@ -45,7 +45,6 @@ type AgentEngine struct {
 	questionOrigin       *QuestionOriginInfo     // Source of a picked suggested question, if any
 	sessionID            string                  // Session ID for logging and event emission
 	systemPromptTemplate string                  // System prompt template (optional, uses default if empty)
-	memoryPrompt         string                  // Long-term memory envelope appended to the system prompt
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
@@ -165,7 +164,6 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		Language:         types.LanguageNameFromContext(ctx),
 		Config:           e.appConfig,
 		SkillInstallMode: e.config.SkillInstallMode(),
-		MemoryPrompt:     e.memoryPrompt,
 		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
 		WorkspaceLayout:  e.workspaceLayout,
 	}
@@ -200,12 +198,6 @@ func (e *AgentEngine) buildSystemPrompt(ctx context.Context) string {
 		logger.Debugf(ctx, "[Agent][Prompt] section=%s bytes=%d", section.Name, len(section.Content))
 	}
 	return renderSystemPromptSections(sections)
-}
-
-// SetMemoryPrompt supplies the long-term memory envelope for this run. Empty
-// input leaves the system prompt untouched.
-func (e *AgentEngine) SetMemoryPrompt(prompt string) {
-	e.memoryPrompt = prompt
 }
 
 // NewAgentEngineWithSkills creates a new agent engine with skills support

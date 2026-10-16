@@ -143,7 +143,6 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventAgentToolResult, h.handleToolResult)
 	h.eventBus.On(event.EventAgentCommandOutput, h.handleCommandOutput)
 	h.eventBus.On(event.EventAgentReferences, h.handleReferences)
-	h.eventBus.On(event.EventMemoryRecalled, h.handleMemoryRecalled)
 	h.eventBus.On(event.EventContextCompacted, h.handleContextCompacted)
 	h.eventBus.On(event.EventUserMessageInjected, h.handleUserMessageInjected)
 	h.eventBus.On(event.EventAgentFinalAnswer, h.handleFinalAnswer)
@@ -457,35 +456,6 @@ func (h *AgentStreamHandler) handleReferences(ctx context.Context, evt event.Eve
 		logger.GetLogger(h.ctx).Error("Append references event to stream failed", "error", err)
 	}
 
-	return nil
-}
-
-// handleMemoryRecalled records the long-term memories injected into this turn.
-// The list is both persisted on the assistant message and streamed, so the
-// panel is present live and after a reload.
-func (h *AgentStreamHandler) handleMemoryRecalled(ctx context.Context, evt event.Event) error {
-	data, ok := evt.Data.(event.MemoryRecalledData)
-	if !ok {
-		return nil
-	}
-	used, ok := data.Memories.(types.UsedMemories)
-	if !ok || len(used) == 0 {
-		return nil
-	}
-
-	h.mu.Lock()
-	h.assistantMessage.UsedMemories = used
-	h.mu.Unlock()
-
-	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID:        evt.ID,
-		Type:      types.ResponseTypeMemoryRecalled,
-		Done:      false,
-		Timestamp: time.Now(),
-		Data:      map[string]interface{}{"memories": used},
-	}); err != nil {
-		logger.GetLogger(h.ctx).Error("Append memory recalled event to stream failed", "error", err)
-	}
 	return nil
 }
 

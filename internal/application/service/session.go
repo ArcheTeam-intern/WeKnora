@@ -163,7 +163,6 @@ type sessionService struct {
 	hostSandbox           sandbox.Manager
 	hostDesktop           bool
 	hostSkillTree         HostSkillTree
-	memoryService         interfaces.MemoryService // Service for cross-session long-term memory
 	// sandboxConfigRepo and tenantSkillRepo answer "which installed skills can
 	// this turn actually invoke". They are repositories rather than
 	// TenantSkillService because that service depends on this one.
@@ -196,7 +195,6 @@ func NewSessionService(cfg *config.Config,
 	sandboxPinner *SessionSandboxPinner,
 	sandboxPolicy WorkspaceSandboxPolicy,
 	hostSandbox HostSandboxManager,
-	memoryService interfaces.MemoryService,
 	sandboxConfigRepo repository.TenantSandboxConfigRepository,
 	tenantSkillRepo repository.TenantSkillRepository,
 	busyGate *SessionBusyGate,
@@ -223,7 +221,6 @@ func NewSessionService(cfg *config.Config,
 		hostSandbox:           hostSandbox.Manager,
 		hostDesktop:           hostSandbox.Desktop,
 		hostSkillTree:         hostSandbox.SkillTree,
-		memoryService:         memoryService,
 		sandboxConfigRepo:     sandboxConfigRepo,
 		tenantSkillRepo:       tenantSkillRepo,
 		busyGate:              busyGate,

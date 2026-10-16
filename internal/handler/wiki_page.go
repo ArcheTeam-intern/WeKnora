@@ -21,11 +21,10 @@ import (
 
 // WikiPageHandler handles HTTP requests for wiki page operations
 type WikiPageHandler struct {
-	wikiService   interfaces.WikiPageService
-	kbService     interfaces.KnowledgeBaseService
-	lintService   *service.WikiLintService
-	auditService  interfaces.AuditLogService
-	memoryService interfaces.MemoryService
+	wikiService  interfaces.WikiPageService
+	kbService    interfaces.KnowledgeBaseService
+	lintService  *service.WikiLintService
+	auditService interfaces.AuditLogService
 }
 
 // NewWikiPageHandler creates a new wiki page handler
@@ -34,14 +33,12 @@ func NewWikiPageHandler(
 	kbService interfaces.KnowledgeBaseService,
 	lintService *service.WikiLintService,
 	auditService interfaces.AuditLogService,
-	memoryService interfaces.MemoryService,
 ) *WikiPageHandler {
 	return &WikiPageHandler{
-		wikiService:   wikiService,
-		kbService:     kbService,
-		lintService:   lintService,
-		auditService:  auditService,
-		memoryService: memoryService,
+		wikiService:  wikiService,
+		kbService:    kbService,
+		lintService:  lintService,
+		auditService: auditService,
 	}
 }
 
@@ -881,9 +878,6 @@ func (h *WikiPageHandler) GetGraph(c *gin.Context) {
 		Depth:           depth,
 		Types:           typesFilter,
 		Limit:           limit,
-	}
-	if h.memoryService != nil {
-		req.FamiliarKnowledgeIDs = h.memoryService.FamiliarKnowledgeIDs(c.Request.Context())
 	}
 
 	graph, err := h.wikiService.GetGraph(c.Request.Context(), req)

@@ -153,42 +153,6 @@ func (r *messageRepository) GetMessagesBySessionBeforeTime(
 	return messages, nil
 }
 
-// ListMessagesBySessionAfterTime returns the oldest messages created after
-// afterTime, so a caller holding a watermark can walk a session forward
-// without skipping anything when it has more new messages than one page.
-func (r *messageRepository) ListMessagesBySessionAfterTime(
-	ctx context.Context, sessionID string, afterTime time.Time, limit int,
-) ([]*types.Message, error) {
-	var messages []*types.Message
-	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
-	if !afterTime.IsZero() {
-		query = query.Where("created_at > ?", afterTime)
-	}
-	if err := query.Order("created_at ASC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
-// ListMessagesBySessionAfterCursor uses a stable tie-breaker for memory paging.
-func (r *messageRepository) ListMessagesBySessionAfterCursor(ctx context.Context, sessionID string, cursor types.MemoryMessageCursor, limit int) ([]*types.Message, error) {
-	var messages []*types.Message
-	query := r.db.WithContext(ctx).Where("session_id = ?", sessionID)
-	if !cursor.At.IsZero() || cursor.ID != "" {
-		query = query.Where("created_at > ? OR (created_at = ? AND id > ?)", cursor.At, cursor.At, cursor.ID)
-	}
-	if err := query.Order("created_at ASC, id ASC").Limit(limit).Find(&messages).Error; err != nil {
-		return nil, err
-	}
-	if err := attachArtifacts(ctx, r.db, messages...); err != nil {
-		return nil, err
-	}
-	return messages, nil
-}
-
 // ListMessagesBySessionBeforeCursor pages a session backwards: up to limit
 // messages sorting strictly before the (before, beforeID) cursor, newest first.
 // A zero cursor starts from the newest message. The ID tie-breaker keeps a page

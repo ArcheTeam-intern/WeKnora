@@ -13,6 +13,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// boolPtr is a small helper for the optional bool fields these tests build.
+func boolPtr(v bool) *bool { return &v }
+
 func TestMCPDirectoryBatchPolicyUsesOneDatabaseQuery(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	require.NoError(t, err)

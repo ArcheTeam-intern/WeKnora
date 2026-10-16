@@ -111,7 +111,6 @@ type agentService struct {
 	wikiPageService       interfaces.WikiPageService
 	tenantService         interfaces.TenantService
 	messageService        interfaces.MessageService
-	memoryService         interfaces.MemoryService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
@@ -142,7 +141,6 @@ func NewAgentService(
 	wikiPageService interfaces.WikiPageService,
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
-	memoryService interfaces.MemoryService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 	sandboxMgr sandbox.Manager,
@@ -173,7 +171,6 @@ func NewAgentService(
 		wikiPageService:      wikiPageService,
 		tenantService:        tenantService,
 		messageService:       messageService,
-		memoryService:        memoryService,
 		storageResolver:      storageResolver,
 		toolApprovalGate:     toolApprovalGate,
 		sandboxMgr:           sandboxMgr,
@@ -1138,22 +1135,10 @@ func (s *agentService) registerTools(
 		allowedTools = append(allowedTools, tools.ToolWebFetch)
 	}
 
-	// Long-term memory search follows the memory switches, not the tool list.
-	// Being able to read memory is already a decision the workspace, the user
-	// and the agent each get a say in; asking for it a fourth time as a tool
-	// checkbox would only produce configurations where memory is on but the
-	// agent cannot reach past what each turn injects for it.
-	//
-	// The tool is dropped before it is re-added so that an allowlist which
-	// still names it — a preset, an API caller, or a config saved while memory
-	// was on — cannot outlive the switch being turned off.
+	// Long-term memory is retired: the tool is dropped even when a stored
+	// allowlist still names it — a preset, an API caller, or a config saved
+	// while memory was on — and nothing re-adds it.
 	allowedTools = withoutString(allowedTools, tools.ToolSearchMemory)
-	if s.memoryService != nil &&
-		s.memoryService.MemoryAvailable(types.ApplyAgentMemoryPreference(ctx, config.MemoryEnabled)) {
-		allowedTools = append(allowedTools, tools.ToolSearchMemory)
-	} else {
-		logger.Infof(ctx, "search_memory not registered: long-term memory is off for this request")
-	}
 
 	// Tool capability sets — used by the hard safety nets below to drop tools
 	// whose runtime prerequisite (a matching KB surface) is missing.
@@ -1262,12 +1247,6 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
 				WithKnowledgeScope(s.knowledgeService).
 				WithGraph(s.graphRepo, chunkRepo)
-		case tools.ToolSearchMemory:
-			// Reaching this case means the memory switches were already
-			// checked above, where the tool is injected. Which memory space is
-			// read is resolved from the request context inside the service, so
-			// this tool needs no owner argument and none can be supplied.
-			toolToRegister = tools.NewSearchMemoryTool(s.memoryService)
 		case tools.ToolDatabaseQuery:
 			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
 		case tools.ToolWebSearch:
