@@ -87,6 +87,125 @@ var retiredWriterRe = regexp.MustCompile(
 	`(?m)^func \([^)]*\) (` + strings.Join(retiredWriterMethods, `|`) + `)\(`,
 )
 
+// retiredTableRefRe matches a GORM Table() call naming a retired table
+// directly. On its own it is not a violation — the tables stay readable — so
+// the write decision is made by walking the method chain that follows it.
+var retiredTableRefRe = regexp.MustCompile(
+	`\.Table\(\s*["` + "`" + `]?(?:` + retiredTableAlternation + `)["` + "`" + `]?\s*\)`,
+)
+
+// gormChainLink parses one link of a fluent GORM chain at the start of rest:
+// optional whitespace, a dot, a method name and a balanced parenthesised
+// argument list. It returns the method name and the number of bytes consumed,
+// with string literals skipped so a quote inside an argument cannot unbalance
+// the scan.
+func gormChainLink(rest string) (string, int, bool) {
+	isSpace := func(b byte) bool { return b == ' ' || b == '\t' || b == '\n' || b == '\r' }
+	isName := func(b byte) bool {
+		return b == '_' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9'
+	}
+	i := 0
+	for i < len(rest) && isSpace(rest[i]) {
+		i++
+	}
+	if i >= len(rest) || rest[i] != '.' {
+		return "", 0, false
+	}
+	i++
+	start := i
+	for i < len(rest) && isName(rest[i]) {
+		i++
+	}
+	if i == start {
+		return "", 0, false
+	}
+	name := rest[start:i]
+	for i < len(rest) && isSpace(rest[i]) {
+		i++
+	}
+	if i >= len(rest) || rest[i] != '(' {
+		return "", 0, false
+	}
+	depth := 0
+	for i < len(rest) {
+		switch rest[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return name, i + 1, true
+			}
+		case '"', '`', '\'':
+			quote := rest[i]
+			i++
+			for i < len(rest) {
+				if rest[i] == '\\' && quote != '`' {
+					i += 2
+					continue
+				}
+				if rest[i] == quote {
+					break
+				}
+				i++
+			}
+		}
+		i++
+	}
+	return "", 0, false
+}
+
+// gormWriterMethods are the GORM chain methods that write rows. Reads
+// (Count, Find, First, Pluck, Scan, ...) are deliberately absent: reading the
+// retired tables is allowed by design.
+var gormWriterMethods = map[string]struct{}{
+	"Create": {}, "CreateInBatches": {}, "Save": {}, "Updates": {}, "Update": {},
+	"UpdateColumn": {}, "UpdateColumns": {}, "FirstOrCreate": {}, "Assign": {},
+	"Delete": {}, "Unscoped": {},
+}
+
+// retiredTableSQLExecRe matches a raw write statement naming a retired table
+// directly, which the INSERT scan misses when the verb is UPDATE or DELETE.
+var retiredTableSQLExecRe = regexp.MustCompile(
+	`(?i)\b(?:UPDATE|DELETE\s+FROM|REPLACE\s+INTO)\s+["` + "`" + `]?(?:` + retiredTableAlternation + `)\b`,
+)
+
+// retiredTableORMWriters returns the write chains in content that open on a
+// retired table by name, e.g. Table("mcp_tool_approvals").Create(row) or
+// Table("tenant_skins").Where(...).Updates(...). The chain is walked link by
+// link rather than matched by one flat pattern, so an intermediate call does
+// not hide the write, and a read chain (Table("x").Count(...)) is not
+// reported.
+//
+// Coverage limit, stated plainly: this is a text scan. A table name assembled
+// at runtime (a variable, a helper, fmt.Sprintf) or a model whose TableName()
+// returns a retired table without the literal appearing at the call site is
+// out of scope.
+func retiredTableORMWriters(content string) []string {
+	var hits []string
+	for _, loc := range retiredTableRefRe.FindAllStringIndex(content, -1) {
+		rest := content[loc[1]:]
+		chain := content[loc[0]:loc[1]]
+		writes := false
+		consumed := 0
+		for {
+			name, length, ok := gormChainLink(rest[consumed:])
+			if !ok {
+				break
+			}
+			consumed += length
+			chain += rest[consumed-length : consumed]
+			if _, isWriter := gormWriterMethods[name]; isWriter {
+				writes = true
+			}
+		}
+		if writes {
+			hits = append(hits, strings.Join(strings.Fields(chain), " "))
+		}
+	}
+	return hits
+}
+
 // TestLegacyCompatTablesPreservedWithoutWriters pins the schema side of Task
 // 5: every non-core table the deletion batches kept stays in the schema after
 // a fresh migration, and the legacy operational tables (tenant_skill_*,
@@ -235,20 +354,98 @@ func seedLegacy(db *gorm.DB) {
 		"Task 5 rule: production code must not INSERT into retired tables; offending files: %v", hits)
 }
 
-// TestLegacyCompatTablesHaveNoRetiredORMWriters covers the write form the SQL
-// scan cannot see: GORM model writes (db.Model(&types.MCPOAuthToken{}).Create,
-// .Save, .Updates, .Delete). Two checks stand in for it. No production type
-// may implement the retired write methods, and the retired persistence
-// contracts may be named only in their declaration files — both would be the
-// wiring an ORM writer needs. The checks are name-based: a writer reached
-// through a table-name variable or a differently named method is out of scope
-// here as well.
+// TestLegacyCompatTablesHaveNoRetiredORMWriters covers the write forms the SQL
+// INSERT scan cannot see. Three checks stand in for it:
+//
+//  1. no production type implements the retired write methods,
+//  2. the retired persistence contracts are named only in their declaration
+//     files (either one is the wiring an ORM writer needs), and
+//  3. no production code opens a write chain on a retired table by name —
+//     db.Table("mcp_tool_approvals").Create(row) names no contract and
+//     contains no SQL, and it is exactly how the reviewer bypassed the first
+//     two checks.
+//
+// Coverage limit, stated plainly: the table-name scan is a text scan, so a
+// write whose table name is assembled at runtime (a variable, a helper,
+// fmt.Sprintf) is out of scope, as is a model whose TableName() returns a
+// retired table without the name appearing at the call site. Reads are
+// allowed on purpose — the retired tables stay readable.
 func TestLegacyCompatTablesHaveNoRetiredORMWriters(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	require.NoError(t, err)
 	files, err := collectProductionGoFiles(repoRoot)
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
+
+	// The scanner itself is exercised on a fixture tree first: a table-name
+	// write chain must be flagged, a read must not, and the pre-fix bypass
+	// shape must be caught even though it names no contract.
+	fixtureRoot := t.TempDir()
+	writeFixtureFile(t, fixtureRoot, "internal/service/table_create.go", `package service
+
+import "gorm.io/gorm"
+
+type approval struct{ ID string }
+
+func tableCreate(db *gorm.DB, row *approval) {
+	db.Table("mcp_tool_approvals").Create(row)
+}
+`)
+	writeFixtureFile(t, fixtureRoot, "internal/service/table_updates.go", `package service
+
+import "gorm.io/gorm"
+
+func tableUpdates(db *gorm.DB) {
+	db.Table("tenant_skill_snapshots").Where("id = ?", "x").Updates(map[string]any{"state": "ready"})
+}
+`)
+	writeFixtureFile(t, fixtureRoot, "internal/service/raw_update.go", `package service
+
+import "gorm.io/gorm"
+
+func rawUpdate(db *gorm.DB) {
+	db.Exec("UPDATE tenant_sandbox_configs SET name = ? WHERE id = ?", "n", "x")
+}
+`)
+	// Reads must stay allowed: the tables remain readable by design.
+	writeFixtureFile(t, fixtureRoot, "internal/service/table_read.go", `package service
+
+import "gorm.io/gorm"
+
+func tableRead(db *gorm.DB) int64 {
+	var n int64
+	db.Table("tenant_skills").Count(&n)
+	return n
+}
+`)
+	// A model write that names no retired table textually: out of scope of
+	// this scan (the doc comment says so), so it must NOT be flagged.
+	writeFixtureFile(t, fixtureRoot, "internal/service/model_write.go", `package service
+
+import "gorm.io/gorm"
+
+type row struct{ ID string }
+
+func modelWrite(db *gorm.DB, r *row) {
+	db.Model(&row{}).Create(r)
+}
+`)
+	writeFixtureFile(t, fixtureRoot, "cmd/app/main.go", "package main\n\nfunc main() {}\n")
+
+	fixtureFiles, err := collectProductionGoFiles(fixtureRoot)
+	require.NoError(t, err)
+	require.Len(t, fixtureFiles, 6)
+
+	fixtureHits := scanFilesForORMWrites(t, fixtureFiles)
+	require.ElementsMatch(t, []string{
+		filepath.Join(fixtureRoot, "internal", "service", "table_create.go"),
+		filepath.Join(fixtureRoot, "internal", "service", "table_updates.go"),
+	}, fixtureHits, "the fixture's table-name write chains must be flagged, and nothing else")
+
+	execHits, err := scanFilesForMatches(fixtureFiles, retiredTableSQLExecRe)
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{filepath.Join(fixtureRoot, "internal", "service", "raw_update.go")},
+		execHits, "a raw UPDATE against a retired table must be flagged even though it is not an INSERT")
 
 	retiredContracts := []string{"MCPOAuthRepository", "MCPToolApprovalRepository", "MCPToolApprovalService"}
 	declarationFiles := map[string]bool{
@@ -258,6 +455,7 @@ func TestLegacyCompatTablesHaveNoRetiredORMWriters(t *testing.T) {
 
 	var offenders []string
 	var writerOffenders []string
+	var tableWriterOffenders []string
 	var seenDeclarations int
 	for _, p := range files {
 		b, err := os.ReadFile(p)
@@ -269,6 +467,13 @@ func TestLegacyCompatTablesHaveNoRetiredORMWriters(t *testing.T) {
 
 		for _, match := range retiredWriterRe.FindAllString(content, -1) {
 			writerOffenders = append(writerOffenders, fmt.Sprintf("%s: %s", rel, strings.TrimSpace(match)))
+		}
+		for _, match := range retiredTableORMWriters(content) {
+			tableWriterOffenders = append(tableWriterOffenders, fmt.Sprintf("%s: %s", rel, match))
+		}
+		for _, match := range retiredTableSQLExecRe.FindAllString(content, -1) {
+			tableWriterOffenders = append(tableWriterOffenders,
+				fmt.Sprintf("%s: %s", rel, strings.Join(strings.Fields(match), " ")))
 		}
 
 		var mentions []string
@@ -289,6 +494,10 @@ func TestLegacyCompatTablesHaveNoRetiredORMWriters(t *testing.T) {
 	require.Emptyf(t, writerOffenders,
 		"Task 5 rule: no production type may implement the retired writer methods "+
 			"(the ORM write path the SQL scan cannot see); offending declarations: %v", writerOffenders)
+	require.Emptyf(t, tableWriterOffenders,
+		"Task 5 rule: no production code may write to a retired table by name "+
+			"(db.Table(\"<retired>\").Create/Save/Updates, or a raw UPDATE/DELETE); "+
+			"offending call sites: %v", tableWriterOffenders)
 	require.Emptyf(t, offenders,
 		"Task 5 rule: retired MCP persistence contracts must stay declaration-only; "+
 			"offending files: %v", offenders)
@@ -516,6 +725,21 @@ func collectProductionGoFiles(repoRoot string) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+// scanFilesForORMWrites returns the files whose content contains a GORM write
+// chain opened on a retired table.
+func scanFilesForORMWrites(t *testing.T, paths []string) []string {
+	t.Helper()
+	var hits []string
+	for _, p := range paths {
+		b, err := os.ReadFile(p)
+		require.NoErrorf(t, err, "read %s", p)
+		if len(retiredTableORMWriters(string(b))) > 0 {
+			hits = append(hits, p)
+		}
+	}
+	return hits
 }
 
 // scanFilesForMatches returns the paths whose content matches re. A file that
