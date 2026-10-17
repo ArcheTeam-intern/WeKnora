@@ -452,6 +452,21 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 func (s *sessionService) UpdateSessionLastRequestState(
 	ctx context.Context, sessionID string, state *types.SessionLastRequestState,
 ) error {
+	if err := s.updateSessionLastRequestState(ctx, sessionID, state); err != nil {
+		logger.Warnf(ctx, "UpdateSessionLastRequestState: %v (session %s)", err, sessionID)
+		return err
+	}
+	return nil
+}
+
+// updateSessionLastRequestState performs the write and reports both failure
+// modes the caller must be able to distinguish: a repository error and a
+// zero-row update (the session is gone, moved, or owned by someone else).
+// UpdateSessionLastRequestState keeps its historical best-effort contract for
+// the chat UI; StoreSessionScopeBinding is the strict wrapper.
+func (s *sessionService) updateSessionLastRequestState(
+	ctx context.Context, sessionID string, state *types.SessionLastRequestState,
+) error {
 	if sessionID == "" {
 		return stderrors.New("session id is required")
 	}
@@ -466,9 +481,24 @@ func (s *sessionService) UpdateSessionLastRequestState(
 		return err
 	}
 	if affected == 0 {
-		logger.Warnf(ctx, "UpdateSessionLastRequestState: no rows affected for session %s", sessionID)
+		return stderrors.New("session was not updated (missing or out of scope)")
 	}
 	return nil
+}
+
+// StoreSessionScopeBinding persists the scope binding the core ask surface
+// enforces on every session reuse. Unlike the UI-memo path it must NOT be
+// best-effort: a binding that failed to persist would make the next reuse
+// read "no binding" and fall through the legacy-compat path, silently
+// dropping the scope protection this state exists to provide. The caller
+// therefore refuses to hand out the session when this returns an error.
+func (s *sessionService) StoreSessionScopeBinding(
+	ctx context.Context, sessionID string, state *types.SessionLastRequestState,
+) error {
+	if state == nil {
+		return stderrors.New("scope binding state is required")
+	}
+	return s.updateSessionLastRequestState(ctx, sessionID, state)
 }
 
 // DeleteSession removes a session by its ID

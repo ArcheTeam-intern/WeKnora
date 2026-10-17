@@ -306,13 +306,29 @@ type SessionLastRequestState struct {
 	AgentEnabled    bool   `json:"agent_enabled"`
 	ModelID         string `json:"model_id,omitempty"`
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
-	// Mode is the QA mode chosen for the most recent ask: "" (uses
-	// endpoint default), "quick-answer" or "smart-reasoning". The core
-	// ask surface uses Mode and ProfileID together with the sorted KB set
-	// to bind a session to its effective scope, so a later ask with a
-	// different mode or profile is refused against the same session id.
-	Mode                string         `json:"mode,omitempty"`
-	ProfileID           string         `json:"profile_id,omitempty"`
+	// Mode is the QA mode the most recent ask requested: "" (endpoint
+	// default), "quick-answer" or "smart-reasoning". ProfileID is the
+	// published profile it named, if any. The core ask surface binds a
+	// session to the configuration that actually executes — see EndpointID
+	// and AskAgentID — so a later ask that would run a different agent or
+	// read a different scope is refused against the same session id.
+	Mode      string `json:"mode,omitempty"`
+	ProfileID string `json:"profile_id,omitempty"`
+	// EndpointID and AskAgentID are the core ask surface's session binding:
+	// the endpoint that served the ask and the agent that answered it,
+	// resolved from the request (mode/profile) and the endpoint's own
+	// configuration. An endpoint or agent change on reuse is refused, which
+	// also covers an endpoint default that changed between two asks. Rows
+	// without these fields predate the binding; they are re-bound on their
+	// next core ask, before any message is written, so a binding that fails
+	// to persist can never masquerade as a legacy row.
+	EndpointID string `json:"endpoint_id,omitempty"`
+	AskAgentID string `json:"ask_agent_id,omitempty"`
+	// KnowledgeBaseIDs is the effective retrieval scope of the most recent
+	// ask as the server resolved it (canonical ids, sorted, de-duplicated):
+	// the same set results from an explicit selection, from the endpoint's
+	// range or from the agent's configuration, so equivalent requests bind
+	// the same session while a changed effective scope is refused.
 	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
 	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
 	TagIDs              []string       `json:"tag_ids,omitempty"`

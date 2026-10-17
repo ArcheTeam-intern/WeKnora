@@ -33,6 +33,11 @@ type SessionService interface {
 	// most recent QA request on this session. Best-effort: callers should log
 	// but not surface failures to the user.
 	UpdateSessionLastRequestState(ctx context.Context, sessionID string, state *types.SessionLastRequestState) error
+	// StoreSessionScopeBinding persists the scope binding enforced on session
+	// reuse (core ask surface). Strict: an error — including a zero-row
+	// update — must stop the caller from handing out the session, because an
+	// unpersisted binding reads as "unbound" on the next reuse.
+	StoreSessionScopeBinding(ctx context.Context, sessionID string, state *types.SessionLastRequestState) error
 	// DeleteSession deletes a session
 	DeleteSession(ctx context.Context, id string) error
 	// BatchDeleteSessions deletes multiple sessions by IDs

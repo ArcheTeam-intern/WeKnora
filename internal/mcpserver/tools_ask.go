@@ -259,23 +259,9 @@ func (s *Server) resolveAskSession(
 		}
 		return session, nil
 	}
-	title := question
-	if runes := []rune(title); len(runes) > askSessionTitleMaxLen {
-		title = string(runes[:askSessionTitleMaxLen])
-	}
-	created, err := s.sessionService.CreateSession(ctx, &types.Session{
-		TenantID:    ep.TenantID,
-		Title:       title,
-		Description: "MCP endpoint " + ep.Name,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create session: %w", err)
-	}
-	if err := s.sessionService.SetSessionOwnerID(ctx, ep.TenantID, created.ID, ownerID); err != nil {
-		return nil, fmt.Errorf("failed to bind session: %w", err)
-	}
-	created.UserID = ownerID
-	return created, nil
+	// Sharing the creator with the core surface keeps the title cap, the
+	// description and the owner binding identical on both entry points.
+	return s.createAskSession(ctx, ep, question)
 }
 
 // runQA executes one turn synchronously and returns the final answer and
