@@ -24,10 +24,14 @@
 
 ### S3 会话与有效范围绑定（P2）
 
-- `SessionLastRequestState` 增加 `Mode` / `ProfileID`；可用知识库集合排序去重后与 mode/profile
-  一起绑定到 session（`core_ask.go` 的 `bindAskSession` / `writeAskSessionBinding`）。
-- 复用会话时先校验绑定，不一致时在**写入任何消息之前**拒绝并提示"start a new session"。
-- 兼容规则：历史遗留的未绑定会话（`LastRequestState == nil`）沿用旧行为，首次带范围问答时补绑定。
+- `SessionLastRequestState` 增加 `Mode` / `ProfileID` / `EndpointID` / `AskAgentID`：绑定的是**实际执行的
+  配置**（端点 + 应答 agent + 调用方选择的 mode/profile）与**服务端解析出的有效知识库集合**，
+  不是请求里的原始参数。
+- 现在先解析执行计划（mode/profile → agent；选择器/端点范围/可见集合 → 有效 KB 列表），再校验会话；
+  范围、端点、应答配置任一变化都在写入消息之前拒绝。省略选择器与显式传入同一集合等价，顺序变化不误判。
+- 新建会话在**执行前**写入绑定（严格写入：仓储错误与零行更新都算失败，失败即拒绝本次问答）；
+  升级前遗留的未绑定会话在使用时同样严格补绑，因此"未绑定"只可能是旧版本写下的行，
+  不会再被新会话的写入失败冒名顶替。
 
 ### C1 Task 5 停写守卫（P2）
 
@@ -42,7 +46,16 @@
 - 新增"旧记录升级"夹具：预置五张退役表各一行 + tenants/knowledge_bases/knowledges/sessions 核心行，
   跑迁移后再逐项断言内容保留、核心行仍可读写、退役表不再新增行；并静态断言没有任何 up 迁移
   `DROP TABLE` 退役表。
-- 扫描能力边界写进注释：只覆盖 SQL INSERT 文本与命名式 ORM 写入，运行时拼表名的写入不在范围内。
+  **范围说明（收窄）**：该用例覆盖的是"当前 schema 带旧数据再跑一次迁移"（第二次 Up 为 NoChange），
+  证明的是带数据重启不丢行，**不等于**历史 schema 版本的升级重放；本批没有新增迁移，也没有发现丢行。
+  若要正式升级验收，需另补旧版本 schema 夹具。
+- ORM 停写守卫（收口复核 T1 后补强）：除"退役契约只许声明、不得有实现"外，新增按表名的写链扫描
+  ——`Table("退役表").Create/Save/Updates/Update/Delete/...`（中间可跨 `Where` 等链式调用）以及
+  `UPDATE/DELETE FROM/REPLACE INTO <退役表>` 的原始语句。夹具树里 `Table(...).Create(...)` 与
+  `Where(...).Updates(...)` 必须被标红、`Table(...).Count(...)` 读操作不得被标红；另在真实生产树里
+  植入一条同形写链验证会被拦下（探针树，未提交）。
+- 扫描能力边界写进注释：只覆盖静态表名的 SQL 文本与命名式 ORM 写入；运行时拼接表名的写入、
+  以及 `TableName()` 返回退役表但字面量不出现在调用点的模型写入，不在扫描范围内。
 
 ### C2 旧 memory 队列退役（P2）
 
@@ -106,3 +119,18 @@
 ## 三、未做（按用户暂缓）
 
 前端切片、WeKnora-Agent 侧改造不在本轮范围；`smart-reasoning` 依赖的 Rerank 模型仍是环境缺口。
+
+## 四、收口复核后的补强（2026-10-17 第二次）
+
+独立复核报告（`2026-10-17-backend-closure-verification.md`）指出 S3 未收口、默认 profile 回归、
+ORM 守卫漏检。以上 S3/C1 段落已按补强后的实现更新，另有两项：
+
+- **V1 默认智能体/profile**：核心面原先把省略的 mode 强填成 `quick-answer` 再转发，导致端点配置的
+  默认 agent 与显式 `profile_id` 都被绕过。现在改为先解析执行计划（显式 mode 钉住内置 agent；
+  省略 mode 或指定 profile 交给端点配置），并把解析结果同时用于校验、绑定与转发。
+- **V3 绑定写入失败**：见上文 S3 第三条——新建会话先绑定后执行，失败不产生可续用会话；
+  `sessionService` 新增严格写入 `StoreSessionScopeBinding`（区分仓储错误与零行更新），
+  原 `UpdateSessionLastRequestState` 保持"UI 备忘 best-effort"语义不变。
+- 复核的四组反例已转为正式测试（`internal/mcpserver/core_ask_plan_test.go`），并做了前后对照：
+  同一批测试在补强前的 `core_ask.go`/`tools_ask.go` 上失败 7 项（含四组反例），在补强后全绿。
+- T1 的 ORM 守卫补强见上文 C1 段落；植入同形写链的生产树探针验证会被拦下。
