@@ -157,11 +157,15 @@ func gormChainLink(rest string) (string, int, bool) {
 
 // gormWriterMethods are the GORM chain methods that write rows. Reads
 // (Count, Find, First, Pluck, Scan, ...) are deliberately absent: reading the
-// retired tables is allowed by design.
+// retired tables is allowed by design. The classification is by the executed
+// method: Unscoped is deliberately NOT a writer here — it is a chain
+// modifier, and a read through it (Table("x").Unscoped().Count(&n)) stays a
+// read, while a write through it (Table("x").Unscoped().Delete(...)) is
+// still caught by the terminal writer that follows.
 var gormWriterMethods = map[string]struct{}{
 	"Create": {}, "CreateInBatches": {}, "Save": {}, "Updates": {}, "Update": {},
 	"UpdateColumn": {}, "UpdateColumns": {}, "FirstOrCreate": {}, "Assign": {},
-	"Delete": {}, "Unscoped": {},
+	"Delete": {},
 }
 
 // retiredTableSQLExecRe matches a raw write statement naming a retired table
@@ -430,16 +434,40 @@ func modelWrite(db *gorm.DB, r *row) {
 	db.Model(&row{}).Create(r)
 }
 `)
+	// Unscoped is a chain modifier, not an executed write: a read through
+	// it must stay unflagged (the review's P3 counterexample).
+	writeFixtureFile(t, fixtureRoot, "internal/service/unscoped_read.go", `package service
+
+import "gorm.io/gorm"
+
+func unscopedCount(db *gorm.DB) int64 {
+	var n int64
+	db.Table("tenant_skills").Unscoped().Count(&n)
+	return n
+}
+`)
+	// A write executed THROUGH Unscoped must still be flagged — the terminal
+	// method decides, and removing the modifier from the writer set must not
+	// have opened that hole.
+	writeFixtureFile(t, fixtureRoot, "internal/service/unscoped_delete.go", `package service
+
+import "gorm.io/gorm"
+
+func unscopedDelete(db *gorm.DB) {
+	db.Table("mcp_tool_approvals").Unscoped().Delete(nil, "id = ?", "x")
+}
+`)
 	writeFixtureFile(t, fixtureRoot, "cmd/app/main.go", "package main\n\nfunc main() {}\n")
 
 	fixtureFiles, err := collectProductionGoFiles(fixtureRoot)
 	require.NoError(t, err)
-	require.Len(t, fixtureFiles, 6)
+	require.Len(t, fixtureFiles, 8)
 
 	fixtureHits := scanFilesForORMWrites(t, fixtureFiles)
 	require.ElementsMatch(t, []string{
 		filepath.Join(fixtureRoot, "internal", "service", "table_create.go"),
 		filepath.Join(fixtureRoot, "internal", "service", "table_updates.go"),
+		filepath.Join(fixtureRoot, "internal", "service", "unscoped_delete.go"),
 	}, fixtureHits, "the fixture's table-name write chains must be flagged, and nothing else")
 
 	execHits, err := scanFilesForMatches(fixtureFiles, retiredTableSQLExecRe)
