@@ -38,6 +38,13 @@ type SessionService interface {
 	// update — must stop the caller from handing out the session, because an
 	// unpersisted binding reads as "unbound" on the next reuse.
 	StoreSessionScopeBinding(ctx context.Context, sessionID string, state *types.SessionLastRequestState) error
+	// AdoptSessionScopeBinding binds a session row that predates the binding.
+	// The "still unbound" test happens inside the repository UPDATE, so two
+	// concurrent first-time adoptions cannot both write: the loser gets
+	// adopted=false without an error and must re-validate the binding that
+	// actually won before running. Unlike StoreSessionScopeBinding, a
+	// zero-row update is the protocol's answer, not a failure.
+	AdoptSessionScopeBinding(ctx context.Context, sessionID string, state *types.SessionLastRequestState) (bool, error)
 	// DeleteSession deletes a session
 	DeleteSession(ctx context.Context, id string) error
 	// BatchDeleteSessions deletes multiple sessions by IDs
@@ -108,6 +115,14 @@ type SessionRepository interface {
 	// session (agent, model, KB scope, etc.) so the chat UI can restore it
 	// when the session is reopened. Scope rules match Update.
 	UpdateLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
+	// AdoptLastRequestState writes a scope binding only while the session
+	// still carries none, decided inside the UPDATE itself: no agent_config,
+	// or its endpoint_id key missing/empty — the same rule the core surface
+	// applies on read. Concurrent first-time adoptions of one row therefore
+	// serialize: exactly one gets 1, everyone else gets 0 and must re-check
+	// the stored binding. Scope rules match UpdateLastRequestState; state
+	// must be non-nil and must name its endpoint.
+	AdoptLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
 	// SetPinned pins or unpins a session row scoped by tenant.
 	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
 	// Returns the number of rows affected; 0 means the session doesn't exist or is

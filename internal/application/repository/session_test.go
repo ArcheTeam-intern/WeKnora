@@ -345,3 +345,79 @@ func TestSessionRepositoryQueryPagedHidesMaintenanceSessions(t *testing.T) {
 			"source=%q count must not include the maintenance session", source)
 	}
 }
+
+// TestSessionRepositoryAdoptLastRequestState pins the compare-and-set of the
+// legacy-adoption write: the "still unbound" decision lives inside the
+// UPDATE, so a second adoption never overwrites the winner's binding, and
+// the unbound test mirrors what the Go side can read (NULL, empty, junk and
+// endpoint_id-less UI state are all adoptable; anything with a non-empty
+// endpoint_id is already bound). Scope rules must match the other writers.
+func TestSessionRepositoryAdoptLastRequestState(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	ctx := context.Background()
+	binding := func(kb string) *types.SessionLastRequestState {
+		return &types.SessionLastRequestState{
+			EndpointID: "ep-1", AskAgentID: "agent-1", KnowledgeBaseIDs: []string{kb},
+		}
+	}
+
+	// NULL agent_config: first adoption wins, the second is a no-op.
+	nilRow := createSessionForTest(t, db, 1, "alice")
+	affected, err := repo.AdoptLastRequestState(ctx, 1, "alice", nilRow.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected)
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", nilRow.ID, binding("kb-2"))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, affected, "a bound row must not be re-bound by adoption")
+	got, err := repo.Get(ctx, 1, "alice", nilRow.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"kb-1"}, got.LastRequestState.KnowledgeBaseIDs,
+		"the winner's binding must survive the loser's write attempt")
+
+	// A UI-memo row (agent_config present, no endpoint_id) predates any
+	// binding and must be adoptable.
+	uiRow := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", uiRow.ID).
+		Update("agent_config", &types.SessionLastRequestState{AgentID: "a", ModelID: "m"}).Error)
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", uiRow.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected, "endpoint_id-less UI state is unbound")
+
+	// Junk the Go Scan silently ignores must read as unbound here too — a
+	// fatal condition would block adoption of such legacy rows.
+	junk := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Exec("UPDATE sessions SET agent_config = ? WHERE id = ?", "not-json", junk.ID).Error)
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", junk.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected, "unreadable agent_config must be adoptable, not fatal")
+
+	// An explicitly empty endpoint_id counts as unbound (the Go-side rule
+	// is bound iff EndpointID != "").
+	emptyEP := createSessionForTest(t, db, 1, "alice")
+	require.NoError(t, db.Model(&types.Session{}).Where("id = ?", emptyEP.ID).
+		Update("agent_config", &types.SessionLastRequestState{EndpointID: "", AskAgentID: "x"}).Error)
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", emptyEP.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 1, affected)
+
+	// Scope rules: wrong tenant or wrong owner is a no-op, never a write.
+	other := createSessionForTest(t, db, 2, "bob")
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", other.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, affected, "another tenant's row must not be adoptable")
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "mallory", nilRow.ID, binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, affected, "another user must not adopt the row")
+	got, err = repo.Get(ctx, 1, "alice", nilRow.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{"kb-1"}, got.LastRequestState.KnowledgeBaseIDs)
+
+	// A missing session is a zero-row no-op, matching UpdateLastRequestState.
+	affected, err = repo.AdoptLastRequestState(ctx, 1, "alice", "gone", binding("kb-1"))
+	require.NoError(t, err)
+	require.EqualValues(t, 0, affected)
+
+	// A state that could not satisfy the SQL condition is refused up front.
+	_, err = repo.AdoptLastRequestState(ctx, 1, "alice", nilRow.ID, &types.SessionLastRequestState{})
+	require.Error(t, err, "adoption requires a state that names its endpoint")
+}

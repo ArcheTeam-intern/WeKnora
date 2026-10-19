@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	stderrors "errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -370,6 +371,76 @@ func (r *sessionRepository) UpdateLastRequestState(
 			"updated_at":   now,
 		})
 	return res.RowsAffected, res.Error
+}
+
+// AdoptLastRequestState is the compare-and-set form of
+// UpdateLastRequestState: the UPDATE itself carries the "still unbound"
+// condition, so the read-check-write of a legacy adoption collapses into one
+// atomic statement and concurrent adoptions of the same row cannot both
+// succeed. "Unbound" mirrors what the Go side can decide on read: a missing,
+// empty, non-JSON or endpoint_id-less agent_config value all count as
+// unbound — a row whose JSON Scan cannot fill predates the binding exactly
+// like a NULL one does.
+func (r *sessionRepository) AdoptLastRequestState(
+	ctx context.Context, tenantID uint64, userID string, sessionID string,
+	state *types.SessionLastRequestState,
+) (int64, error) {
+	if state == nil {
+		return 0, stderrors.New("adoption requires a binding state")
+	}
+	if state.EndpointID == "" {
+		// The SQL condition identifies a binding by its endpoint_id key; a
+		// state without one could never satisfy — or be protected by — the
+		// CAS. The core ask surface always names the endpoint it binds to.
+		return 0, stderrors.New("adoption requires a state that names its endpoint")
+	}
+	cond, err := unboundBindingCondition(r.db)
+	if err != nil {
+		return 0, err
+	}
+	v, err := state.Value()
+	if err != nil {
+		return 0, err
+	}
+	res := applySessionUserScope(r.db.WithContext(ctx).
+		Model(&types.Session{}).
+		Where("tenant_id = ? AND id = ?", tenantID, sessionID).
+		Where(cond), userID).
+		Updates(map[string]interface{}{
+			"agent_config": v,
+			"updated_at":   time.Now(),
+		})
+	return res.RowsAffected, res.Error
+}
+
+// unboundBindingCondition returns the dialect-specific SQL predicate that is
+// true only while agent_config holds no core-ask binding (no JSON object
+// with a non-empty "endpoint_id" key). An unknown dialect refuses the
+// adoption instead of guessing: a wrong condition is worse than no adoption
+// at all — the core ask surface then reports the binding as not persistable
+// rather than running unprotected.
+func unboundBindingCondition(db *gorm.DB) (string, error) {
+	switch db.Dialector.Name() {
+	case "postgres":
+		return `(agent_config IS NULL
+			OR agent_config->>'endpoint_id' IS NULL
+			OR agent_config->>'endpoint_id' = '')`, nil
+	case "mysql":
+		return `(agent_config IS NULL
+			OR NOT JSON_VALID(CAST(agent_config AS CHAR))
+			OR IFNULL(JSON_UNQUOTE(JSON_EXTRACT(CAST(agent_config AS CHAR), '$.endpoint_id')), '') = '')`, nil
+	case "sqlite", "sqlite3":
+		// CAST first: the column is JSONB-typed under SQLite's affinity
+		// rules and arrives as a blob for some drivers; json_valid guards
+		// against non-JSON junk, which reads as unbound on the Go side too.
+		// (json_extract over junk is an error, not a NULL.)
+		return `(agent_config IS NULL
+			OR CAST(agent_config AS TEXT) = ''
+			OR NOT json_valid(CAST(agent_config AS TEXT))
+			OR IFNULL(json_extract(CAST(agent_config AS TEXT), '$.endpoint_id'), '') = '')`, nil
+	default:
+		return "", fmt.Errorf("session scope adoption is not supported on database %q", db.Dialector.Name())
+	}
 }
 
 // Delete deletes a session

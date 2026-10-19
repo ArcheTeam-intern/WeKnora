@@ -501,6 +501,41 @@ func (s *sessionService) StoreSessionScopeBinding(
 	return s.updateSessionLastRequestState(ctx, sessionID, state)
 }
 
+// AdoptSessionScopeBinding is the compare-and-set variant of
+// StoreSessionScopeBinding, for binding a session row that predates the
+// binding. The "still unbound" test runs inside the repository UPDATE, so
+// two concurrent first-time adoptions of one row cannot both write: exactly
+// one gets adopted=true, the others get adopted=false with no error and must
+// re-validate the binding that won before running — the report's rule that
+// same-scope concurrency proceeds while a different scope is refused before
+// any QA message is written.
+func (s *sessionService) AdoptSessionScopeBinding(
+	ctx context.Context, sessionID string, state *types.SessionLastRequestState,
+) (bool, error) {
+	if sessionID == "" {
+		return false, stderrors.New("session id is required")
+	}
+	if state == nil {
+		return false, stderrors.New("scope binding state is required")
+	}
+	if state.EndpointID == "" {
+		// A binding without an endpoint would neither satisfy nor be
+		// protected by the repository condition. Core ask always names one.
+		return false, stderrors.New("scope binding must name its endpoint")
+	}
+	tenantID := types.MustTenantIDFromContext(ctx)
+	userID := sessionUserIDFromContext(ctx)
+	affected, err := s.sessionRepo.AdoptLastRequestState(ctx, tenantID, userID, sessionID, state)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"session_id": sessionID,
+			"tenant_id":  tenantID,
+		})
+		return false, err
+	}
+	return affected > 0, nil
+}
+
 // DeleteSession removes a session by its ID
 func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 	// Validate session ID
