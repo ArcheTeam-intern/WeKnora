@@ -46,21 +46,12 @@ export const useAuthStore = defineStore('auth', () => {
   // so PR 3 can render a tenant-switcher UI without a store migration.
   const memberships = ref<Array<{ tenant_id: number; tenant_name?: string; role: string }>>([])
   const isLiteMode = ref(false)
-  // pendingInvitationCount is the number of pending tenant invitations
-  // addressed to the current user. Renders as a badge next to the
-  // avatar; updated by fetchPendingInvitationCount, which runs after
-  // login, after tenant switch, and on a polling interval. Polling
-  // (vs SSE) is fine — the count is checked rarely and a 1-2 minute
-  // staleness window is acceptable for an inbox indicator.
-  const pendingInvitationCount = ref<number>(0)
   // Authoritative deployment capability returned by /auth/me. Defaults to
   // false (fail-closed): we hide the "create workspace" affordance until
   // /auth/me confirms the deployment allows it, so an invitation-only
   // deployment never briefly flashes a create action the backend would
   // then reject with 403/2005.
   const canCreateTenant = ref(false)
-
-  const autoAcceptInvitation = ref(false)
 
   // 计算属性
   const isLoggedIn = computed(() => {
@@ -297,47 +288,14 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.setItem('weknora_memberships', JSON.stringify(memberships.value))
   }
 
-  // setPendingInvitationCount is the explicit setter used by the
-  // polling composable below. Keeping the mutation behind a setter
-  // matches the pattern of every other piece of auth state and lets
-  // future devtools / strict-mode checks intercept the write.
-  const setPendingInvitationCount = (n: number) => {
-    pendingInvitationCount.value = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0
-  }
-
   const setCanCreateTenant = (allowed: boolean) => {
     canCreateTenant.value = allowed
   }
 
-  const setAutoAcceptInvitation = (enabled: boolean) => {
-    autoAcceptInvitation.value = enabled
-  }
-
-  // fetchPendingInvitationCount hits the dedicated /me/invitations/
-  // pending-count endpoint and updates the store. Errors are
-  // swallowed — the badge degrades to its last-known value instead
-  // of nagging the user with a toast. The caller can choose to fire
-  // and forget (login flow) or await (manual refresh button).
-  const fetchPendingInvitationCount = async () => {
-    // Import lazily to avoid circular module ordering between auth
-    // store, axios interceptor, and i18n bootstrapping. The store is
-    // imported by very early modules in main.ts; a top-level api
-    // import would tighten that graph unnecessarily.
-    try {
-      const { getMyPendingInvitationCount } = await import('@/api/tenant/invitations')
-      const resp = await getMyPendingInvitationCount()
-      if (resp.success && resp.data) {
-        setPendingInvitationCount(resp.data.pending_count)
-      }
-    } catch {
-      // best-effort; keep last known value
-    }
-  }
-
   // Reconcile user / home tenant / memberships with GET /api/v1/auth/me.
   // Login only populated memberships once; SPA navigations skip
-  // hydrateSessionFromToken when isLoggedIn is already true — so inviting
-  // flows or revokes would leave the sidebar switcher stale until reload.
+  // hydrateSessionFromToken when isLoggedIn is already true — so membership
+  // changes would leave the sidebar switcher stale until reload.
   //
   // 请求排序：refreshFromAuthMe 是「刷新」，结果必须来自本次调用之后发出的请求
   // （接受邀请 / 建空间 / 改空间信息之后调用，不能吃到侧栏悬停早先发出的那次响应）；
@@ -401,32 +359,8 @@ export const useAuthStore = defineStore('auth', () => {
       setCanCreateTenant(createCapability)
     }
 
-    setAutoAcceptInvitation(response.data?.capabilities?.auto_accept_invitation === true)
-
     authMeSynced = true
     return true
-  }
-
-  // 用 token 加入空间并刷新成员关系、切到新空间。token 无效时返回 ok:false（不抛异常），
-  // 提示与跳转交给调用方（store 不碰 router）。
-  const acceptInvitationByTokenAndRefresh = async (
-    token: string,
-  ): Promise<{ ok: boolean; tenantId?: number; tenantName?: string }> => {
-    try {
-      const { acceptInvitationByToken } = await import('@/api/tenant/invitations')
-      const resp = await acceptInvitationByToken(token)
-      if (!resp.success || !resp.data?.membership) {
-        return { ok: false }
-      }
-      const tenantId = resp.data.membership.tenant_id
-      const tenantName = resp.data.tenant_name
-      // 刷新成员关系，并切到刚加入的空间。
-      await refreshFromAuthMe()
-      setSelectedTenant(tenantId, tenantName ?? null)
-      return { ok: true, tenantId, tenantName }
-    } catch {
-      return { ok: false }
-    }
   }
 
   const getSelectedTenant = () => {
@@ -454,9 +388,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName.value = null
     allTenants.value = []
     memberships.value = []
-    pendingInvitationCount.value = 0
     canCreateTenant.value = false
-    autoAcceptInvitation.value = false
     authMeSynced = false
     // 飞行中的 /auth/me 作废：登出之后才返回的响应不能再 setUser / setTenant。
     authMeRequest.invalidate()
@@ -581,9 +513,7 @@ export const useAuthStore = defineStore('auth', () => {
     selectedTenantName,
     allTenants,
     memberships,
-    pendingInvitationCount,
     canCreateTenant,
-    autoAcceptInvitation,
 
     // 计算属性
     isLoggedIn,
@@ -608,13 +538,9 @@ export const useAuthStore = defineStore('auth', () => {
     setSelectedTenant,
     setAllTenants,
     setMemberships,
-    setPendingInvitationCount,
     setCanCreateTenant,
-    setAutoAcceptInvitation,
-    fetchPendingInvitationCount,
     refreshFromAuthMe,
     ensureAuthMe,
-    acceptInvitationByTokenAndRefresh,
     getSelectedTenant,
     setLiteMode,
     logout,

@@ -875,7 +875,6 @@ function keyCapabilityLabels(key: TenantAPIKey): string[] {
     message_history: t('integrations.api.capabilityMessageHistory'),
     manage_models: t('integrations.api.capabilityManageModels'),
     manage_mcp_services: t('integrations.api.capabilityManageMcpServices'),
-    manage_datasources: t('integrations.api.capabilityManageDatasources'),
     manage_channels: t('integrations.api.capabilityManageChannels'),
     manage_vector_stores: t('integrations.api.capabilityManageVectorStores'),
     manage_storage_backends: t('integrations.api.capabilityManageStorageBackends'),

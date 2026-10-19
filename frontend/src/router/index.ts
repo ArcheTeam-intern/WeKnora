@@ -35,12 +35,6 @@ function isSafeLiteRestoreTarget(path: string) {
   return path.startsWith('/platform/') && !path.startsWith('/platform/organizations')
 }
 
-function hasPendingOIDCCallback() {
-  if (typeof window === 'undefined') return false
-  const hash = window.location.hash || ''
-  return hash.includes('oidc_result=') || hash.includes('oidc_error=')
-}
-
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
@@ -51,18 +45,6 @@ const router = createRouter({
     {
       path: "/login",
       name: "login",
-      component: () => import("../views/auth/Login.vue"),
-      meta: { requiresAuth: false, requiresInit: false }
-    },
-    // Embed chat is a separate entry (embed.html + embed-main.ts), not this SPA.
-    {
-      path: "/register",
-      name: "registerByInvite",
-      // Share-link landing page reuses the Login form: the same Vue
-      // component renders both modes and detects ?token=xxx on mount
-      // to switch into invite-register flow. Avoids a parallel page
-      // that would duplicate the OIDC / language-switch / styling
-      // surface for one extra field.
       component: () => import("../views/auth/Login.vue"),
       meta: { requiresAuth: false, requiresInit: false }
     },
@@ -280,13 +262,6 @@ let liteDeepLinkRestoreDone = false
 // 路由守卫：检查认证状态和系统初始化状态
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-
-  // OIDC 回跳登录结果依赖 App.vue 在挂载后消费 URL hash。
-  // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。
-  if (hasPendingOIDCCallback()) {
-    next()
-    return
-  }
 
   // Preserve bookmarks for tools that have moved out of Settings.
   if (to.path === '/platform/settings' && isToolboxSection(to.query.section)) {

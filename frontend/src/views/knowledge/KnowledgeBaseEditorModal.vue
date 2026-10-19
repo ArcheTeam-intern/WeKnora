@@ -515,11 +515,6 @@
         />
       </div>
 
-      <!-- 数据源管理（仅编辑模式） -->
-      <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'datasource'" class="section">
-        <DataSourceSettings :kb-id="activeKbId" @count="dsCount = $event" />
-      </div>
-
       <!-- 共享设置（仅编辑模式） -->
       <div v-if="editorMode === 'edit' && activeKbId && currentSection === 'share'" class="section">
         <KBShareSettings :kb-id="activeKbId" :can-share="canShareKB" />
@@ -617,7 +612,6 @@ import KBAdvancedSettings from './settings/KBAdvancedSettings.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
-import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
 import { useI18n } from 'vue-i18n'
 
@@ -713,7 +707,6 @@ const initialStorageProvider = ref<string>('')
 /** Tenant-wide default from Settings → Storage engine (used when creating a KB). */
 const tenantDefaultStorageProvider = ref('local')
 const initialIndexingStrategy = ref<any>(null)
-const dsCount = ref(0)
 // Identifier of the user who created this KB. Empty for older rows
 // that predate per-KB ownership tracking; those KBs have no "owner" and
 // only tenant Admin+ can mutate their share settings.
@@ -763,9 +756,9 @@ const DEFAULT_CHUNKING_PRESET = {
   enableParentChild: true,
 } as const
 
-// 这些分区的操作在点击时即时生效（共享 / 数据源 / 活动记录），不经过底部「保存」，
+// 这些分区的操作在点击时即时生效（共享 / 活动记录），不经过底部「保存」，
 // 因此底部只显示「关闭」并提示，避免用户以为需要再点保存或以为「取消」能撤销。
-const INSTANT_SECTIONS = new Set(['datasource', 'share', 'activity'])
+const INSTANT_SECTIONS = new Set(['share', 'activity'])
 const isInstantSection = computed(() => INSTANT_SECTIONS.has(currentSection.value))
 
 const navItems = computed(() => {
@@ -789,9 +782,6 @@ const navItems = computed(() => {
       { key: 'graph', icon: 'chart-bubble', label: t('knowledgeEditor.sidebar.graph') },
       { key: 'advanced', icon: 'setting', label: t('knowledgeEditor.sidebar.advanced') }
     )
-    if (editorMode.value === 'edit' && activeKbId.value) {
-      items.push({ key: 'datasource', icon: 'cloud-download', label: t('knowledgeEditor.sidebar.datasource'), badge: dsCount.value || undefined })
-    }
   }
   if (editorMode.value === 'edit' && activeKbId.value && !authStore.isLiteMode) {
     items.push({ key: 'share', icon: 'share', label: t('knowledgeEditor.sidebar.share') })
@@ -821,7 +811,7 @@ const navGroups = computed(() => {
     {
       key: 'data',
       label: t('knowledgeEditor.navGroups.data'),
-      items: pickItems(['storage', 'datasource']),
+      items: pickItems(['storage']),
     },
     {
       key: 'integration',

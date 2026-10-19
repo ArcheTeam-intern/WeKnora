@@ -89,7 +89,7 @@ instance.interceptors.request.use(
     // 添加跨空间访问请求头：只要 setSelectedTenant 写过激活空间，
     // 每个请求都要附 X-Tenant-ID。早期版本会 short-circuit
     // "selectedTenantId === defaultTenantId 时不附"以减少 header 体积，
-    // 但这条优化会被任何把 weknora_tenant 写成激活空间的代码（OIDC
+    // 但这条优化会被任何把 weknora_tenant 写成激活空间的代码
     // 回调、UserMenu loadUserInfo、router hydrate）触发，导致后续请求
     // 静默丢失 header，前端"切换了"但实际仍跑在 home 空间里——把"切
     // 换之后只有第一批请求带 X-Tenant-ID"调成永久状态。
@@ -110,12 +110,7 @@ instance.interceptors.request.use(
   }
 );
 
-// Share-link endpoints (/auth/invitations/lookup, /auth/register-by-invite)
-// are reachable by anonymous users opening an invite link. A 401 from these
-// must surface to the page (e.g. expired token), not trigger the
-// refresh-then-redirect-to-login flow (issue #1617). '/auth/register' already
-// covers '/auth/register-by-invite' via substring match.
-const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/auth/register', '/auth/oidc/', '/auth/invitations/lookup', '/api/v1/embed/'];
+const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/api/v1/embed/'];
 
 function isPublicAuthRequest(url?: string): boolean {
   if (!url) return false;
@@ -157,7 +152,7 @@ instance.interceptors.response.use(
       }
     }
     
-    // 公开接口（auto-setup / login / register / oidc）的 401 不走 refresh 逻辑，直接返回错误
+    // 公开接口（auto-setup / login）的 401 不走 refresh 逻辑，直接返回错误
     if ((error.response.status === 401 || error.response.status === 403) && isPublicAuthRequest(originalRequest?.url)) {
       const { status, data } = error.response;
       const msg = typeof data === 'object'

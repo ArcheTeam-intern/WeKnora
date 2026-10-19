@@ -58,7 +58,6 @@ export interface APIPrincipalTestToken {
 //  - 'message_history': search/read tenant chat-history metadata
 //  - 'manage_models': manage tenant model definitions, checks, and credentials
 //  - 'manage_mcp_services': manage MCP services, credentials, tool policies, and OAuth state
-//  - 'manage_datasources': manage data-source connectors and sync jobs
 //  - 'manage_channels': manage embed and IM channels
 //  - 'manage_vector_stores': manage vector stores and parser/storage checks
 //  - 'manage_web_search': manage web-search providers
@@ -76,7 +75,6 @@ export type TenantAPIKeyCapability =
   | 'message_history'
   | 'manage_models'
   | 'manage_mcp_services'
-  | 'manage_datasources'
   | 'manage_channels'
   | 'manage_vector_stores'
   | 'manage_storage_backends'

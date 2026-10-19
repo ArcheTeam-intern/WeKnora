@@ -31,22 +31,10 @@
           <span>{{ $t('auth.workspaceOnboarding.inviteOnlyNotice') }}</span>
         </div>
 
-        <div class="workspace-actions" :class="{ 'workspace-actions--single': !authStore.canCreateTenant }">
-          <t-button v-if="authStore.canCreateTenant" theme="primary" size="large" @click="createVisible = true">
+        <div v-if="authStore.canCreateTenant" class="workspace-actions">
+          <t-button theme="primary" size="large" @click="createVisible = true">
             <template #icon><t-icon name="add" /></template>
             {{ $t('auth.workspaceOnboarding.create') }}
-          </t-button>
-          <t-button
-            :theme="authStore.canCreateTenant ? 'default' : 'primary'"
-            :variant="authStore.canCreateTenant ? 'outline' : 'base'"
-            size="large"
-            @click="invitationsVisible = true"
-          >
-            <template #icon><t-icon name="mail" /></template>
-            {{ $t('auth.workspaceOnboarding.invitations') }}
-            <template v-if="authStore.pendingInvitationCount > 0">
-              ({{ authStore.pendingInvitationCount }})
-            </template>
           </t-button>
         </div>
       </template>
@@ -63,7 +51,6 @@
     </section>
 
     <CreateTenantDialog v-model:visible="createVisible" @created="onTenantCreated" />
-    <MyInvitationsDialog v-model:visible="invitationsVisible" />
   </main>
 </template>
 
@@ -71,7 +58,6 @@
 import { onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
-import MyInvitationsDialog from '@/components/MyInvitationsDialog.vue'
 import { logout as logoutApi } from '@/api/auth'
 import type { TenantInfo } from '@/api/tenant'
 import { useAuthStore } from '@/stores/auth'
@@ -79,7 +65,6 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 const createVisible = ref(false)
-const invitationsVisible = ref(false)
 const policyLoading = ref(true)
 const policyLoadFailed = ref(false)
 
@@ -92,7 +77,6 @@ async function loadPolicy() {
       policyLoadFailed.value = true
       return
     }
-    await authStore.fetchPendingInvitationCount()
   } finally {
     policyLoading.value = false
   }
@@ -173,12 +157,8 @@ h1 {
 
 .workspace-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.workspace-actions--single {
   grid-template-columns: minmax(220px, 1fr);
+  gap: 12px;
 }
 
 .policy-loading,

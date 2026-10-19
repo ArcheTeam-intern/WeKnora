@@ -69,119 +69,6 @@
            侧，邀请按钮再往右一个图标位，所有「针对这张列表」的控
            件聚到同一行，独立 toolbar 不复存在。 -->
 
-      <!-- Pending invitations. Shown only to managers because the
-               viewer/contributor roles don't have an action surface
-               here. Even when empty we still render the header so
-               operators get a stable "is there anything pending?"
-               affordance after they hit "Send invitation". -->
-      <div v-if="canManage" class="pending-invitations-section">
-        <div class="pending-invitations-header">
-          <div class="pending-invitations-titlewrap">
-            <span class="pending-invitations-title">
-              {{ $t('tenantInvitation.pendingSectionTitle') }}
-            </span>
-            <!-- Same count-badge style as the «空间成员» list header
-                 so the two list titles read at parity. -->
-            <span class="members-list-count-badge">{{ invitationsTotal }}</span>
-          </div>
-          <span class="pending-invitations-desc">
-            {{ $t('tenantInvitation.pendingSectionDesc', { days: INVITATION_TTL_DAYS }) }}
-          </span>
-        </div>
-        <div v-if="invitationsLoading" class="loading-inline">
-          <t-loading size="small" />
-          <span>{{ $t('tenantMember.loading') }}</span>
-        </div>
-        <div v-else-if="invitationsError" class="error-inline">
-          <t-alert theme="error" :message="invitationsError">
-            <template #operation>
-              <t-button size="small" @click="loadInvitations">{{ $t('tenantMember.retry') }}</t-button>
-            </template>
-          </t-alert>
-        </div>
-        <div v-else-if="invitationsTotal === 0" class="pending-invitations-empty">
-          {{ $t('tenantInvitation.pendingEmpty') }}
-        </div>
-        <div v-else class="data-table-shell data-table-shell--with-footer pending-invitations-table">
-          <div class="data-table-shell__scroll">
-            <t-table row-key="id" :data="invitations" :columns="invitationColumns" size="medium" hover>
-              <template #invitee="{ row }">
-                <div class="member-cell">
-                  <template v-if="row.is_share_link">
-                    <span class="member-name share-link-title">
-                      <t-icon name="link" size="14px" />
-                      {{ $t('tenantInvitation.shareLink.cellTitle') }}
-                    </span>
-                    <span class="member-email">
-                      {{ (row.accepted_count ?? 0) > 0
-                        ? $t('tenantInvitation.shareLink.cellAccepted', { count: row.accepted_count })
-                        : $t('tenantInvitation.shareLink.cellEmpty') }}
-                    </span>
-                  </template>
-                  <template v-else>
-                    <span class="member-name">{{ inviteePrimary(row) }}</span>
-                    <span v-if="row.invitee_email && row.invitee_name" class="member-email">{{ row.invitee_email
-                      }}</span>
-                  </template>
-                </div>
-              </template>
-              <template #role="{ row }">
-                <t-tag :theme="roleTagTheme(row.role)" size="small">
-                  {{ $t('tenantMember.role.' + row.role) }}
-                </t-tag>
-              </template>
-              <template #inviter="{ row }">
-                <span>{{ inviterPrimary(row) }}</span>
-              </template>
-              <template #expires_at="{ row }">{{ formatDate(row.expires_at) }}</template>
-              <template #status="{ row }">
-                <t-tag :theme="invitationStatusTheme(row.status)" size="small">
-                  {{ row.is_share_link && row.status === 'pending'
-                    ? $t('tenantInvitation.status.shareLinkActive')
-                    : $t('tenantInvitation.status.' + row.status) }}
-                </t-tag>
-              </template>
-              <template #actions="{ row }">
-                <!-- Per-row "copy link" for active share-link rows.
-                     Icon-only with tooltip so two actions ("copy" +
-                     "revoke") fit inside the actions column without
-                     clipping; the full label was too wide. -->
-                <t-tooltip v-if="row.status === 'pending' && row.invite_url"
-                  :content="$t('tenantInvitation.copyLink')" placement="top">
-                  <t-button shape="square" variant="text" size="small"
-                    @click="copyText(absoluteInviteURL(row.invite_url))">
-                    <template #icon><t-icon name="copy" /></template>
-                  </t-button>
-                </t-tooltip>
-                <!-- Inline popconfirm anchored to the revoke button.
-                       Avoids spawning a top-level modal for a simple
-                       yes/no decision; the popover stays inside the
-                       table cell so the user keeps spatial context. -->
-                <t-popconfirm v-if="row.status === 'pending'" theme="warning"
-                  :content="row.is_share_link
-                    ? $t('tenantInvitation.shareLink.revokeConfirm')
-                    : $t('tenantInvitation.revoke.confirmBody', {
-                        email: row.invitee_email || row.invitee_user_id,
-                      })"
-                  :confirm-btn="{ content: $t('tenantInvitation.revoke.confirm'), theme: 'danger' }"
-                  :cancel-btn="$t('common.cancel')" placement="left" @confirm="doRevokeInvitation(row)">
-                  <t-tooltip :content="$t('tenantInvitation.revoke.button')" placement="top">
-                    <t-button theme="danger" shape="square" variant="text" size="small">
-                      <template #icon><t-icon name="close" /></template>
-                    </t-button>
-                  </t-tooltip>
-                </t-popconfirm>
-              </template>
-            </t-table>
-          </div>
-          <div v-if="invitationsTotal > 0" class="data-table-shell__pager">
-            <t-pagination v-model="invitationsPage" v-model:page-size="invitationsPageSize" :total="invitationsTotal"
-              size="small" show-jumper show-page-number show-page-size
-              :page-size-options="INVITATIONS_PAGE_SIZE_OPTIONS" @change="onInvitationsPageChange" />
-          </div>
-        </div>
-      </div>
-
       <!-- Member list. 列表头（标题 / 计数 / 搜索框 / 邀请按钮）始终
            渲染，loading / error / empty / 表格作为下方的内容状态切换。
            这样搜索时输入框不会被卸载，避免焦点丢失与页面抖动。 -->
@@ -205,15 +92,9 @@
               </t-button>
               <template #content>
                 <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      addDialogStep === 'form'
-                        ? $t('tenantMember.add.dialogTitle')
-                        : $t('tenantInvitation.confirmInviteTitle')
-                    }}
-                  </div>
-                  <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
-                    :label-width="80" class="member-invite-form">
+                  <div class="member-invite-popup-title">{{ $t('tenantMember.add.dialogTitle') }}</div>
+                  <t-form ref="addFormRef" :data="addForm" :rules="addFormRules" :label-width="80"
+                    class="member-invite-form">
                     <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
                       <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')"
                         clearable />
@@ -222,83 +103,12 @@
                       <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
                     </t-form-item>
                   </t-form>
-                  <div v-else class="invite-confirm-body">
-                    {{ $t('tenantInvitation.confirmInviteBody', {
-                      email: addConfirmEmail,
-                      role: addConfirmRoleLabel,
-                    }) }}
-                  </div>
                   <div class="invite-popup-footer">
-                    <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
-                      @click="invitePopupVisible = false">
+                    <t-button variant="outline" :disabled="adding" @click="invitePopupVisible = false">
                       {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" :disabled="adding" @click="goBackToForm">
-                      {{ $t('common.back') }}
                     </t-button>
                     <t-button theme="primary" :loading="adding" @click="submitAdd">
-                      {{ dialogConfirmLabel }}
-                    </t-button>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
-            <!-- Share-link generator. Sits next to the invite-by-email
-                 popup so the two flows live side-by-side: "I know who"
-                 (email input) vs "I don't" (one link, group chat). -->
-            <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
-              <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
-                :title="$t('tenantInvitation.shareLink.button')"
-                :aria-label="$t('tenantInvitation.shareLink.button')">
-                <template #icon><t-icon name="link" /></template>
-              </t-button>
-              <template #content>
-                <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      shareLinkResult
-                        ? $t('tenantInvitation.shareLink.resultTitle')
-                        : $t('tenantInvitation.shareLink.dialogTitle')
-                    }}
-                  </div>
-                  <div v-if="!shareLinkResult" class="member-invite-form">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
-                    </p>
-                    <t-form :data="shareLinkForm" :label-width="80">
-                      <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                        <t-select v-model="shareLinkForm.role" :options="roleOptions"
-                          :popup-props="roleSelectPopupProps" />
-                      </t-form-item>
-                    </t-form>
-                  </div>
-                  <div v-else class="share-link-result">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.resultBody') }}
-                    </p>
-                    <div class="share-link-row">
-                      <input class="share-link-row__input"
-                        :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
-                        readonly @click="($event.target as HTMLInputElement).select()" />
-                      <t-button size="small" theme="primary" variant="outline"
-                        @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
-                        <template #icon><t-icon name="copy" /></template>
-                        {{ $t('tenantInvitation.copyLink') }}
-                      </t-button>
-                    </div>
-                  </div>
-                  <div class="invite-popup-footer">
-                    <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
-                      @click="shareLinkPopupVisible = false">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
-                      {{ $t('common.close') }}
-                    </t-button>
-                    <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
-                      @click="submitShareLink">
-                      {{ $t('tenantInvitation.shareLink.generate') }}
+                      {{ $t('common.confirm') }}
                     </t-button>
                   </div>
                 </div>
@@ -517,24 +327,17 @@ import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import { copyWithToast } from '@/utils/clipboard'
 import { useAuthStore } from '@/stores/auth'
 import { AUDIT_ACTION_I18N_ROOTS } from '@/i18n/auditActionRegistry'
 import { auditActionLabel } from '@/i18n/auditActionLabel'
 import {
   listMembers,
+  addMember,
   updateMemberRole,
   removeMember,
   type TenantMember,
   type TenantRole,
 } from '@/api/tenant/members'
-import {
-  listTenantInvitations,
-  createInvitation,
-  createInviteLink,
-  revokeInvitation,
-  type TenantInvitation,
-} from '@/api/tenant/invitations'
 import { docsUrl } from '@/utils/docsUrl'
 import {
   listAuditLog,
@@ -561,18 +364,8 @@ const members = ref<TenantMember[]>([])
 const loading = ref(false)
 const error = ref('')
 const adding = ref(false)
-/** 邀请流程：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
+/** 添加成员入口：锚在列表头「+」按钮旁的弹出层（非居中模态）。 */
 const invitePopupVisible = ref(false)
-// share-link generator state (separate popup next to the email
-// invite). shareLinkResult is non-null after a successful create —
-// the popup then switches into "here's your link, copy it" mode.
-const shareLinkPopupVisible = ref(false)
-const shareLinkForm = reactive<{ role: TenantRole }>({ role: 'contributor' })
-const creatingShareLink = ref(false)
-const shareLinkResult = ref<TenantInvitation | null>(null)
-// Two-step invite inside the popup: 'form' renders the email/role inputs;
-// 'confirm' swaps the body for an in-place summary; primary CTA toggles label.
-const addDialogStep = ref<'form' | 'confirm'>('form')
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
 /** 已应用到服务端筛选的检索词（相对输入框防抖） */
@@ -583,30 +376,10 @@ const membersTotal = ref(0)
 const membersPage = ref(1)
 const membersPageSize = ref(20)
 
-const invitationsTotal = ref(0)
-const invitationsPage = ref(1)
-const invitationsPageSize = ref(20)
-
 /** 历次分页载荷里见过的成员展示字段，补齐审计表里不在当前页的 user id */
 const memberDisplayByUserId = reactive<Record<string, { username?: string; email?: string }>>({})
 
-// Pending invitations live alongside members but in a distinct section
-// at the top of the Members tab — they're "people we've asked to
-// join but haven't yet accepted", and conflating them with the
-// authoritative roster would mislead an Owner trying to see who
-// actually has access. The load happens on the same trigger as the
-// members fetch so the screen renders both at once.
-const invitations = ref<TenantInvitation[]>([])
-const invitationsLoading = ref(false)
-const invitationsError = ref('')
-// Invitation TTL is mirrored from the backend constant
-// (defaultInvitationTTL in tenant_invitation.go). Kept as a UI string
-// for the section description; the authoritative number comes from
-// the server's expires_at on each row.
-const INVITATION_TTL_DAYS = 7
-
 const MEMBERS_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
-const INVITATIONS_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 // Audit log moved out of t-tabs into a right-side drawer; this flag
 // controls its visibility. Default closed — most operators come here
@@ -858,121 +631,6 @@ watch(searchQuery, () => {
     loadMembers()
   }, 320)
 })
-
-// ---- Pending invitations ------------------------------------------------
-
-const invitationColumns = computed(() => [
-  { colKey: 'invitee', title: t('tenantInvitation.columns.invitee'), ellipsis: true, minWidth: 160 },
-  { colKey: 'role', title: t('tenantInvitation.columns.role'), width: 110 },
-  { colKey: 'inviter', title: t('tenantInvitation.columns.inviter'), ellipsis: true, minWidth: 140 },
-  { colKey: 'expires_at', title: t('tenantInvitation.columns.expiresAt'), width: 160 },
-  { colKey: 'status', title: t('tenantInvitation.columns.status'), width: 100 },
-  ...(canManage.value
-    ? [{ colKey: 'actions', title: t('tenantInvitation.columns.operations'), width: 120, align: 'left' as const }]
-    : []),
-])
-
-function invitationStatusTheme(s: TenantInvitation['status']): 'primary' | 'success' | 'warning' | 'danger' | 'default' {
-  switch (s) {
-    case 'pending':
-      return 'primary'
-    case 'accepted':
-      return 'success'
-    case 'declined':
-    case 'revoked':
-      return 'warning'
-    case 'expired':
-      return 'danger'
-    default:
-      return 'default'
-  }
-}
-
-function inviteePrimary(row: TenantInvitation): string {
-  return row.invitee_name?.trim() || row.invitee_email?.trim() || row.invitee_user_id
-}
-
-function inviterPrimary(row: TenantInvitation): string {
-  return row.inviter_name?.trim() || row.inviter_email?.trim() || row.invited_by || '—'
-}
-
-// loadInvitations is called from the same trigger as loadMembers so
-// the Members tab can render the pending section without an extra
-// round-trip latency budget. canManage gates the fetch — viewers /
-// contributors / admins-without-management see no pending section at
-// all (the route returns 200 but listing pending invites to those
-// roles would be UX noise; the route layer is Viewer+ for the read
-// itself).
-async function loadInvitations() {
-  if (!activeTenantId.value || !canManage.value) {
-    invitations.value = []
-    invitationsTotal.value = 0
-    return
-  }
-  invitationsLoading.value = true
-  invitationsError.value = ''
-  try {
-    const resp = await listTenantInvitations(activeTenantId.value, {
-      page: invitationsPage.value,
-      page_size: invitationsPageSize.value,
-    })
-    if (resp.success && resp.data) {
-      const total = resp.data.total ?? 0
-      const ps = resp.data.page_size ?? invitationsPageSize.value
-      const safePs = Math.max(1, ps)
-      const maxPage = Math.max(1, Math.ceil(total / safePs))
-      if (invitationsPage.value > maxPage) {
-        invitationsPage.value = maxPage
-        invitationsLoading.value = false
-        await loadInvitations()
-        return
-      }
-      invitations.value = resp.data.invitations ?? []
-      invitationsTotal.value = total
-      if (typeof resp.data.page === 'number' && resp.data.page > 0) {
-        invitationsPage.value = resp.data.page
-      }
-      if (typeof resp.data.page_size === 'number' && resp.data.page_size > 0) {
-        invitationsPageSize.value = resp.data.page_size
-      }
-    } else {
-      invitationsError.value = resp.message || t('tenantInvitation.errors.generic')
-    }
-  } catch (err: any) {
-    invitationsError.value = err?.message || t('tenantInvitation.errors.generic')
-  } finally {
-    invitationsLoading.value = false
-  }
-}
-
-function onInvitationsPageChange() {
-  void loadInvitations()
-}
-
-// doRevokeInvitation is wired to the t-popconfirm @confirm event in
-// the table template. The popconfirm itself owns the yes/no surface,
-// so this function is the post-confirmation action only — no nested
-// modal. Errors surface as toasts and the row stays in place for retry.
-async function doRevokeInvitation(row: TenantInvitation) {
-  try {
-    const resp = await revokeInvitation(activeTenantId.value, row.id)
-    if (resp.success) {
-      await loadInvitations()
-      MessagePlugin.success(t('tenantInvitation.revoke.success'))
-    } else {
-      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
-    }
-  } catch (err: any) {
-    const status = err?.status
-    if (status === 404) {
-      MessagePlugin.error(t('tenantInvitation.errors.notFound'))
-    } else if (status === 409) {
-      MessagePlugin.error(err?.message || t('tenantInvitation.errors.notPending'))
-    } else {
-      MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
-    }
-  }
-}
 
 // ---- Audit-log helpers --------------------------------------------------
 
@@ -1247,127 +905,33 @@ watch(invitePopupVisible, (open) => {
   if (!open) return
   addForm.email = ''
   addForm.role = 'contributor'
-  addDialogStep.value = 'form'
 })
 
-// Share-link popup: re-init on every open so the operator never sees
-// the previous result on a fresh click.
-watch(shareLinkPopupVisible, (open) => {
-  if (!open) return
-  shareLinkForm.role = 'contributor'
-  shareLinkResult.value = null
-})
-
-// absoluteInviteURL turns the backend's potentially-host-relative
-// invite_url into a copy-friendly absolute URL. The backend returns
-// "/register?token=…" when FRONTEND_BASE_URL is unset (the typical
-// case); the SPA is best-positioned to know its own origin.
-function absoluteInviteURL(raw: string): string {
-  if (!raw) return ''
-  if (/^https?:\/\//i.test(raw)) return raw
-  const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || ''
-  return raw.startsWith('/') ? origin + raw : origin + '/' + raw
-}
-
-async function copyText(text: string) {
-  await copyWithToast(text, 'tenantInvitation.copied', 'tenantInvitation.copyFailed')
-}
-
-async function submitShareLink() {
-  creatingShareLink.value = true
-  try {
-    const resp = await createInviteLink(activeTenantId.value, { role: shareLinkForm.role })
-    if (!resp.success || !resp.data) {
-      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
-      return
-    }
-    shareLinkResult.value = resp.data
-    invitationsPage.value = 1
-    await loadInvitations()
-  } catch (err: any) {
-    MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
-  } finally {
-    creatingShareLink.value = false
-  }
-}
-
-// Live display strings for the in-place confirm step. Recomputed
-// every time the user goes Back, tweaks the form, and re-advances —
-// the summary always mirrors the current form state.
-const addConfirmEmail = computed(() => addForm.email.trim())
-const addConfirmRoleLabel = computed(() => t('tenantMember.role.' + addForm.role))
-
-// submitAdd is wired to the popup footer primary CTA. On step='form' it
-// validates and swaps to summary; on step='confirm' it fires the API.
-// With auto-accept the action is a direct add, so we skip the invitation
-// confirm step entirely and fire the API right after validation.
+// submitAdd validates the form and adds an existing account to the
+// tenant via POST /tenants/:id/members.
 async function submitAdd() {
-  if (addDialogStep.value === 'form') {
-    const valid = await addFormRef.value?.validate?.()
-    if (valid !== true) return
-    if (authStore.autoAcceptInvitation) {
-      await sendInvitation(addForm.email.trim(), addForm.role)
-      return
-    }
-    addDialogStep.value = 'confirm'
-    return
-  }
-  await sendInvitation(addForm.email.trim(), addForm.role)
-}
-
-// goBackToForm un-advances from confirm to form inside the popup.
-function goBackToForm() {
-  addDialogStep.value = 'form'
-}
-
-// dialogConfirmLabel: "Send" on the confirm step, or when auto-accept makes
-// the form step a direct add; otherwise "Send invitation".
-const dialogConfirmLabel = computed(() =>
-  addDialogStep.value === 'confirm' || authStore.autoAcceptInvitation
-    ? t('tenantInvitation.confirmSend')
-    : t('tenantInvitation.inviteSubmit'),
-)
-
-// sendInvitation actually fires the create-invitation API call.
-async function sendInvitation(email: string, role: TenantRole) {
+  const valid = await addFormRef.value?.validate?.()
+  if (valid !== true) return
   adding.value = true
   try {
-    const resp = await createInvitation(activeTenantId.value, { email, role })
+    const resp = await addMember(activeTenantId.value, {
+      email: addForm.email.trim(),
+      role: addForm.role,
+    })
     if (resp.success) {
-      // auto-accept returns a member (user_id) instead of an invitation (id)
-      const autoJoined = !!resp.data && 'user_id' in resp.data
       invitePopupVisible.value = false
-      if (autoJoined) {
-        // The invitee is already a member — refresh the roster so they
-        // appear immediately. No toast: the new row is the feedback.
-        await loadMembers()
-      } else {
-        invitationsPage.value = 1
-        await loadInvitations()
-        MessagePlugin.success(t('tenantInvitation.inviteSuccess'))
-      }
+      await loadMembers()
     } else {
-      MessagePlugin.error(resp.message || t('tenantInvitation.errors.generic'))
+      MessagePlugin.error(resp.message || t('tenantMember.errors.generic'))
     }
   } catch (err: any) {
     const status = err?.status
     if (status === 404) {
       MessagePlugin.error(t('tenantMember.errors.userNotFound'))
     } else if (status === 409) {
-      // Server returns the same 409 for both "already a member" and
-      // "already a pending invite". The message body discriminates,
-      // but for the toast we show both possibilities folded into one
-      // helpful line.
-      MessagePlugin.error(
-        err?.message ||
-        `${t('tenantInvitation.errors.alreadyMember')} / ${t(
-          'tenantInvitation.errors.pendingExists',
-        )}`,
-      )
-    } else if (status === 400) {
-      MessagePlugin.error(err?.message || t('tenantMember.errors.invalidRole'))
+      MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
     } else {
-      MessagePlugin.error(err?.message || t('tenantInvitation.errors.generic'))
+      MessagePlugin.error(err?.message || t('tenantMember.errors.generic'))
     }
   } finally {
     adding.value = false
@@ -1453,13 +1017,9 @@ watch(
       memberSearchQ.value = ''
       window.clearTimeout(memberSearchDebounceTimer)
       membersPage.value = 1
-      invitationsPage.value = 1
       membersPageSize.value = 20
-      invitationsPageSize.value = 20
       membersTotal.value = 0
-      invitationsTotal.value = 0
       loadMembers()
-      loadInvitations()
     }
   },
   { immediate: true },
