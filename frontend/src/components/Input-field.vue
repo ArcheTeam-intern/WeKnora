@@ -54,7 +54,6 @@ import {
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
 import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
-import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
 const route = useRoute();
@@ -873,18 +872,11 @@ const browserSourceUnavailableHint = computed(() => {
   return 'localBrowser.settingsHint';
 });
 
-const openBrowserConnectionSettings = () => {
-  void router.push(toolboxLocation('browserconnection'));
-};
-
 const toggleBrowserSource = () => {
   showMention.value = false;
   showModelSelector.value = false;
   showAgentModeSelector.value = false;
-  if (browserConnection.knownOffline) {
-    openBrowserConnectionSettings();
-    return;
-  }
+  if (browserConnection.knownOffline) return;
   settingsStore.toggleLocalBrowser(!settingsStore.isLocalBrowserEnabled);
 };
 
@@ -2459,19 +2451,10 @@ const onDragOver = (e: DragEvent) => {
   e.preventDefault();
 };
 
-const handleGoToWebSearchSettings = () => {
-  uiStore.openSettings('websearch');
-  if (route.path !== '/platform/settings') {
-    router.push('/platform/settings');
-  }
-};
-
 const handleGoToWebSearchConfig = () => {
   if (hasAgentConfig.value && selectedAgent.value) {
     handleGoToAgentSettings('websearch');
-    return;
   }
-  handleGoToWebSearchSettings();
 };
 
 const handleGoToAgentSettings = (section?: string) => {
@@ -2790,7 +2773,6 @@ defineExpose({
               </div>
               <div v-else class="tooltip-with-link">
                 <span>{{ $t(browserSourceUnavailableHint) }}</span>
-                <a href="#" @click.prevent="openBrowserConnectionSettings">{{ $t('localBrowser.openSettings') }}</a>
               </div>
             </template>
             <button type="button" class="control-btn browser-source-btn"

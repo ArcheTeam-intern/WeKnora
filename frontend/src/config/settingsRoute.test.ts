@@ -51,8 +51,7 @@ test('legacy api / integrations / bare-tab query strings normalize to nav keys',
   // 'mcp' is the MCP-client settings page, not the MCP server integration tab.
   assert.equal(normalizeSettingsSection('mcp'), 'mcp')
   assert.equal(normalizeSettingsSection('integrations', 'cli'), 'integration-cli')
-  assert.equal(normalizeSettingsSection('integrations', 'embed'), 'integration-embed')
-  assert.equal(normalizeSettingsSection('integrations'), 'integration-im')
+  assert.equal(normalizeSettingsSection('integrations'), 'integration-api')
   assert.equal(normalizeSettingsSection('integration-chrome'), 'integration-chrome')
   assert.equal(normalizeSettingsSection('system-global'), 'system-global')
   assert.equal(isIntegrationSection('integration-chrome'), true)

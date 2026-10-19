@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -170,7 +170,8 @@ const embedKeysByLocale = Object.fromEntries(
 
 const embedStaticKeys = new Set<string>()
 const EMBED_STATIC_RE = /(?:\$t|(?<![.\w])t)\(\s*['"]([^'"]+)['"]/g
-for (const file of walk(join(SOURCE_ROOT, 'views/embed'))) {
+const embedViewsDir = join(SOURCE_ROOT, 'views/embed')
+for (const file of existsSync(embedViewsDir) ? walk(embedViewsDir) : []) {
   const content = readFileSync(file, 'utf8')
   let match: RegExpExecArray | null
   EMBED_STATIC_RE.lastIndex = 0

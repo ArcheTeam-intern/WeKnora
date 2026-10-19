@@ -40,7 +40,7 @@ test('settings sidebar includes every registered integration, including CLI, in 
 })
 
 test('settings sidebar preserves visibility filtering without hiding CLI', () => {
-  const visible = integrationKeys.filter((key) => key !== 'integration-api' && key !== 'integration-im')
+  const visible = integrationKeys.filter((key) => key !== 'integration-api')
   assert.deepEqual(integrationMenu(visible), visible)
   assert.deepEqual(integrationMenu(['general']), [])
 })

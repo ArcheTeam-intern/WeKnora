@@ -39,27 +39,6 @@
             </div>
           </div>
 
-          <!-- 集成渠道状态（编辑模式，配置在集成中心） -->
-          <div v-if="editorMode === 'edit' && editorAgent?.id" class="setting-row">
-            <div class="setting-info">
-              <label>{{ $t('integrations.agentEditor.label') }}</label>
-              <p class="desc">{{ isPostCreateSession ? $t('agent.editor.postCreateHint.integrationDesc') : $t('integrations.agentEditor.desc') }}</p>
-            </div>
-            <div class="setting-control">
-              <div class="integration-inline">
-                <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('im')">
-                  <span>{{ $t('integrations.tabs.im') }} · {{ agentIMChannelCount }}</span>
-                  <t-icon name="chevron-right" size="14px" />
-                </button>
-                <span class="integration-inline__sep" aria-hidden="true">|</span>
-                <button type="button" class="integration-inline__stat integration-inline__link" @click="gotoIntegrations('embed')">
-                  <span>{{ $t('integrations.tabs.embed') }} · {{ agentEmbedChannelCount }}</span>
-                  <t-icon name="chevron-right" size="14px" />
-                </button>
-              </div>
-            </div>
-          </div>
-
           <!-- 运行模式（首先选择） -->
           <div class="setting-row">
             <div class="setting-info">
@@ -1299,22 +1278,6 @@
                 </t-option>
               </t-select>
               <p v-if="selectedSandboxSummary" class="sandbox-selected-meta">{{ selectedSandboxSummary }}</p>
-              <div class="sandbox-select-links">
-                <a href="javascript:void(0)" class="go-settings-link"
-                  @click.prevent="uiStore.openSettings('sandbox')">
-                  {{ $t('agent.editor.goSandboxSettings') }}
-                </a>
-                <template v-if="hasSandboxSelected && canInstallSkills">
-                  <span class="sandbox-select-links__sep" aria-hidden="true">·</span>
-                  <a
-                    href="javascript:void(0)"
-                    class="go-settings-link"
-                    @click.prevent="openSkillSettings"
-                  >
-                    {{ $t('agent.editor.goSkillSettings') }}
-                  </a>
-                </template>
-              </div>
               <p v-if="sandboxConfigOptions.length === 0" class="desc empty-hint">
                 {{ $t('agent.editor.sandboxNoConfigs') }}
               </p>
@@ -1337,14 +1300,6 @@
               </p>
               <p v-else-if="hasSandboxSelected && skillCatalog.length === 0" class="desc empty-hint">
                 <span>{{ $t('agent.editor.noSkillsAvailable') }}</span>
-                <a
-                  v-if="canInstallSkills"
-                  href="javascript:void(0)"
-                  class="go-settings-link"
-                  @click.prevent="openSkillSettings"
-                >
-                  {{ $t('agent.editor.goSkillSettings') }}
-                </a>
               </p>
             </div>
           </div>
@@ -1843,7 +1798,6 @@ import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import {
   createAgent,
   updateAgent,
-  listIMChannels,
   type CustomAgent,
   type PlaceholderDefinition,
   type AgentTypePreset,
@@ -1879,10 +1833,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue';
 import KBParserSettings, { type ParserEngineRule } from '@/views/knowledge/settings/KBParserSettings.vue';
 import AgentShareSettings from '@/components/AgentShareSettings.vue';
 import { SKILL_ICON } from '@/types/mention';
-import { listEmbedChannels } from '@/api/embed';
 import { getRootZoom, rectToCssPx } from '@/utils/zoom';
-import { integrationSectionKey } from '@/config/settingsRoute';
-import { toolboxLocation } from '@/config/toolbox';
 import {
   evaluateToolRequirement,
   deriveKbFilterFromTools,
@@ -2242,13 +2193,6 @@ function autoBindSoleSandbox() {
   }
 }
 
-function openSkillSettings() {
-  const configId = skillTargetId.value
-  modalShell.requestClose(() => {
-    void router.push(toolboxLocation('skills', configId || undefined))
-  })
-}
-
 const showSkillProgress = ref(false)
 const skillProgressRecord = ref<SandboxConfigRecord | null>(null)
 const skillProgressId = ref('')
@@ -2271,20 +2215,14 @@ function installOnCurrentSandbox(skill: CatalogSkillRow, configId: string) {
 async function openSkillInstallProgress(skill: CatalogSkillRow) {
   const configId = skillTargetId.value
   const record = sandboxRecordById(configId)
-  if (!record) {
-    openSkillSettings()
-    return
-  }
+  if (!record) return
   let inst = installOnCurrentSandbox(skill, configId)
   if (!inst?.skill_id) {
     await syncInstalledSkills(true)
     const latest = catalogSkillRows.value.find((row) => row.id === skill.id)
     inst = latest ? installOnCurrentSandbox(latest, configId) : undefined
   }
-  if (!inst?.skill_id) {
-    openSkillSettings()
-    return
-  }
+  if (!inst?.skill_id) return
   skillProgressRecord.value = record
   skillProgressId.value = inst.skill_id
   skillProgressTitle.value = skill.name
@@ -3079,30 +3017,6 @@ watch(currentSection, (section) => {
   }
 });
 
-const agentIMChannelCount = ref(0);
-const agentEmbedChannelCount = ref(0);
-
-async function loadAgentIntegrationCounts(agentId: string) {
-  try {
-    const [imResp, embedResp] = await Promise.all([
-      listIMChannels(agentId),
-      listEmbedChannels(agentId),
-    ]);
-    agentIMChannelCount.value = imResp?.data?.length ?? 0;
-    agentEmbedChannelCount.value = embedResp?.data?.length ?? 0;
-  } catch {
-    agentIMChannelCount.value = 0;
-    agentEmbedChannelCount.value = 0;
-  }
-}
-
-function gotoIntegrations(tab: 'im' | 'embed') {
-  const agentId = editorAgent.value?.id;
-  if (!agentId) return;
-  handleClose();
-  router.push({ path: '/platform/settings', query: { section: integrationSectionKey(tab), agentId } });
-}
-
 const filteredIntentPlaceholders = computed(() => {
   if (!intentPromptPopup.value.prefix) {
     return placeholderData.value.system_prompt;
@@ -3594,7 +3508,6 @@ watch(() => props.visible, async (val) => {
       });
       // Display inherited defaults for all agents without persisting a copy.
       fillBuiltinAgentDefaults();
-      void loadAgentIntegrationCounts(agentData.id);
     } else {
       // 创建新智能体，使用系统默认值
       const newFormData = JSON.parse(JSON.stringify(defaultFormData));
@@ -3684,8 +3597,6 @@ watch(() => props.visible, async (val) => {
   } else {
     editorInitializing.value = false;
     clearFieldHighlight();
-    agentIMChannelCount.value = 0;
-    agentEmbedChannelCount.value = 0;
     showSkillProgress.value = false;
     skillProgressRecord.value = null;
     skillProgressId.value = '';
@@ -4972,7 +4883,6 @@ const handleSave = async () => {
       modalShell.markClean();
       markContextualGuideDone('agentCreate')
       currentSection.value = 'basic';
-      void loadAgentIntegrationCounts(created.id);
       MessagePlugin.success(t('agent.messages.created'));
       emit('success', created);
     } else {

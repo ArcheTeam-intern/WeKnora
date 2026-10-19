@@ -44,19 +44,6 @@
                 </transition>
             </div>
             <div class="create-chat-composer">
-                <div v-if="hostSandboxEnabled" class="project-dir-bar">
-                    <button type="button" class="project-dir-bar__btn"
-                        :class="{ 'is-bound': !!selectedProjectDir, 'is-picking': pickingProjectDir }"
-                        :disabled="pickingProjectDir" :title="selectedProjectDir || $t('createChat.openProject')"
-                        @click="openProjectDir">
-                        <t-icon :name="pickingProjectDir ? 'loading' : 'folder'" />
-                        <span class="project-dir-bar__name">{{
-                            selectedProjectDir ? projectDirBasename(selectedProjectDir) : $t('createChat.openProject')
-                        }}</span>
-                    </button>
-                    <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
-                        :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
-                </div>
                 <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
             </div>
         </div>
@@ -74,15 +61,12 @@ import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
-import { pickHostProjectDir } from '@/utils/desktopProjectDir';
-import { projectDirBasename, shouldRenderHostProjectSettings, withOptionalProjectDir } from '@/utils/hostWorkspace';
 import { getSuggestedQuestions } from "@/api/agent/index";
 import type { SuggestedQuestion } from "@/api/agent/index";
 import { questionOriginFromSuggestion, type SendMessageOptions } from '@/utils/questionOrigin';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
-import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
 import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
@@ -101,15 +85,8 @@ onBeforeRouteLeave((to) => {
     }
 });
 const uiStore = useUIStore();
-const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const { t } = useI18n();
 const { navigateToKnowledgeBaseList } = useKnowledgeBaseCreationNavigation();
-
-const hostSandboxEnabled = computed(() =>
-    shouldRenderHostProjectSettings(deploymentCapabilities.isSupported('settings.sandbox.host')),
-);
-const selectedProjectDir = ref('');
-const pickingProjectDir = ref(false);
 
 const showChatContextualGuide = computed(() => {
     return route.name === 'globalCreatChat' || route.name === 'kbCreatChat';
@@ -244,7 +221,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     };
 
     try {
-        const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
+        const res = await createSessions(sessionData);
         if (res.data && res.data.id) {
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
@@ -278,23 +255,6 @@ const handleKBEditorSuccess = (kbId: string) => {
     navigateToKnowledgeBaseList(kbId)
 }
 
-function clearProjectDir() {
-    selectedProjectDir.value = '';
-}
-
-async function openProjectDir() {
-    if (pickingProjectDir.value) return;
-    pickingProjectDir.value = true;
-    try {
-        const picked = await pickHostProjectDir();
-        if (picked) selectedProjectDir.value = picked;
-    } catch (e: any) {
-        MessagePlugin.error(e?.message || t('createChat.pickFailed'));
-    } finally {
-        pickingProjectDir.value = false;
-    }
-}
-
 </script>
 <style lang="less" scoped>
 .dialogue-wrap {
@@ -325,59 +285,6 @@ async function openProjectDir() {
     align-items: stretch;
     gap: 8px;
     width: 100%;
-}
-
-.project-dir-bar {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    max-width: 960px;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-.project-dir-bar__btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 100%;
-    height: 28px;
-    padding: 0 10px;
-    border: 0.5px solid var(--td-component-border);
-    border-radius: var(--app-radius-md);
-    background: var(--td-bg-color-container);
-    color: var(--td-text-color-secondary);
-    font-size: var(--app-text-sm);
-    cursor: pointer;
-}
-
-.project-dir-bar__btn.is-bound {
-    color: var(--td-text-color-primary);
-}
-
-.project-dir-bar__btn.is-picking,
-.project-dir-bar__btn:disabled {
-    cursor: default;
-    opacity: 0.75;
-}
-
-.project-dir-bar__name {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.project-dir-bar__clear {
-    flex: 0 0 auto;
-    border: none;
-    background: transparent;
-    padding: 0 4px;
-    color: var(--td-text-color-placeholder);
-    font-size: var(--app-text-base);
-    line-height: 1;
-    cursor: pointer;
 }
 
 .dialogue-title {

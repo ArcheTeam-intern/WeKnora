@@ -16,7 +16,7 @@ export function integrationTabFromSection(section: string): IntegrationTab {
   if (INTEGRATION_TABS.includes(raw as IntegrationTab)) {
     return raw as IntegrationTab
   }
-  return 'im'
+  return 'api'
 }
 
 export function isIntegrationSection(section: string): boolean {
@@ -36,7 +36,7 @@ function isBareIntegrationTab(section: string): section is IntegrationTab {
  */
 export function normalizeSettingsSection(section: string, tab?: string | null): string {
   if (section === 'integrations') {
-    return integrationSectionKey(integrationTabFromSection(tab || 'im'))
+    return integrationSectionKey(integrationTabFromSection(tab || 'api'))
   }
   if (isBareIntegrationTab(section)) {
     return integrationSectionKey(section)

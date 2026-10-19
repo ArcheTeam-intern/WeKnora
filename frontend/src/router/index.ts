@@ -8,7 +8,6 @@ import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
-import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -118,12 +117,6 @@ const router = createRouter({
           name: "artifactLibrary",
           component: () => import("../views/artifacts/ArtifactLibrary.vue"),
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'settings.sandbox' }
-        },
-        {
-          path: "toolbox/:section?",
-          name: "toolbox",
-          component: () => import("../views/toolbox/Toolbox.vue"),
-          meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "agents",
@@ -262,13 +255,6 @@ let liteDeepLinkRestoreDone = false
 // 路由守卫：检查认证状态和系统初始化状态
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
-
-  // Preserve bookmarks for tools that have moved out of Settings.
-  if (to.path === '/platform/settings' && isToolboxSection(to.query.section)) {
-    next({ ...toolboxLocation(to.query.section,
-      typeof to.query.sandboxId === 'string' ? to.query.sandboxId : undefined), replace: true })
-    return
-  }
 
   // Lite：硬刷新后若落在默认首页，恢复本次会话中最后访问的 /platform 子路径
   if (!liteDeepLinkRestoreDone) {
