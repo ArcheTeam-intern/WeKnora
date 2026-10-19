@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
-	"encoding/json"
 	stderrors "errors"
 	"fmt"
 	"net/http"
@@ -29,13 +28,8 @@ var liteSetupToken string
 // Web deployments leave it empty and cannot issue anonymous administrator tokens.
 func SetLiteSetupToken(token string) { liteSetupToken = token }
 
-const (
-	oidcNonceCookieName   = "weknora_oidc_nonce"
-	oidcNonceCookieMaxAge = 600
-)
-
 // AuthHandler implements HTTP request handlers for user authentication
-// Provides functionality for user registration, login, logout, and token management
+// Provides functionality for user login, logout, and token management
 // through the REST API endpoints
 type AuthHandler struct {
 	userService      interfaces.UserService
@@ -60,10 +54,9 @@ func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService,
 	systemSettingSvc interfaces.SystemSettingService,
 ) *AuthHandler {
-	// Boot-time guard: a nil-or-empty Auth section silently disables the
-	// invite_only gate (see Register below). Emit a loud one-shot log
-	// pointing at the misconfiguration so operators notice on startup
-	// instead of discovering it the day someone hits /auth/register.
+	// Boot-time guard: a nil-or-empty Auth section would silently disable
+	// the auth defaults. Emit a loud one-shot log pointing at the
+	// misconfiguration so operators notice on startup.
 	if configInfo == nil || configInfo.Auth == nil {
 		logger.Errorf(context.Background(),
 			"[auth] AuthHandler constructed with nil/incomplete config (cfg=%v); "+
@@ -82,8 +75,7 @@ func NewAuthHandler(configInfo *config.Config,
 // Priority: DB system_settings > cfg (which already absorbed the legacy
 // DISABLE_REGISTRATION env coerce at startup) > "self_serve" hard default.
 //
-// Centralised here so /auth/register and /auth/config stay in lock-step —
-// otherwise a SystemAdmin's UI edit could affect one path and not the other.
+// Kept centralised so future auth surfaces resolve the same value.
 func (h *AuthHandler) resolveRegistrationMode(ctx context.Context) string {
 	// cfg-derived default: empty is impossible after applyAuthAndTenantDefaults,
 	// but be defensive in case AuthHandler was constructed before that ran
@@ -138,12 +130,6 @@ func resolveDefaultTenantMode(
 	return types.TenantProvisioningCreatePersonal
 }
 
-// resolveDefaultTenantMode returns the provisioning policy for ordinary
-// public password registrations.
-func (h *AuthHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
-	return resolveDefaultTenantMode(ctx, h.configInfo, h.systemSettingSvc)
-}
-
 // resolveDefaultTenantMode resolves the same policy for users provisioned
 // by a SystemAdmin via POST /api/v1/system/admin/users/create.
 func (h *SystemHandler) resolveDefaultTenantMode(ctx context.Context) types.TenantProvisioningMode {
@@ -156,87 +142,6 @@ func (h *AuthHandler) complexPasswordEnabled(ctx context.Context) bool {
 
 func (h *SystemHandler) complexPasswordEnabled(ctx context.Context) bool {
 	return service.ResolveComplexPasswordEnabled(ctx, h.cfg, h.systemSettingSvc)
-}
-
-// Register godoc
-// @Summary      用户注册
-// @Description  注册新用户账号
-// @Tags         认证
-// @Accept       json
-// @Produce      json
-// @Param        request  body      types.RegisterRequest  true  "注册请求参数"
-// @Success      201      {object}  types.RegisterResponse
-// @Failure      400      {object}  errors.AppError  "请求参数错误"
-// @Failure      403      {object}  errors.AppError  "注册功能已禁用"
-// @Router       /auth/register [post]
-func (h *AuthHandler) Register(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	logger.Info(ctx, "Start user registration")
-
-	// Only self_serve permits registration without an invitation. Resolve
-	// each request so system-settings changes take effect immediately.
-	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
-		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
-		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
-		return
-	}
-
-	var req types.RegisterRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		logger.Error(ctx, "Failed to parse registration request parameters", err)
-		appErr := errors.NewValidationError("Invalid registration parameters").WithDetails(err.Error())
-		c.Error(appErr)
-		return
-	}
-	req.Username = secutils.SanitizeForLog(req.Username)
-	req.Email = secutils.SanitizeForLog(req.Email)
-	// Password is intentionally NOT sanitized: SanitizeForLog replaces
-	// \n, \r, \t and strips other control characters so a string is safe
-	// to write into a log line. Applying it to a real password would
-	// silently rewrite the credential before hashing, so registration
-	// would succeed but login with the original password would fail.
-	// Passwords must never be logged, so they don't need that defence.
-
-	// Validate required fields
-	if req.Username == "" || req.Email == "" || req.Password == "" {
-		logger.Error(ctx, "Missing required registration fields")
-		appErr := errors.NewValidationError("Username, email and password are required")
-		c.Error(appErr)
-		return
-	}
-
-	// Validate password against the runtime policy (DB system_settings
-	// first). Register itself does not enforce this because OIDC
-	// auto-provision uses an untyped random secret the user never types.
-	if err := service.ValidatePasswordPolicy(req.Password, h.complexPasswordEnabled(ctx)); err != nil {
-		logger.Error(ctx, "Invalid password policy")
-		appErr := errors.NewValidationError(err.Error())
-		_ = c.Error(appErr)
-		return
-	}
-
-	req.Username = secutils.SanitizeForLog(req.Username)
-	req.Email = secutils.SanitizeForLog(req.Email)
-	req.TenantProvisioning = h.resolveDefaultTenantMode(ctx)
-	// Call service to register user
-	user, err := h.userService.Register(ctx, &req)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to register user: %v", err)
-		appErr := errors.NewBadRequestError(err.Error())
-		c.Error(appErr)
-		return
-	}
-
-	// Return success response
-	response := &types.RegisterResponse{
-		Success: true,
-		Message: "Registration successful",
-		User:    user,
-	}
-
-	logger.Infof(ctx, "User registered successfully: %s", secutils.SanitizeForLog(user.Email))
-	c.JSON(http.StatusCreated, response)
 }
 
 // Login godoc
@@ -291,214 +196,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
 	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response))
-}
-
-// GetOIDCAuthorizationURL godoc
-// @Summary      获取OIDC授权地址
-// @Description  根据后端OIDC配置生成第三方登录跳转地址
-// @Tags         认证
-// @Accept       json
-// @Produce      json
-// @Param        redirect_uri  query     string  true  "OIDC回调地址"
-// @Success      200           {object}  types.OIDCAuthURLResponse
-// @Failure      400           {object}  errors.AppError  "请求参数错误"
-// @Failure      403           {object}  errors.AppError  "OIDC未启用"
-// @Router       /auth/oidc/url [get]
-func (h *AuthHandler) GetOIDCAuthorizationURL(c *gin.Context) {
-	ctx := c.Request.Context()
-	redirectURI := strings.TrimSpace(c.Query("redirect_uri"))
-	if redirectURI == "" {
-		appErr := errors.NewValidationError("redirect_uri is required")
-		c.Error(appErr)
-		return
-	}
-
-	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, redirectURI)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
-		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
-		c.Error(appErr)
-		return
-	}
-
-	// Bind the state nonce to this browser so an attacker cannot replay
-	// their own authorization code into a victim's callback.
-	setOIDCNonceCookie(c, resp.Nonce)
-
-	c.JSON(http.StatusOK, resp)
-}
-
-// setOIDCNonceCookie binds the OIDC state nonce to this browser so an
-// attacker cannot replay their own authorization code into a victim's
-// callback. Shared by /auth/oidc/url (JSON) and /auth/oidc/start (302).
-func setOIDCNonceCookie(c *gin.Context, nonce string) {
-	if nonce == "" {
-		return
-	}
-	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(oidcNonceCookieName, nonce, oidcNonceCookieMaxAge, "/", "", secure, true)
-}
-
-// oidcCallbackURL derives the absolute /auth/oidc/callback URL from the
-// request's own origin (scheme + host), so external platforms can deep-link
-// to /auth/oidc/start without supplying a redirect_uri.
-func oidcCallbackURL(c *gin.Context) string {
-	scheme := "http"
-	if c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https") {
-		scheme = "https"
-	}
-	return scheme + "://" + c.Request.Host + "/api/v1/auth/oidc/callback"
-}
-
-// OIDCStart godoc
-// @Summary      发起 OIDC 登录（直接 302）
-// @Description  与 /auth/oidc/url 不同，此端点直接 302 重定向到 OIDC Provider 的授权页，
-// @Description  无需前端 JS 介入。适用于外部平台（如企业门户）直接给出一个链接即可
-// @Description  触发 OIDC 授权码流程，借助 IdP 的 SSO session 实现免再次输密码。
-// @Tags         认证
-// @Success      302
-// @Router       /auth/oidc/start [get]
-func (h *AuthHandler) OIDCStart(c *gin.Context) {
-	ctx := c.Request.Context()
-	resp, err := h.userService.GetOIDCAuthorizationURL(ctx, oidcCallbackURL(c))
-	if err != nil {
-		logger.Errorf(ctx, "Failed to generate OIDC authorization URL: %v", err)
-		appErr := errors.NewForbiddenError("OIDC authorization unavailable").WithDetails(err.Error())
-		c.Error(appErr)
-		return
-	}
-	setOIDCNonceCookie(c, resp.Nonce)
-	c.Redirect(http.StatusFound, resp.AuthorizationURL)
-}
-
-// GetOIDCConfig godoc
-// @Summary      获取OIDC登录配置
-// @Description  返回OIDC是否启用以及provider展示名称，供前端决定是否展示OIDC登录入口
-// @Tags         认证
-// @Accept       json
-// @Produce      json
-// @Success      200  {object}  types.OIDCConfigResponse
-// @Router       /auth/oidc/config [get]
-func (h *AuthHandler) GetOIDCConfig(c *gin.Context) {
-	providerDisplayName := ""
-	enabled := false
-
-	if h.configInfo != nil && h.configInfo.OIDCAuth != nil {
-		enabled = h.configInfo.OIDCAuth.Enable
-		providerDisplayName = strings.TrimSpace(h.configInfo.OIDCAuth.ProviderDisplayName)
-	}
-
-	c.JSON(http.StatusOK, &types.OIDCConfigResponse{
-		Success:             true,
-		Enabled:             enabled,
-		ProviderDisplayName: providerDisplayName,
-	})
-}
-
-// OIDCRedirectCallback godoc
-// @Summary      OIDC登录重定向回调
-// @Description  接收OIDC provider回调并由后端完成code交换，随后重定向回前端登录页
-// @Tags         认证
-// @Accept       json
-// @Produce      json
-// @Param        code   query string false "OIDC授权码"
-// @Param        state  query string false "OIDC状态"
-// @Param        error  query string false "OIDC错误码"
-// @Success      302
-// @Router       /auth/oidc/callback [get]
-func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
-	ctx := c.Request.Context()
-	frontendRedirectURI := "/"
-
-	if providerError := strings.TrimSpace(c.Query("error")); providerError != "" {
-		redirectURL := frontendRedirectURI + "#oidc_error=" + urlQueryEscape(providerError)
-		if description := strings.TrimSpace(c.Query("error_description")); description != "" {
-			redirectURL += "&oidc_error_description=" + urlQueryEscape(description)
-		}
-		c.Redirect(http.StatusFound, redirectURL)
-		return
-	}
-
-	state := strings.TrimSpace(c.Query("state"))
-	decodedState, err := decodeOIDCState(state, c.Request)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to decode OIDC state: %v", err)
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("invalid_state"))
-		return
-	}
-	// One-time use: clear the binding cookie as soon as it is checked.
-	c.SetCookie(oidcNonceCookieName, "", -1, "/", "", false, true)
-
-	code := strings.TrimSpace(c.Query("code"))
-	if code == "" {
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("missing_code"))
-		return
-	}
-
-	resp, err := h.userService.LoginWithOIDC(ctx, code, strings.TrimSpace(decodedState.RedirectURI), h.resolveDefaultTenantMode(ctx))
-	if err != nil {
-		logger.Errorf(ctx, "Failed to complete OIDC login via redirect callback: %v", err)
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("login_failed")+"&oidc_error_description="+urlQueryEscape(err.Error()))
-		return
-	}
-	if !resp.Success {
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("login_failed")+"&oidc_error_description="+urlQueryEscape(resp.Message))
-		return
-	}
-
-	payload, err := encodeOIDCCallbackPayload(resp)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to encode OIDC callback payload: %v", err)
-		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("payload_encode_failed"))
-		return
-	}
-
-	c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_result="+urlQueryEscape(payload))
-}
-
-func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
-	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp))
-	if err != nil {
-		return "", err
-	}
-	return base64.RawURLEncoding.EncodeToString(payload), nil
-}
-
-type oidcStatePayload struct {
-	Nonce       string
-	RedirectURI string
-}
-
-func decodeOIDCState(raw string, req *http.Request) (*oidcStatePayload, error) {
-	payload, err := secutils.VerifyOIDCState(raw)
-	if err != nil {
-		return nil, err
-	}
-	cookieNonce, err := req.Cookie(oidcNonceCookieName)
-	if err != nil || cookieNonce == nil || strings.TrimSpace(cookieNonce.Value) == "" {
-		return nil, errors.NewValidationError("oidc nonce cookie missing")
-	}
-	if cookieNonce.Value != payload.Nonce {
-		return nil, errors.NewValidationError("oidc nonce mismatch")
-	}
-	return &oidcStatePayload{
-		Nonce:       payload.Nonce,
-		RedirectURI: strings.TrimSpace(payload.RedirectURI),
-	}, nil
-}
-
-func urlQueryEscape(value string) string {
-	replacer := strings.NewReplacer(
-		"%", "%25",
-		" ", "%20",
-		"#", "%23",
-		"&", "%26",
-		"+", "%2B",
-		"=", "%3D",
-		"?", "%3F",
-	)
-	return replacer.Replace(value)
 }
 
 // Logout godoc
@@ -810,13 +507,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 // @Success      200  {object}  map[string]interface{}  "认证配置"
 // @Router       /auth/config [get]
 //
-// GetAuthConfig is intentionally a no-auth endpoint: the frontend reads
-// it on app load to decide whether to show the Register tab and which
-// password complexity rules to apply. We expose only what the UI
-// strictly needs; other config stays internal.
+// GetAuthConfig is intentionally a no-auth endpoint: clients read it on
+// load to discover the password complexity rules. We expose only what the
+// UI strictly needs; other config stays internal.
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
-	// Same source-of-truth as Register's gate, so the UI hide-the-button
-	// signal can never disagree with the API enforcement signal.
+	// Registration itself is no longer exposed; registration_mode is kept
+	// for clients that still display deployment policy.
 	mode := h.resolveRegistrationMode(c.Request.Context())
 
 	complexPasswordEnabled := service.ResolveComplexPasswordEnabled(

@@ -35,22 +35,8 @@ var (
 // 无需认证的API列表
 var noAuthAPI = map[string][]string{
 	"/health":                 {"GET"},
-	"/api/v1/auth/register":   {"POST"},
 	"/api/v1/auth/login":      {"POST"},
 	"/api/v1/auth/auto-setup": {"POST"},
-	// Share-link surfaces accept a plaintext invite token from anonymous
-	// callers (an invitee who hasn't registered yet). They are registered
-	// as public routes in RegisterAuthRoutes and rate-limited by IP, so the
-	// global Auth middleware must let them through — otherwise opening a
-	// share link while logged out 401s and the frontend bounces the user to
-	// /login instead of the register page (issue #1617).
-	"/api/v1/auth/invitations/lookup": {"POST"},
-	"/api/v1/auth/register-by-invite": {"POST"},
-	"/api/v1/auth/config":             {"GET"},
-	"/api/v1/auth/oidc/config":        {"GET"},
-	"/api/v1/auth/oidc/url":           {"GET"},
-	"/api/v1/auth/oidc/start":         {"GET"},
-	"/api/v1/auth/oidc/callback":      {"GET"},
 	// MCP OAuth provider redirect: the third-party authorization server
 	// redirects the browser here without a WeKnora bearer token. The request
 	// is authenticated by the opaque, single-use `state` parameter instead.

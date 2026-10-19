@@ -43,18 +43,3 @@ func TestAuthLoginResponse_OwnerOmitsLegacyTenantAPIKey(t *testing.T) {
 	assert.NotContains(t, s, "legacy-search-secret-999")
 	assert.Contains(t, s, "web_search_config")
 }
-
-func TestAuthOIDCCallbackResponse_ViewerOmitsTenantSecrets(t *testing.T) {
-	tenant := sampleSecretTenant()
-	resp := NewAuthOIDCCallbackResponse(&types.OIDCCallbackResponse{
-		Success: true,
-		Tenant:  tenant,
-		Memberships: []types.Membership{{
-			TenantID: tenant.ID,
-			Role:     types.TenantRoleViewer,
-		}},
-	})
-	body, err := json.Marshal(resp)
-	require.NoError(t, err)
-	assert.NotContains(t, string(body), "tenant-api-key-123")
-}

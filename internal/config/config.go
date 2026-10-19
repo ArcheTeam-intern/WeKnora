@@ -23,7 +23,6 @@ type Config struct {
 	Tenant          *TenantConfig          `yaml:"tenant"           json:"tenant"`
 	Auth            *AuthConfig            `yaml:"auth"             json:"auth"`
 	Audit           *AuditConfig           `yaml:"audit"            json:"audit"`
-	OIDCAuth        *OIDCAuthConfig        `yaml:"oidc_auth"        json:"oidc_auth"`
 	Models          []ModelConfig          `yaml:"models"           json:"models"`
 	VectorDatabase  *VectorDatabaseConfig  `yaml:"vector_database"  json:"vector_database"`
 	DocReader       *DocReaderConfig       `yaml:"docreader"        json:"docreader"`
@@ -353,26 +352,6 @@ func (c *AuthConfig) IsInviteOnly() bool {
 	return c.RegistrationMode == AuthRegistrationModeInviteOnly
 }
 
-type OIDCUserInfoMapping struct {
-	Username string `yaml:"username" json:"username"`
-	Email    string `yaml:"email"    json:"email"`
-}
-
-type OIDCAuthConfig struct {
-	Enable                bool                 `yaml:"enable"                 json:"enable"`
-	IssuerURL             string               `yaml:"issuer_url"             json:"issuer_url"`
-	DiscoveryURL          string               `yaml:"discovery_url"          json:"discovery_url"`
-	ProviderDisplayName   string               `yaml:"provider_display_name"  json:"provider_display_name"`
-	ClientID              string               `yaml:"client_id"              json:"client_id"`
-	ClientSecret          string               `yaml:"client_secret"          json:"-"`
-	AuthorizationEndpoint string               `yaml:"authorization_endpoint" json:"authorization_endpoint"`
-	TokenEndpoint         string               `yaml:"token_endpoint"         json:"token_endpoint"`
-	UserInfoEndpoint      string               `yaml:"user_info_endpoint"     json:"user_info_endpoint"`
-	JwksURI               string               `yaml:"jwks_uri"               json:"jwks_uri"`
-	Scopes                []string             `yaml:"scopes"                 json:"scopes"`
-	UserInfoMapping       *OIDCUserInfoMapping `yaml:"user_info_mapping"      json:"user_info_mapping"`
-}
-
 // PromptTemplateI18n holds localized name and description for a prompt template.
 type PromptTemplateI18n struct {
 	Name        string `yaml:"name"        json:"name"`
@@ -640,7 +619,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Validate configuration values
-	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
 	applyAuthAndTenantDefaults(&cfg)
@@ -675,19 +653,6 @@ func LoadConfig() (*Config, error) {
 // It checks for obviously invalid or missing values that would cause runtime failures.
 func ValidateConfig(cfg *Config) error {
 	var errs []string
-
-	if cfg.OIDCAuth != nil && cfg.OIDCAuth.Enable {
-		if strings.TrimSpace(cfg.OIDCAuth.ClientID) == "" {
-			errs = append(errs, "oidc_auth.client_id is required when OIDC is enabled")
-		}
-		if strings.TrimSpace(cfg.OIDCAuth.ClientSecret) == "" {
-			errs = append(errs, "oidc_auth.client_secret is required when OIDC is enabled")
-		}
-		if strings.TrimSpace(cfg.OIDCAuth.DiscoveryURL) == "" &&
-			(strings.TrimSpace(cfg.OIDCAuth.AuthorizationEndpoint) == "" || strings.TrimSpace(cfg.OIDCAuth.TokenEndpoint) == "") {
-			errs = append(errs, "oidc_auth.discovery_url or both oidc_auth.authorization_endpoint and oidc_auth.token_endpoint are required when OIDC is enabled")
-		}
-	}
 
 	if cfg.Auth != nil {
 		mode := strings.TrimSpace(cfg.Auth.RegistrationMode)
@@ -747,71 +712,6 @@ func ValidateConfig(cfg *Config) error {
 		return fmt.Errorf("config validation errors: %s", strings.Join(errs, "; "))
 	}
 	return nil
-}
-
-func applyOIDCEnvOverrides(cfg *Config) {
-	if cfg.OIDCAuth == nil {
-		cfg.OIDCAuth = &OIDCAuthConfig{}
-	}
-	if cfg.OIDCAuth.UserInfoMapping == nil {
-		cfg.OIDCAuth.UserInfoMapping = &OIDCUserInfoMapping{}
-	}
-
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ENABLE")); value != "" {
-		cfg.OIDCAuth.Enable = strings.EqualFold(value, "true")
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_ISSUER_URL")); value != "" {
-		cfg.OIDCAuth.IssuerURL = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_DISCOVERY_URL")); value != "" {
-		cfg.OIDCAuth.DiscoveryURL = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_PROVIDER_DISPLAY_NAME")); value != "" {
-		cfg.OIDCAuth.ProviderDisplayName = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_CLIENT_ID")); value != "" {
-		cfg.OIDCAuth.ClientID = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_CLIENT_SECRET")); value != "" {
-		cfg.OIDCAuth.ClientSecret = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_AUTHORIZATION_ENDPOINT")); value != "" {
-		cfg.OIDCAuth.AuthorizationEndpoint = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_TOKEN_ENDPOINT")); value != "" {
-		cfg.OIDCAuth.TokenEndpoint = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_USER_INFO_ENDPOINT")); value != "" {
-		cfg.OIDCAuth.UserInfoEndpoint = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_JWKS_URI")); value != "" {
-		cfg.OIDCAuth.JwksURI = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_AUTH_SCOPES")); value != "" {
-		cfg.OIDCAuth.Scopes = strings.Fields(strings.ReplaceAll(value, ",", " "))
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_USER_INFO_MAPPING_USER_NAME")); value != "" {
-		cfg.OIDCAuth.UserInfoMapping.Username = value
-	}
-	if value := strings.TrimSpace(os.Getenv("OIDC_USER_INFO_MAPPING_EMAIL")); value != "" {
-		cfg.OIDCAuth.UserInfoMapping.Email = value
-	}
-
-	if cfg.OIDCAuth.ProviderDisplayName == "" {
-		cfg.OIDCAuth.ProviderDisplayName = "OIDC"
-	}
-	if len(cfg.OIDCAuth.Scopes) == 0 {
-		cfg.OIDCAuth.Scopes = []string{"openid", "profile", "email"}
-	}
-	if cfg.OIDCAuth.UserInfoMapping.Username == "" {
-		cfg.OIDCAuth.UserInfoMapping.Username = "name"
-	}
-	if cfg.OIDCAuth.UserInfoMapping.Email == "" {
-		cfg.OIDCAuth.UserInfoMapping.Email = "email"
-	}
-	if cfg.OIDCAuth.DiscoveryURL == "" && cfg.OIDCAuth.IssuerURL != "" {
-		cfg.OIDCAuth.DiscoveryURL = strings.TrimRight(cfg.OIDCAuth.IssuerURL, "/") + "/.well-known/openid-configuration"
-	}
 }
 
 func applyKnowledgeBaseEnvOverrides(cfg *Config) {

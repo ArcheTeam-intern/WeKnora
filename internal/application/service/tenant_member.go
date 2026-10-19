@@ -206,7 +206,7 @@ func (s *tenantMemberService) AddMember(
 
 // EnsureOwner is idempotent: if the user already has an active membership
 // in the tenant it is returned unchanged; otherwise a new owner row is
-// created. Used by Register/OIDC paths so re-running Register on an
+// created. Used by the Register path so re-running Register on an
 // existing user (e.g. after a partial failure) does not double-insert.
 func (s *tenantMemberService) EnsureOwner(
 	ctx context.Context,

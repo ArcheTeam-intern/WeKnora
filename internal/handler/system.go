@@ -1602,7 +1602,7 @@ type CreateSystemUserResponse struct {
 // @Summary      Create a new user (SystemAdmin)
 // @Description  Provision a new local user account (SystemAdmin only).
 // @Description  When `password` is omitted or null, a cryptographically random
-// @Description  password is generated (OIDC-style crypto/rand + base64url)
+// @Description  password is generated (crypto/rand + base64url)
 // @Description  and returned once in the response body. Any provided value,
 // @Description  including empty string, is policy-checked. Tenant provisioning
 // @Description  follows the shared auth.default_tenant_mode policy.

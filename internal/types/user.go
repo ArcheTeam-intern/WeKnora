@@ -169,47 +169,6 @@ type LoginRequest struct {
 	Password string `json:"password" binding:"required,min=6"`
 }
 
-type OIDCAuthURLResponse struct {
-	Success             bool   `json:"success"`
-	ProviderDisplayName string `json:"provider_display_name,omitempty"`
-	AuthorizationURL    string `json:"authorization_url,omitempty"`
-	State               string `json:"state,omitempty"`
-	// Nonce is bound to an HttpOnly cookie on /auth/oidc/url and verified
-	// on callback; omitted from JSON so clients cannot replay it alone.
-	Nonce string `json:"-"`
-}
-
-type OIDCConfigResponse struct {
-	Success             bool   `json:"success"`
-	Enabled             bool   `json:"enabled"`
-	ProviderDisplayName string `json:"provider_display_name,omitempty"`
-}
-
-type OIDCCallbackResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message,omitempty"`
-	User    *User  `json:"user,omitempty"`
-	// Tenant carries the active tenant for the issued token. The field
-	// name is preserved for backward compatibility with existing frontend
-	// OIDC callback handling; LoginResponse uses ActiveTenant for the
-	// same data.
-	Tenant *Tenant `json:"tenant,omitempty"`
-	// Memberships mirrors LoginResponse.Memberships so the OIDC flow
-	// produces the same role information available to password logins.
-	// Always populated (length >= 1 for an authenticated user).
-	Memberships  []Membership `json:"memberships"`
-	Token        string       `json:"token,omitempty"`
-	RefreshToken string       `json:"refresh_token,omitempty"`
-	IsNewUser    bool         `json:"is_new_user,omitempty"`
-}
-
-type OIDCUserInfo struct {
-	Subject  string                 `json:"subject,omitempty"`
-	Username string                 `json:"username,omitempty"`
-	Email    string                 `json:"email,omitempty"`
-	Claims   map[string]interface{} `json:"claims,omitempty"`
-}
-
 // RegisterRequest represents a registration request
 type RegisterRequest struct {
 	Username string `json:"username" binding:"required,min=2,max=50"`
@@ -269,14 +228,6 @@ type LoginResponse struct {
 	Memberships  []Membership `json:"memberships"`
 	Token        string       `json:"token,omitempty"`
 	RefreshToken string       `json:"refresh_token,omitempty"`
-}
-
-// RegisterResponse represents a registration response
-type RegisterResponse struct {
-	Success bool    `json:"success"`
-	Message string  `json:"message,omitempty"`
-	User    *User   `json:"user,omitempty"`
-	Tenant  *Tenant `json:"tenant,omitempty"`
 }
 
 // UserInfo represents user information for API responses
