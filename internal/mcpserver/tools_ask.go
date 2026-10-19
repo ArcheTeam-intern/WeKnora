@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -200,6 +201,12 @@ func (s *Server) resolveAskAgent(ctx context.Context, ep *types.MCPEndpoint, mod
 // otherwise the agent's configuration decides, except that an agent with no
 // knowledge bases of its own falls back to everything the endpoint can see
 // so the call does not fail with "no search targets".
+//
+// Every successful return is a RESOLVED set, never nil: an agent-owned
+// default is narrowed to the caller-authorized canonical ids the same way
+// native QA would read them. The core ask binding pins what this returns, so
+// an omitted selector cannot silently move a continued conversation onto
+// libraries the previous turn did not read (review 2026-10-19 P2).
 func (s *Server) resolveAskKnowledgeBases(
 	ctx context.Context, ep *types.MCPEndpoint, agent *types.CustomAgent, requested []string,
 ) ([]string, error) {
@@ -233,7 +240,53 @@ func (s *Server) resolveAskKnowledgeBases(
 		}
 		return knowledgeBaseIDs(kbs), nil
 	}
-	return nil, nil
+	// The agent has its own configured scope and nothing was selected. The
+	// native QA path would read that configuration directly
+	// (session_qa_helpers.go resolveKnowledgeBases -> agent); resolve it
+	// here to the authorized canonical set so the binding compares the
+	// effective scope instead of skipping the check.
+	if agent.Config.RetrieveKBOnlyWhenMentioned {
+		// With no mention on this surface native QA retrieves from nothing —
+		// the suggestion anchor never reaches an MCP ask. The empty scope is
+		// still a determined one: pin it, forward nothing.
+		return []string{}, nil
+	}
+	allowed, err := s.allowedKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, err
+	}
+	if mode == "all" {
+		// Mirror the runtime's capability filter for "all" mode so the
+		// pinned set is exactly what the retrieval would resolve itself.
+		capFilter := tools.DeriveKBFilterForAgent(agent.Config.AgentMode, agent.Config.AllowedTools)
+		kept := make([]*types.KnowledgeBase, 0, len(allowed))
+		for _, kb := range allowed {
+			if capFilter.IsEmpty() ||
+				tools.KBSatisfiesAgentRequirements(
+					kb.Capabilities(), agent.Config.AgentMode, agent.Config.AllowedTools) {
+				kept = append(kept, kb)
+			}
+		}
+		return knowledgeBaseIDs(kept), nil
+	}
+	// "selected", unset and unknown modes take the configured libraries, but
+	// re-authorized: an entry this caller cannot read here is dropped rather
+	// than trusted (it would also fail inside native retrieval).
+	ids := make([]string, 0, len(agent.Config.KnowledgeBases))
+	for _, configured := range agent.Config.KnowledgeBases {
+		kb := matchKnowledgeBase(allowed, strings.TrimSpace(configured))
+		if kb == nil {
+			logger.Warnf(ctx, "[mcpserver] ask agent %s references unavailable knowledge base %q: dropped from the pinned scope",
+				agent.ID, configured)
+			continue
+		}
+		ids = append(ids, kb.ID)
+	}
+	if len(ids) == 0 {
+		return nil, fmt.Errorf(
+			"the endpoint's default agent has no readable knowledge base on this endpoint; select knowledge_base_ids explicitly")
+	}
+	return ids, nil
 }
 
 func (s *Server) resolveAskSession(

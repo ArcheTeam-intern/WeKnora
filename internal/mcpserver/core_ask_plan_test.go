@@ -80,6 +80,30 @@ func (s *planAskSessions) StoreSessionScopeBinding(
 	return nil
 }
 
+// AdoptSessionScopeBinding emulates the repository compare-and-set: the
+// write happens only while the row still has no binding, and a row that
+// already carries one — or is gone — reports adopted=false instead of
+// overwriting the winner.
+func (s *planAskSessions) AdoptSessionScopeBinding(
+	_ context.Context, sessionID string, state *types.SessionLastRequestState,
+) (bool, error) {
+	if s.failBinding {
+		return false, errors.New("simulated binding persistence failure")
+	}
+	if s.zeroRowBinding {
+		return false, nil
+	}
+	row, ok := s.rows[sessionID]
+	if !ok {
+		return false, nil
+	}
+	if row.LastRequestState != nil && row.LastRequestState.EndpointID != "" {
+		return false, nil
+	}
+	row.LastRequestState = state
+	return true, nil
+}
+
 // UpdateSessionLastRequestState is the historical best-effort write. The fake
 // keeps it so a regression to the best-effort path makes these tests fail with
 // an assertion instead of a nil-interface panic.
@@ -485,4 +509,112 @@ func jsonDetails(result *mcp.CallToolResult) string {
 		}
 	}
 	return ""
+}
+
+// --------------------------------------------------------------------------
+// V2 completion (review 2026-10-19 Spec P2): the agent-owned default scope is
+// resolved and pinned, never left for native QA to decide unchecked.
+// --------------------------------------------------------------------------
+
+// agentOwnedDefaultServer is the review's setup: an endpoint with no fixed
+// range whose published profile selects kb-2 by its own configuration.
+func agentOwnedDefaultServer() (*Server, *planAskSessions, *types.MCPEndpoint, context.Context) {
+	srv, sessions := planAskServer()
+	srv.agentService = &stubAgentService{agents: map[string]*types.CustomAgent{
+		types.BuiltinQuickAnswerID:    {ID: types.BuiltinQuickAnswerID, IsBuiltin: true},
+		types.BuiltinSmartReasoningID: {ID: types.BuiltinSmartReasoningID, IsBuiltin: true},
+		"published-profile": {ID: "published-profile", TenantID: 1,
+			Config: types.CustomAgentConfig{KBSelectionMode: "selected", KnowledgeBases: []string{"kb-2"}}},
+	}}
+	ep := planAskEndpoint()
+	ep.KnowledgeBaseIDs = nil
+	ep.DefaultAgentID = "published-profile"
+	return srv, sessions, ep, planAskContext(ep, "user-1")
+}
+
+// The review's counterexample, promoted: first ask explicitly selects kb-1
+// (binding [kb-1]); the continuation omits the selector, so the published
+// profile's own [kb-2] decides. Native QA would answer from B while the
+// history still carries A's context. The default scope is now resolved to a
+// canonical authorized set and compared: the reuse is refused.
+func TestCoreAskAgentOwnedDefaultCannotBypassExplicitBinding(t *testing.T) {
+	srv, sessions, ep, ctx := agentOwnedDefaultServer()
+
+	first, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "explicit A", "knowledge_base_ids": []string{"kb-1"},
+	}))
+	require.NoError(t, err)
+	require.False(t, first.IsError, "%s", mcpErrorText(first))
+	sessionID := structuredOf(first)["session_id"].(string)
+	require.Equal(t, []string{"kb-1"}, sessions.rows[sessionID].LastRequestState.KnowledgeBaseIDs)
+
+	plan, err := srv.resolveAskPlan(ctx, ep, map[string]any{"question": "default B"})
+	require.NoError(t, err)
+	require.True(t, plan.kbScopeKnown,
+		"the agent's own default scope must be resolved to a canonical set instead of skipped")
+	require.Equal(t, []string{"kb-2"}, plan.KBIDs)
+
+	second, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "default B", "session_id": sessionID,
+	}))
+	require.NoError(t, err)
+	require.True(t, second.IsError,
+		"an omitted selector moving the session from an explicit scope to the agent's "+
+			"own default must be refused: %+v", structuredOf(second))
+	require.Equal(t, "INVALID_ARGUMENT", errorCodeOf(second))
+	require.Equal(t, []string{"kb-1"}, sessions.rows[sessionID].LastRequestState.KnowledgeBaseIDs,
+		"the refusal must not rewrite the binding")
+}
+
+// The positive control the review asked for: when the agent default resolves
+// to the same effective scope an explicit turn used, the continuation is the
+// same run and must proceed on the same session.
+func TestCoreAskAgentOwnedDefaultContinuesWhenScopesAgree(t *testing.T) {
+	srv, _, _, ctx := agentOwnedDefaultServer()
+
+	first, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "explicit B", "knowledge_base_ids": []string{"kb-2"},
+	}))
+	require.NoError(t, err)
+	require.False(t, first.IsError, "%s", mcpErrorText(first))
+
+	second, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "default B", "session_id": structuredOf(first)["session_id"],
+	}))
+	require.NoError(t, err)
+	require.False(t, second.IsError,
+		"an omission that resolves to the same effective scope must continue: %s", mcpErrorText(second))
+	require.Equal(t, structuredOf(first)["session_id"], structuredOf(second)["session_id"])
+}
+
+// The review's mode "all" branch: the tenant-wide default is pinned to the
+// caller-visible set, so it too cannot drift into a bound session unchecked.
+func TestCoreAskAgentOwnedAllModeIsPinnedToTheVisibleScope(t *testing.T) {
+	srv, sessions, _, ctx := agentOwnedDefaultServer()
+	srv.agentService = &stubAgentService{agents: map[string]*types.CustomAgent{
+		types.BuiltinQuickAnswerID: {ID: types.BuiltinQuickAnswerID, IsBuiltin: true},
+		"published-profile": {ID: "published-profile", TenantID: 1,
+			Config: types.CustomAgentConfig{KBSelectionMode: "all"}},
+	}}
+
+	first, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "explicit A", "knowledge_base_ids": []string{"kb-1"},
+	}))
+	require.NoError(t, err)
+	require.False(t, first.IsError, "%s", mcpErrorText(first))
+
+	second, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{
+		"question": "default all", "session_id": structuredOf(first)["session_id"],
+	}))
+	require.NoError(t, err)
+	require.True(t, second.IsError,
+		"the all-mode default resolves to [kb-1 kb-2] against the binding [kb-1]: must be refused, got %+v",
+		structuredOf(second))
+
+	// A fresh all-mode session binds the resolved visible set, not nothing.
+	fresh, err := srv.handleCoreAsk(ctx, coreCall(CoreToolAsk, map[string]any{"question": "fresh all"}))
+	require.NoError(t, err)
+	require.False(t, fresh.IsError, "%s", mcpErrorText(fresh))
+	require.Equal(t, []string{"kb-1", "kb-2"},
+		sessions.rows[structuredOf(fresh)["session_id"].(string)].LastRequestState.KnowledgeBaseIDs)
 }

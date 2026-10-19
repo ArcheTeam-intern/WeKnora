@@ -49,13 +49,16 @@ type askPlan struct {
 	ProfileID string
 	// KBIDs is the effective retrieval scope: canonical ids of the knowledge
 	// bases this question may read, resolved through the endpoint range and
-	// the caller's authorization — never the raw request strings. nil means
-	// the run uses the agent's own configured scope (no override).
+	// the caller's authorization — never the raw request strings. An empty
+	// known set is a real scope ("reads nothing"), distinct from the nil an
+	// unresolved plan would carry.
 	KBIDs []string
 	// kbScopeKnown reports whether KBIDs was resolved to an explicit set
-	// (request selection, endpoint range, or caller-visible fallback). When
-	// false the scope lives in the agent configuration and cannot be pinned
-	// here; the binding then pins the agent, which fixes that configuration.
+	// (request selection, endpoint range, caller-visible fallback, or the
+	// agent's own configuration re-authorized — resolveAskKnowledgeBases
+	// resolves all of these). When false the scope could not be pinned here;
+	// validateAskSessionBinding then refuses, rather than skips, a comparison
+	// against a session that was bound to a known set.
 	kbScopeKnown bool
 }
 
@@ -82,11 +85,13 @@ func (s *Server) handleCoreAsk(ctx context.Context, req mcp.CallToolRequest) (*m
 			return errorResult(err), nil
 		}
 		// A session that predates the binding is adopted here, before the
-		// run: the same strict write as a fresh session, so a row can never
-		// stay unbound after the caller has been told it works.
+		// run. The adoption is a compare-and-set on "still unbound" and not
+		// a read-check-write: two concurrent first-time adoptions of
+		// different scopes cannot both execute, and a row can never stay
+		// unbound after the caller has been told it works.
 		if !bound {
-			if err := s.storeAskSessionBinding(ctx, sessionID, ep, plan); err != nil {
-				return errorResult(bindingPersistenceError(err)), nil
+			if err := s.adoptAskSessionBinding(ctx, ep, sessionID, plan); err != nil {
+				return errorResult(err), nil
 			}
 		}
 	} else {
@@ -255,20 +260,28 @@ func (s *Server) validateAskSessionBinding(
 		return true, &ToolError{Code: CodeInvalidArgument,
 			Message: "session_id was bound to a different profile_id; start a new session"}
 	}
-	if plan.kbScopeKnown && !sliceEqual(sortDedupStrings(bound.KnowledgeBaseIDs), plan.KBIDs) {
+	if plan.kbScopeKnown {
+		if !sliceEqual(sortDedupStrings(bound.KnowledgeBaseIDs), plan.KBIDs) {
+			return true, &ToolError{Code: CodeInvalidArgument,
+				Message: "session_id was bound to a different knowledge_base set; start a new session"}
+		}
+	} else if len(bound.KnowledgeBaseIDs) > 0 {
+		// Defence in depth: resolveAskKnowledgeBases resolves every scope —
+		// including the agent's own default — to a canonical set, so a plan
+		// with an unknown scope should not exist. If one ever does, it must
+		// not continue a session bound to an explicit set: an unchecked
+		// default is exactly the explicit->agent-owned drift the review
+		// caught (2026-10-19 P2). Start fresh instead.
 		return true, &ToolError{Code: CodeInvalidArgument,
-			Message: "session_id was bound to a different knowledge_base set; start a new session"}
+			Message: "this request cannot pin its knowledge-base scope; pass knowledge_base_ids explicitly or start a new session"}
 	}
 	return true, nil
 }
 
-// storeAskSessionBinding writes the plan onto the session. Strict by design:
-// StoreSessionScopeBinding reports a repository error AND a zero-row update,
-// and either one must stop the call — an unpersisted binding would read as
-// "unbound" on the next reuse.
-func (s *Server) storeAskSessionBinding(
-	ctx context.Context, sessionID string, ep *types.MCPEndpoint, plan *askPlan,
-) error {
+// bindingStateFor renders the plan as the stored binding. Fresh sessions and
+// legacy adoptions write the same shape, so the two paths can never
+// disagree about what a binding means.
+func bindingStateFor(ep *types.MCPEndpoint, plan *askPlan) *types.SessionLastRequestState {
 	state := &types.SessionLastRequestState{
 		Mode:       plan.Mode,
 		ProfileID:  plan.ProfileID,
@@ -278,7 +291,47 @@ func (s *Server) storeAskSessionBinding(
 	if plan.kbScopeKnown {
 		state.KnowledgeBaseIDs = append([]string(nil), plan.KBIDs...)
 	}
-	return s.sessionService.StoreSessionScopeBinding(ctx, sessionID, state)
+	return state
+}
+
+// storeAskSessionBinding writes the plan onto a session this surface just
+// created. Strict by design: StoreSessionScopeBinding reports a repository
+// error AND a zero-row update, and either one must stop the call — an
+// unpersisted binding would read as "unbound" on the next reuse.
+func (s *Server) storeAskSessionBinding(
+	ctx context.Context, sessionID string, ep *types.MCPEndpoint, plan *askPlan,
+) error {
+	return s.sessionService.StoreSessionScopeBinding(ctx, sessionID, bindingStateFor(ep, plan))
+}
+
+// adoptAskSessionBinding binds a session row that predates the binding. The
+// service performs it as a compare-and-set ("write only while still
+// unbound"), so a concurrent adoption cannot quietly overwrite the other's:
+// the CAS loser re-validates the binding that actually won. Same scope runs
+// on; a different scope — or a row that vanished or somehow shows no binding
+// after a lost write — is refused before any question message is written
+// (review 2026-10-19 Standards P2).
+func (s *Server) adoptAskSessionBinding(
+	ctx context.Context, ep *types.MCPEndpoint, sessionID string, plan *askPlan,
+) error {
+	adopted, err := s.sessionService.AdoptSessionScopeBinding(ctx, sessionID, bindingStateFor(ep, plan))
+	if err != nil {
+		return bindingPersistenceError(err)
+	}
+	if adopted {
+		return nil
+	}
+	bound, err := s.validateAskSessionBinding(ctx, ep, sessionID, plan)
+	if err != nil {
+		return err
+	}
+	if !bound {
+		return &ToolError{
+			Code:    CodeInternal,
+			Message: "the session binding was being adopted concurrently; retry the question",
+		}
+	}
+	return nil
 }
 
 // createAskSession creates the session a new core ask runs in, owned by the
