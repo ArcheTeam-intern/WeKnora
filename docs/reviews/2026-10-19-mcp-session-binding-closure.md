@@ -57,4 +57,15 @@ legacy `/mcp/:id` ask 与本面共用该解析器：省略选择器时 legacy as
 
 限制，如实说明：本轮为离线验证。未在活栈重建镜像跑 `core_acceptance.py` 三阶段真实验收（本轮改动不触传输/工具发现面，报告 §6 的验收要求是反例转正 + 七包回归，均已满足）；真实 Postgres 上的 CAS 条件按报告探针同等口径由 sqlite 仓储测试 + 方言条件复核覆盖，`->>`/`JSON_VALID` 分支未经真库回放。跨用户场景未引入新判定：owner 校验顺序不变。
 
+## 5. 活栈重建与真实 MCP 验收回放（2026-10-19 晚，独立复核后的下一步）
+
+独立复核（`2026-10-19-mcp-session-binding-verification.md`）确认 0 项新阻塞后，按其"后续验收边界"第 1 条执行：重建 app 镜像至 `4c239a2ca` 并回放真实验收。
+
+- 镜像：`docker compose build weknora` 前台完成（CreatedSince 43s），`up -d` 后 app healthy；P0 在新构建上复认 core 入口恰 5 工具。
+- `core_acceptance.py` 三阶段全回放：**positive 14/14、ask 10/10（真实模型问答：A1 命中林澈/顾言 + 有效库=[3daf893b]、A2 同范围续问、A3/A4 跨库/跨模式拒绝、A9 省略 mode 与显式 profile 均命中发布的默认档案、A10 跨端点拒绝、A7 仍为已分类的缺 Rerank 限制）、negatives 16/16**。`publish_profile.py` setup→ask→teardown 全流程执行，teardown 已复位（`cc7eb833`：default_agent_id 空、tools=22）。验收 PDF（acceptance-record/acceptance-broken）已用 `cleanup_acceptance_docs.py` 删除。
+- 真实环境定向回放（`.planning/2026-10-19-mcp-live-replay/live_replay_binding.py`，**9/9 通过**，报告落 `live-replay-report.json`）：新建**无固定范围**临时端点 + 发布 `kb_selection_mode=selected [B]` 的自定义 Agent（报告 P2 的精确触发形状）——R1 显式 A 成功且绑定存 `[A]`+端点+实际 agent；R2 省略选择器（默认解析为 [B]）被拒于 `different knowledge_base set`，且拒后绑定未被改写（**Spec P2 反例在活栈上现在是拒绝而非放行**）；R3 显式 B + 省略续问同会话放行；R4 legacy 面创建的无绑定会话被首次 core ask 经真实 SQLite CAS 补绑（`state_after` 含 endpoint/[A]），补绑后异范围拒、同范围放行；R5 全新省略问句实际在 [B] 上作答。临时端点、Agent、全部会话均已删除，无残留。
+- 复核意见的措辞收窄已落：仓储/接口注释将"与 Go 侧读取一致"限定为**产品序列化器可产出的数据形状**，并写明人为损坏的非字符串 `endpoint_id` 这一种分歧形态落向安全侧（补绑零行 → 重读 → 拒绝，不会放行）。该改动为纯注释，gofmt/build/vet 复验通过。
+
+仍未覆盖，保持不宣称：Postgres/MySQL 真库 CAS 方言回放（活栈为 SQLite）；HTTP 并发首次补绑竞态的活栈复现（离线 barrier 测试为权威证据，真实双请求时序不可控）；Rerank 相关 smart-reasoning 实测能力（缺模型配置，工作区现状未变）。工作台迁移继续暂缓。
+
 后续若恢复工作台迁移（报告 §3 五步），本报告的两处收口正是迁移前必须稳定的 core `ask` 语义。
