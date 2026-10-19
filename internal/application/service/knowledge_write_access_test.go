@@ -426,17 +426,3 @@ func TestSharedFAQWriteLoadsOwnerTenantInfoWithoutReplacingCaller(t *testing.T) 
 	original, _ := types.TenantInfoFromContext(ctx)
 	require.Equal(t, uint64(1), original.ID)
 }
-
-func TestDataSourceTagCreationReceivesOnlyItsTaskKBGrant(t *testing.T) {
-	h := newSyncDeletionHarness(t, false, "ds-tag-scope", "log-tag-scope", nil, nil)
-	tags := h.svc.tagService.(*processSyncTagService)
-	_, err := h.run(t)
-	require.NoError(t, err)
-	require.NotNil(t, tags.ctx)
-	require.Zero(t, types.CallerFromContext(tags.ctx).TenantID)
-	require.NoError(
-		t,
-		access.RequireKBWrite(tags.ctx, &types.KnowledgeBase{ID: h.ds.KnowledgeBaseID, TenantID: h.ds.TenantID}),
-	)
-	require.Error(t, access.RequireKBWrite(tags.ctx, &types.KnowledgeBase{ID: "other", TenantID: h.ds.TenantID}))
-}

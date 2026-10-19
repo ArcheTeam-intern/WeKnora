@@ -29,55 +29,53 @@ import (
 type RouterParams struct {
 	dig.In
 
-	Config                       *config.Config
-	FileService                  interfaces.FileService
-	UserService                  interfaces.UserService
-	KBService                    interfaces.KnowledgeBaseService
-	KnowledgeService             interfaces.KnowledgeService
-	ChunkService                 interfaces.ChunkService
-	SessionService               interfaces.SessionService
-	MessageService               interfaces.MessageService
-	ModelService                 interfaces.ModelService
-	EvaluationService            interfaces.EvaluationService
-	KBShareService               interfaces.KBShareService
-	AgentShareService            interfaces.AgentShareService
-	KBHandler                    *handler.KnowledgeBaseHandler
-	KnowledgeHandler             *handler.KnowledgeHandler
-	TenantHandler                *handler.TenantHandler
-	TenantService                interfaces.TenantService
-	TenantAPIKeyService          interfaces.TenantAPIKeyService
-	TenantMemberService          interfaces.TenantMemberService
-	TenantMemberHandler          *handler.TenantMemberHandler
-	TenantInvitationHandler      *handler.TenantInvitationHandler
-	AuditLogHandler              *handler.AuditLogHandler
-	AuditLogService              interfaces.AuditLogService
-	ChunkHandler                 *handler.ChunkHandler
-	SessionHandler               *session.Handler
-	MessageHandler               *handler.MessageHandler
-	MessageSuggestionHandler     *handler.MessageSuggestionHandler
-	ModelHandler                 *handler.ModelHandler
-	ModelCredentialsHandler      *handler.ModelCredentialsHandler
-	EvaluationHandler            *handler.EvaluationHandler
-	AuthHandler                  *handler.AuthHandler
-	InitializationHandler        *handler.InitializationHandler
-	SystemHandler                *handler.SystemHandler
-	VectorStoreHandler           *handler.VectorStoreHandler
-	StorageBackendHandler        *handler.StorageBackendHandler
-	StorageBackendResolver       interfaces.StorageBackendResolver
-	ResourceCatalog              interfaces.ResourceCatalog
-	FAQHandler                   *handler.FAQHandler
-	TagHandler                   *handler.TagHandler
-	CustomAgentHandler           *handler.CustomAgentHandler
-	UserFavoriteHandler          *handler.UserResourceFavoriteHandler
-	OrganizationHandler          *handler.OrganizationHandler
-	MCPEndpointHandler           *handler.MCPEndpointHandler
-	MCPEndpointService           interfaces.MCPEndpointService
-	MCPServer                    *mcpserver.Server
-	RedisClient                  *redis.Client
-	DataSourceHandler            *handler.DataSourceHandler
-	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
-	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
-	WikiPageHandler              *handler.WikiPageHandler
+	Config                   *config.Config
+	FileService              interfaces.FileService
+	UserService              interfaces.UserService
+	KBService                interfaces.KnowledgeBaseService
+	KnowledgeService         interfaces.KnowledgeService
+	ChunkService             interfaces.ChunkService
+	SessionService           interfaces.SessionService
+	MessageService           interfaces.MessageService
+	ModelService             interfaces.ModelService
+	EvaluationService        interfaces.EvaluationService
+	KBShareService           interfaces.KBShareService
+	AgentShareService        interfaces.AgentShareService
+	KBHandler                *handler.KnowledgeBaseHandler
+	KnowledgeHandler         *handler.KnowledgeHandler
+	TenantHandler            *handler.TenantHandler
+	TenantService            interfaces.TenantService
+	TenantAPIKeyService      interfaces.TenantAPIKeyService
+	TenantMemberService      interfaces.TenantMemberService
+	TenantMemberHandler      *handler.TenantMemberHandler
+	TenantInvitationHandler  *handler.TenantInvitationHandler
+	AuditLogHandler          *handler.AuditLogHandler
+	AuditLogService          interfaces.AuditLogService
+	ChunkHandler             *handler.ChunkHandler
+	SessionHandler           *session.Handler
+	MessageHandler           *handler.MessageHandler
+	MessageSuggestionHandler *handler.MessageSuggestionHandler
+	ModelHandler             *handler.ModelHandler
+	ModelCredentialsHandler  *handler.ModelCredentialsHandler
+	EvaluationHandler        *handler.EvaluationHandler
+	AuthHandler              *handler.AuthHandler
+	InitializationHandler    *handler.InitializationHandler
+	SystemHandler            *handler.SystemHandler
+	VectorStoreHandler       *handler.VectorStoreHandler
+	StorageBackendHandler    *handler.StorageBackendHandler
+	StorageBackendResolver   interfaces.StorageBackendResolver
+	ResourceCatalog          interfaces.ResourceCatalog
+	FAQHandler               *handler.FAQHandler
+	TagHandler               *handler.TagHandler
+	CustomAgentHandler       *handler.CustomAgentHandler
+	UserFavoriteHandler      *handler.UserResourceFavoriteHandler
+	OrganizationHandler      *handler.OrganizationHandler
+	MCPEndpointHandler       *handler.MCPEndpointHandler
+	MCPEndpointService       interfaces.MCPEndpointService
+	MCPServer                *mcpserver.Server
+	RedisClient              *redis.Client
+	WeKnoraCloudHandler      *handler.WeKnoraCloudHandler
+	WikiPageHandler          *handler.WikiPageHandler
 }
 
 // NewRouter 创建新的路由
@@ -308,7 +306,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// IM channel management and embed channel management routes are gone
 		// with their implementations.
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
-		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		// Long-term memory is retired: no routes, no handler, no distillation

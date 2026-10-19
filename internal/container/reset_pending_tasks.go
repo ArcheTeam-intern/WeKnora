@@ -27,17 +27,12 @@ const restartInterruptedMessage = "Task interrupted due to application restart"
 // startup hook cannot safely distinguish an orphan from a backlogged task that
 // has not opened a span yet. HousekeepingService owns that decision because it
 // checks BOTH recent span activity and the real Asynq queue. Consequently this
-// hook never resets knowledge/summary rows in distributed mode; it only keeps
-// the separate sync-log cleanup below.
+// hook never resets knowledge/summary rows in distributed mode; it only resets
+// knowledge/summary rows in Lite mode.
 func resetPendingTasks(db *gorm.DB) {
 	distributed := os.Getenv("REDIS_ADDR") != ""
 	ctx := context.Background()
 	spanRepo := repository.NewKnowledgeSpanRepository(db)
-
-	var staleCutoff time.Time
-	if distributed {
-		staleCutoff = time.Now().Add(-resetPendingStaleWindow)
-	}
 
 	// Resolve Lite-mode orphaned knowledge rows first. A finalizing row whose
 	// ONLY remaining slot is backed by a durable wiki op is excluded and resumed
@@ -120,20 +115,6 @@ func resetPendingTasks(db *gorm.DB) {
 		}
 	}
 
-	// 3. Reset data source sync tasks
-	now := time.Now()
-	resultSync := stuckSyncLogQuery(db, distributed, staleCutoff).Updates(map[string]interface{}{
-		"status":        types.SyncLogStatusFailed,
-		"error_message": "Sync interrupted due to application restart",
-		"finished_at":   &now,
-	})
-	if resultSync.Error != nil {
-		logger.Warnf(context.Background(), "Failed to reset pending data source sync tasks: %v", resultSync.Error)
-	} else if resultSync.RowsAffected > 0 {
-		logger.Infof(context.Background(),
-			"Reset %d stuck data source sync tasks to failed state (distributed=%v)",
-			resultSync.RowsAffected, distributed)
-	}
 }
 
 func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {
@@ -157,15 +138,6 @@ func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {
 func stuckKnowledgeSummaryQuery(db *gorm.DB) *gorm.DB {
 	return db.Model(&types.Knowledge{}).
 		Where("summary_status IN ?", []string{types.SummaryStatusPending, types.SummaryStatusProcessing})
-}
-
-func stuckSyncLogQuery(db *gorm.DB, distributed bool, staleCutoff time.Time) *gorm.DB {
-	q := db.Model(&types.SyncLog{}).
-		Where("status = ?", types.SyncLogStatusRunning)
-	if distributed {
-		q = q.Where("started_at < ?", staleCutoff)
-	}
-	return q
 }
 
 func resettableParseStatuses() []string {

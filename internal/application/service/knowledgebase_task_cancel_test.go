@@ -104,32 +104,6 @@ func (r *recordingKBDeleteEnqueuer) Enqueue(
 	return &asynq.TaskInfo{ID: "kb-delete-task"}, nil
 }
 
-func TestDeleteKnowledgeBaseForwardsDataSourceTaskScope(t *testing.T) {
-	const kbID = "kb-with-datasource"
-	kbRepo := &kbDeleteKBRepo{fakeKBRepo: *newFakeKBRepo()}
-	kbRepo.rows[kbID] = &types.KnowledgeBase{ID: kbID, TenantID: 1, Name: "test"}
-	inspector := &recordingKBTaskInspector{repo: kbRepo}
-	enqueuer := &recordingKBDeleteEnqueuer{}
-	dsRepo := newKBDeleteDSRepo(kbID, &types.DataSource{ID: "datasource-1", KnowledgeBaseID: kbID})
-	svc := &knowledgeBaseService{
-		repo:          kbRepo,
-		asynqClient:   enqueuer,
-		taskInspector: inspector,
-		dsRepo:        dsRepo,
-	}
-
-	err := svc.DeleteKnowledgeBase(ctxWithTenantStorage(1, "local"), kbID)
-
-	require.NoError(t, err)
-	require.Len(t, inspector.calls, 2)
-	assert.Empty(t, inspector.calls[0].dataSourceIDs)
-	assert.Equal(t, []string{"datasource-1"}, inspector.calls[1].dataSourceIDs)
-	require.NotNil(t, enqueuer.task)
-	var payload types.KBDeletePayload
-	require.NoError(t, json.Unmarshal(enqueuer.task.Payload(), &payload))
-	assert.Equal(t, []string{"datasource-1"}, payload.DataSourceIDs)
-}
-
 func TestDeleteKnowledgeBaseCancelsQueuedTasksBestEffort(t *testing.T) {
 	tests := []struct {
 		name       string

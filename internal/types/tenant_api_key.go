@@ -116,10 +116,6 @@ const (
 	// APIKeyCapabilityManageMCPServices lets a key manage tenant MCP service
 	// definitions, credentials, tool policies, and per-principal OAuth state.
 	APIKeyCapabilityManageMCPServices APIKeyCapability = "manage_mcp_services"
-	// APIKeyCapabilityManageDataSources lets a key manage data-source
-	// connectors and sync jobs. KB scoping applies to data sources bound to a
-	// knowledge base.
-	APIKeyCapabilityManageDataSources APIKeyCapability = "manage_datasources"
 	// APIKeyCapabilityManageChannels lets a key manage embed and IM channel
 	// integrations for agents.
 	APIKeyCapabilityManageChannels APIKeyCapability = "manage_channels"
@@ -186,8 +182,6 @@ func NormalizeAPIKeyCapability(c APIKeyCapability) APIKeyCapability {
 		return APIKeyCapabilityManageModels
 	case APIKeyCapabilityManageMCPServices:
 		return APIKeyCapabilityManageMCPServices
-	case APIKeyCapabilityManageDataSources:
-		return APIKeyCapabilityManageDataSources
 	case APIKeyCapabilityManageChannels:
 		return APIKeyCapabilityManageChannels
 	case APIKeyCapabilityManageVectorStores:

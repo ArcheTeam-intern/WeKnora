@@ -102,10 +102,6 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// Same-bytes files from different source identities are still distinct
 	// documents (GitLab README templates, copied Confluence pages). Scope the
 	// hash check to datasource_id + external_id so retries stay idempotent.
-	if usesSourceIdentityDuplicateCheck(channel) {
-		checkParams.DataSourceID = metadata["datasource_id"]
-		checkParams.ExternalID = metadata["external_id"]
-	}
 	exists, existingKnowledge, err := s.repo.CheckKnowledgeExists(ctx, tenantID, kbID, checkParams)
 	if err != nil {
 		logger.Errorf(ctx, "Failed to check knowledge existence: %v", err)
@@ -1163,15 +1159,6 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 	knowledge.ErrorMessage = "Failed to enqueue processing task"
 	if err := s.repo.UpdateKnowledge(ctx, knowledge); err != nil {
 		logger.Errorf(ctx, "Failed to mark knowledge as failed after enqueue error: %v", err)
-	}
-}
-
-func usesSourceIdentityDuplicateCheck(channel string) bool {
-	switch channel {
-	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile:
-		return true
-	default:
-		return false
 	}
 }
 

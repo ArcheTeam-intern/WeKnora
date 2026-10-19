@@ -130,9 +130,6 @@ func shouldTrace(c *gin.Context) bool {
 		// Chunk-level mutations that rerun embeddings on update.
 		case strings.HasPrefix(path, "/api/v1/chunks/") && method == "PUT":
 			return true
-		// Manual data source sync triggers asynq sync.
-		case strings.Contains(path, "/datasource/") && strings.HasSuffix(path, "/sync"):
-			return true
 		}
 	}
 	return false

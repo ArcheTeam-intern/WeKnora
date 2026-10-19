@@ -233,24 +233,26 @@ type WorkerServerStat struct {
 }
 
 const (
-	TypeChunkExtract             = "chunk:extract"
-	TypeDocumentProcess          = "document:process"           // 文档处理任务
-	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
-	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
-	TypeKBClone                  = "kb:clone"                   // 知识库复制任务
-	TypeIndexDelete              = "index:delete"               // 索引删除任务
-	TypeKBDelete                 = "kb:delete"                  // 知识库删除任务
-	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
-	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
-	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
-	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
-	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
-	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
-	TypeKnowledgeAutoTag         = "knowledge:auto_tag"         // 文档自动关联知识库已有标签
-	TypeKnowledgeBaseProfile     = "kb:profile"                 // 知识库描述（画像）生成任务
-	TypeManualProcess            = "manual:process"             // 手工知识更新任务（cleanup + 重新索引）
-	TypeDataSourceSync           = "datasource:sync"            // 数据源同步任务
+	TypeChunkExtract         = "chunk:extract"
+	TypeDocumentProcess      = "document:process"       // 文档处理任务
+	TypeFAQImport            = "faq:import"             // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration   = "question:generation"    // 问题生成任务
+	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
+	TypeKBClone              = "kb:clone"               // 知识库复制任务
+	TypeIndexDelete          = "index:delete"           // 索引删除任务
+	TypeKBDelete             = "kb:delete"              // 知识库删除任务
+	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
+	TypeKnowledgeListReparse = "knowledge:list_reparse" // 批量重解析知识任务
+	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
+	TypeDataTableSummary     = "datatable:summary"      // 表格摘要任务
+	TypeImageMultimodal      = "image:multimodal"       // 图片多模态处理任务（OCR + VLM Caption）
+	TypeKnowledgePostProcess = "knowledge:post_process" // 知识后处理任务（统一调度）
+	TypeKnowledgeAutoTag     = "knowledge:auto_tag"     // 文档自动关联知识库已有标签
+	TypeKnowledgeBaseProfile = "kb:profile"             // 知识库描述（画像）生成任务
+	TypeManualProcess        = "manual:process"         // 手工知识更新任务（cleanup + 重新索引）
+	// TypeDataSourceSync 外部数据源同步任务。该功能已退役：类型保留只为
+	// 消费升级前遗留的任务，见 RetiredTaskTypes。
+	TypeDataSourceSync           = "datasource:sync"
 	TypeWikiIngest               = "wiki:ingest"                // Wiki 页面同步任务
 	TypeWikiFinalize             = "wiki:finalize"              // Wiki KB 级收尾任务（防抖：索引重建/死链清理/交叉链接）
 	TypeTemporaryDocumentProcess = "temporary_document:process" // 会话临时文档解析任务
@@ -278,6 +280,7 @@ const (
 // installation can still hold pre-upgrade tasks.
 var RetiredTaskTypes = []string{
 	TypeMemoryExtract,
+	TypeDataSourceSync,
 }
 
 // MemoryExtractPayload carries everything the background distillation task
@@ -457,7 +460,6 @@ type KBDeletePayload struct {
 	TracingContext
 	TenantID         uint64                  `json:"tenant_id"`
 	KnowledgeBaseID  string                  `json:"knowledge_base_id"`
-	DataSourceIDs    []string                `json:"data_source_ids,omitempty"`
 	EffectiveEngines []RetrieverEngineParams `json:"effective_engines"`
 	// VectorStoreID is the bound store snapshot taken at enqueue time (before
 	// soft-delete) so the async worker can resolve the right store. nil means

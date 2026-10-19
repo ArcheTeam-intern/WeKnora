@@ -436,10 +436,6 @@ func (r *knowledgeRepository) CheckKnowledgeExists(
 
 	switch params.Type {
 	case "file":
-		if params.DataSourceID != "" && params.ExternalID != "" {
-			query = query.Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?",
-				params.DataSourceID, params.ExternalID)
-		}
 		// File content is only a duplicate within the same file type. This keeps
 		// same-content documents with distinct formats (for example, .md and
 		// .txt) available as separate knowledge items.
@@ -894,27 +890,6 @@ func (r *knowledgeRepository) FindByMetadataKeyPrefix(
 		return nil, err
 	}
 	return items, nil
-}
-
-// FindByDataSourceExternalID locates a synced knowledge item without allowing
-// identical external IDs from two data sources to collide in one knowledge base.
-func (r *knowledgeRepository) FindByDataSourceExternalID(
-	ctx context.Context,
-	tenantID uint64,
-	kbID, dataSourceID, externalID string,
-) (*types.Knowledge, error) {
-	var knowledge types.Knowledge
-	err := r.db.WithContext(ctx).
-		Where("tenant_id = ? AND knowledge_base_id = ? AND deleted_at IS NULL", tenantID, kbID).
-		Where("metadata->>'datasource_id' = ? AND metadata->>'external_id' = ?", dataSourceID, externalID).
-		First(&knowledge).Error
-	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &knowledge, nil
 }
 
 // HardDeleteKnowledge physically removes a knowledge row. Call it AFTER

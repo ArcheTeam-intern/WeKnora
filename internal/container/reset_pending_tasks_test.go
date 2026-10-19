@@ -254,43 +254,6 @@ func TestResetPendingTasks_LiteWikiDoesNotHideOtherLostSubtasks(t *testing.T) {
 		"a durable wiki op cannot recover another lost in-memory subtask")
 }
 
-func TestResetPendingTasks_SyncLogStaleRunning(t *testing.T) {
-	db := setupResetPendingDB(t)
-	stale := time.Now().Add(-2 * time.Hour)
-	require.NoError(t, db.Exec(
-		`INSERT INTO sync_logs (id, status, started_at) VALUES (?, ?, ?)`,
-		"sync-1", types.SyncLogStatusRunning, stale,
-	).Error)
-
-	t.Setenv("REDIS_ADDR", "redis:6379")
-	resetPendingTasks(db)
-
-	var status string
-	var finishedAt *time.Time
-	require.NoError(t, db.Raw(
-		`SELECT status, finished_at FROM sync_logs WHERE id = ?`, "sync-1",
-	).Row().Scan(&status, &finishedAt))
-	assert.Equal(t, types.SyncLogStatusFailed, status)
-	require.NotNil(t, finishedAt)
-}
-
-func TestResetPendingTasks_SyncLogLiteMode(t *testing.T) {
-	db := setupResetPendingDB(t)
-	os.Unsetenv("REDIS_ADDR")
-	require.NoError(t, db.Exec(
-		`INSERT INTO sync_logs (id, status, started_at) VALUES (?, ?, ?)`,
-		"sync-lite", types.SyncLogStatusRunning, time.Now(),
-	).Error)
-
-	resetPendingTasks(db)
-
-	var status string
-	require.NoError(t, db.Raw(
-		`SELECT status FROM sync_logs WHERE id = ?`, "sync-lite",
-	).Row().Scan(&status))
-	assert.Equal(t, types.SyncLogStatusFailed, status)
-}
-
 func TestStuckKnowledgeParseQuery_ReuseAfterFindDoesNotBreakUpdate(t *testing.T) {
 	db := setupResetPendingDB(t)
 	stale := time.Now().Add(-2 * time.Hour)

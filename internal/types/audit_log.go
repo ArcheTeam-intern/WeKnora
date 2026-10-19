@@ -169,15 +169,6 @@ const (
 	AuditActionTagUpdated AuditAction = "tag.updated"
 	AuditActionTagDeleted AuditAction = "tag.deleted"
 
-	AuditActionDataSourceCreated       AuditAction = "datasource.created"
-	AuditActionDataSourceUpdated       AuditAction = "datasource.updated"
-	AuditActionDataSourceDeleted       AuditAction = "datasource.deleted"
-	AuditActionDataSourceSyncStarted   AuditAction = "datasource.sync_started"
-	AuditActionDataSourceSyncCompleted AuditAction = "datasource.sync_completed"
-	AuditActionDataSourceSyncFailed    AuditAction = "datasource.sync_failed"
-	AuditActionDataSourcePaused        AuditAction = "datasource.paused"
-	AuditActionDataSourceResumed       AuditAction = "datasource.resumed"
-
 	AuditActionKBShareAdded             AuditAction = "kb.share_added"
 	AuditActionKBSharePermissionChanged AuditAction = "kb.share_permission_changed"
 	AuditActionKBShareRemoved           AuditAction = "kb.share_removed"

@@ -6,7 +6,6 @@ package container
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -55,18 +54,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
-	"github.com/Tencent/WeKnora/internal/datasource"
-	confluenceConnector "github.com/Tencent/WeKnora/internal/datasource/connector/confluence"
-	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
-	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
-	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
-	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
-	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
-	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
-	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
-	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
-	seafileConnector "github.com/Tencent/WeKnora/internal/datasource/connector/seafile"
-	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -167,8 +154,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPEndpointRepository))
 	must(container.Provide(repository.NewTenantDisabledSharedAgentRepository))
 	must(container.Provide(repository.NewUserResourceFavoriteRepository))
-	must(container.Provide(repository.NewDataSourceRepository))
-	must(container.Provide(repository.NewSyncLogRepository))
 	must(container.Provide(repository.NewWikiPageRepository))
 	must(container.Provide(repository.NewTaskPendingOpsRepository))
 	must(container.Provide(repository.NewTaskDeadLetterRepository))
@@ -302,13 +287,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Chat pipeline components for processing chat requests
 	logger.Debugf(ctx, "[Container] Registering chat pipeline plugins...")
 
-	// Data source sync framework
-	logger.Debugf(ctx, "[Container] Registering data source sync framework...")
-	must(container.Provide(initConnectorRegistry))
-	must(container.Provide(datasource.NewScheduler))
-	must(container.Provide(service.NewDataSourceService))
-	must(container.Invoke(startDataSourceScheduler))
-	logger.Debugf(ctx, "[Container] Data source sync framework registered")
 	must(container.Invoke(startAuditLogRetention))
 	logger.Debugf(ctx, "[Container] Audit log retention runner registered")
 	must(container.Provide(service.NewHousekeepingService))
@@ -353,15 +331,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Dig resolves exact types; adapt the registered service to the handler's
 	// narrower SharedAgentLookup interface at the composition boundary.
 	must(container.Provide(handler.NewModelCredentialsHandler))
-	must(container.Provide(handler.NewDataSourceCredentialsHandler))
 	must(container.Provide(handler.NewVectorStoreHandler))
 	must(container.Provide(handler.NewStorageBackendHandler))
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(handler.NewOrganizationHandler))
 
-	// Data source handler
-	must(container.Provide(handler.NewDataSourceHandler))
 	// Wiki page handler
 	must(container.Provide(handler.NewWikiPageHandler))
 	// IM delivery and web-embed publishing are retired in this build: there is
@@ -1554,75 +1529,6 @@ func NewDuckDB() (*sql.DB, error) {
 	}
 
 	return sqlDB, nil
-}
-
-// initConnectorRegistry creates and populates the connector registry with all available connectors.
-// Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
-// container initialization loudly instead of silently disabling the feature at runtime.
-func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
-	registry := datasource.NewConnectorRegistry()
-
-	var errs error
-	if err := registry.Register(wiki.NewConnector(core.RegionFeishu)); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
-	}
-	// Lark is Feishu's international cloud: same connector, different host/tenant.
-	if err := registry.Register(wiki.NewConnector(core.RegionLark)); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
-	}
-	// Feishu/Lark Drive (云盘) mode: different connector type so the registry
-	// dispatches to the Drive connector. Shares core.Client/Region/export logic
-	// with the wiki connector. See 飞书云盘数据源设计.md / ADR-0001.
-	if err := registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive)); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register feishu_drive connector: %w", err))
-	}
-	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
-	}
-	if err := registry.Register(notionConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
-	}
-	if err := registry.Register(confluenceConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register confluence connector: %w", err))
-	}
-	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
-	}
-	if err := registry.Register(dingtalkConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register dingtalk connector: %w", err))
-	}
-	if err := registry.Register(imaConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register ima connector: %w", err))
-	}
-	if err := registry.Register(rssConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
-	}
-	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
-	}
-	if err := registry.Register(seafileConnector.NewConnector()); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("register seafile connector: %w", err))
-	}
-
-	// Future connectors will be registered here:
-	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
-
-	if errs != nil {
-		return nil, errs
-	}
-	return registry, nil
-}
-
-// startDataSourceScheduler starts the data source cron scheduler and registers cleanup.
-func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interfaces.ResourceCleaner) {
-	if err := scheduler.Start(context.Background()); err != nil {
-		logger.Warnf(context.Background(), "[Container] data source scheduler start failed: %v", err)
-	}
-
-	cleaner.RegisterWithName("DataSourceScheduler", func() error {
-		scheduler.StopWithin(cleanupStepTimeout)
-		return nil
-	})
 }
 
 // startHousekeepingService starts the knowledge housekeeping cron and registers

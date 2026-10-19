@@ -286,10 +286,6 @@ func apiKeyManageMCPServices(base middleware.APIKeyRoutePolicy) middleware.APIKe
 	return base.WithCapability(types.APIKeyCapabilityManageMCPServices)
 }
 
-func apiKeyManageDataSources(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
-	return base.WithCapability(types.APIKeyCapabilityManageDataSources)
-}
-
 func apiKeyManageChannels(base middleware.APIKeyRoutePolicy) middleware.APIKeyRoutePolicy {
 	return base.WithCapability(types.APIKeyCapabilityManageChannels)
 }
