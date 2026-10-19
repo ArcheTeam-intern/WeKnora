@@ -6,7 +6,6 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/handler"
-	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -44,7 +43,6 @@ func RegisterTenantRoutes(
 	r *gin.RouterGroup,
 	handler *handler.TenantHandler,
 	memberHandler *handler.TenantMemberHandler,
-	invitationHandler *handler.TenantInvitationHandler,
 	auditLogHandler *handler.AuditLogHandler,
 	g *rbacGuards,
 ) {
@@ -125,16 +123,6 @@ func RegisterTenantRoutes(
 			// existing /members mutation gates. nil-skip pattern
 			// mirrors memberHandler above for environments built
 			// without the invitation dependency wired.
-			if invitationHandler != nil {
-				g.apiKeyRoute(tenantByID, http.MethodGet, "/invitations", apiKeyManageMembers(apiKeyFullAccess()), g.Viewer(), invitationHandler.ListTenantInvitations)
-				g.apiKeyRoute(tenantByID, http.MethodPost, "/invitations", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.CreateInvitation)
-				g.apiKeyRoute(tenantByID, http.MethodDelete, "/invitations/:inv_id", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.RevokeInvitation)
-				// Share-link create lives under /invite-links so the URL
-				// reads as "create a link" rather than another flavour
-				// of /invitations; the underlying row still lives in the
-				// tenant_invitations table and shows up in the GET above.
-				g.apiKeyRoute(tenantByID, http.MethodPost, "/invite-links", apiKeyManageMembers(apiKeyFullAccess()), g.Owner(), invitationHandler.CreateInviteLink)
-			}
 
 			// Audit log feed (PR 6 of #1303). Admin+ so denied-action
 			// histories don't surface to ordinary members; the
@@ -148,54 +136,13 @@ func RegisterTenantRoutes(
 	}
 }
 
-// RegisterMyInvitationRoutes wires the per-user invitation inbox under
-// /me/invitations. The v1 group already applies middleware.Auth so we
-// don't need a role gate here — the service enforces "only the invitee
-// can accept/decline". The list endpoint mounts under /me to make the
-// "show me MY invitations" semantics obvious in URLs and logs (vs the
-// tenant-scoped /tenants/:id/invitations which lists ALL invitations
-// for the tenant). pending-count is a separate, ultra-light endpoint
-// the avatar-row badge polls; splitting it off so polling doesn't
-// transfer the full list every cycle.
-//
-// invitationHandler may be nil in environments built without the
-// invitation dependency wired; that's a no-op registration which is
-// preferable to a startup crash.
-func RegisterMyInvitationRoutes(r *gin.RouterGroup, invitationHandler *handler.TenantInvitationHandler) {
-	if invitationHandler == nil {
-		return
-	}
-	me := r.Group("/me")
-	{
-		me.GET("/invitations", invitationHandler.ListMyInvitations)
-		me.GET("/invitations/pending-count", invitationHandler.CountMyPendingInvitations)
-		me.POST("/invitations/:inv_id/accept", invitationHandler.AcceptMyInvitation)
-		me.POST("/invitations/:inv_id/decline", invitationHandler.DeclineMyInvitation)
-		// 已登录用户用共享链接 token 加入空间（对应 register-by-invite，但不建新账号）。
-		me.POST("/invitations/accept-by-token", invitationHandler.AcceptMyInvitationByToken)
-	}
-}
-
 // RegisterAuthRoutes registers authentication routes
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards) {
-	r.POST("/auth/register", handler.Register)
-	// Share-link surfaces are unauthenticated and accept a plaintext
-	// token from the caller; rate-limit by IP to bound brute-force /
-	// enumeration / abuse traffic. Limiter is shared across both
-	// endpoints (see middleware/auth_public_ratelimit.go) so total
-	// budget per IP is intuitive.
-	publicAuthRL := middleware.PublicAuthRateLimit()
-	r.POST("/auth/register-by-invite", publicAuthRL, handler.RegisterByInvite)
-	r.POST("/auth/invitations/lookup", publicAuthRL, handler.LookupInvitationByToken)
 	r.POST("/auth/login", handler.Login)
 	r.POST("/auth/auto-setup", handler.AutoSetup)
 	r.GET("/auth/config", handler.GetAuthConfig)
 	r.POST("/auth/switch-tenant", handler.SwitchTenant)
-	r.GET("/auth/oidc/config", handler.GetOIDCConfig)
-	r.GET("/auth/oidc/url", handler.GetOIDCAuthorizationURL)
-	r.GET("/auth/oidc/callback", handler.OIDCRedirectCallback)
 	// /auth/oidc/start：直连 302 跳转到 OIDC 提供方，供前端无法走 JS 拉取 URL 的场景直接发起登录
-	r.GET("/auth/oidc/start", handler.OIDCStart)
 	r.POST("/auth/refresh", handler.RefreshToken)
 	r.GET("/auth/validate", handler.ValidateToken)
 	r.POST("/auth/logout", handler.Logout)

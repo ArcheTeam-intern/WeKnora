@@ -31,7 +31,6 @@ func TestRemovedModulesReadAsUnsupported(t *testing.T) {
 		MCPEndpointService:       &stubEndpointService{},
 		MessageSuggestionHandler: &handler.MessageSuggestionHandler{},
 		TenantMemberHandler:      &handler.TenantMemberHandler{},
-		TenantInvitationHandler:  &handler.TenantInvitationHandler{},
 		AuditLogHandler:          &handler.AuditLogHandler{},
 		TenantAPIKeyService:      nil,
 	}
