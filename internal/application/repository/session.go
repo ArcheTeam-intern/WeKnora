@@ -377,10 +377,14 @@ func (r *sessionRepository) UpdateLastRequestState(
 // UpdateLastRequestState: the UPDATE itself carries the "still unbound"
 // condition, so the read-check-write of a legacy adoption collapses into one
 // atomic statement and concurrent adoptions of the same row cannot both
-// succeed. "Unbound" mirrors what the Go side can decide on read: a missing,
-// empty, non-JSON or endpoint_id-less agent_config value all count as
-// unbound — a row whose JSON Scan cannot fill predates the binding exactly
-// like a NULL one does.
+// succeed. For every agent_config shape the product's own serializer
+// produces, "unbound" here matches what the Go side decides on read: a
+// missing, empty, non-JSON or endpoint_id-less value all count as unbound —
+// a row whose JSON Scan cannot fill predates the binding exactly like a
+// NULL one does. A hand-corrupted non-string endpoint_id (bool, number) is
+// the one shape where the two views differ — the SQL side reads it as bound
+// while Scan ignores it — and the divergence lands on the safe side: the
+// adoption writes nothing, the core surface re-validates and refuses.
 func (r *sessionRepository) AdoptLastRequestState(
 	ctx context.Context, tenantID uint64, userID string, sessionID string,
 	state *types.SessionLastRequestState,

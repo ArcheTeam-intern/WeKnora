@@ -117,11 +117,12 @@ type SessionRepository interface {
 	UpdateLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
 	// AdoptLastRequestState writes a scope binding only while the session
 	// still carries none, decided inside the UPDATE itself: no agent_config,
-	// or its endpoint_id key missing/empty — the same rule the core surface
-	// applies on read. Concurrent first-time adoptions of one row therefore
-	// serialize: exactly one gets 1, everyone else gets 0 and must re-check
-	// the stored binding. Scope rules match UpdateLastRequestState; state
-	// must be non-nil and must name its endpoint.
+	// or its endpoint_id key missing/empty — the rule the core surface
+	// applies on read, for every shape the product's serializer produces.
+	// Concurrent first-time adoptions of one row therefore serialize: exactly
+	// one gets 1, everyone else gets 0 and must re-check the stored binding.
+	// Scope rules match UpdateLastRequestState; state must be non-nil and
+	// must name its endpoint.
 	AdoptLastRequestState(ctx context.Context, tenantID uint64, userID string, sessionID string, state *types.SessionLastRequestState) (int64, error)
 	// SetPinned pins or unpins a session row scoped by tenant.
 	// userID, when non-empty, is enforced so users cannot pin sessions they don't own.
