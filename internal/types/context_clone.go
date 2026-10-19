@@ -112,10 +112,6 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// one attachment's file type. Read by the attachment processor on the same
 	// context that set it, and meaningless for anything else.
 	ChatParserEngineContextKey: false,
-	// The authenticated embed channel. Every reader takes it straight off the
-	// request context inside the embed handler that authenticated it; nothing
-	// downstream of a detach reads it.
-	EmbedChannelContextKey: false,
 	// The authenticated MCP endpoint. Read only by the MCP tool handlers on
 	// the request context that authenticated it.
 	MCPEndpointContextKey: false,

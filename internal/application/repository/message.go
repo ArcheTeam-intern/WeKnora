@@ -268,50 +268,6 @@ func (r *messageRepository) GetMessageByRequestID(
 	return &message, nil
 }
 
-// SearchMessagesByKeyword searches messages by keyword across sessions for a tenant
-func (r *messageRepository) SearchMessagesByKeyword(
-	ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int,
-) ([]*types.MessageWithSession, error) {
-	if limit <= 0 {
-		limit = 20
-	}
-
-	// ILIKE is Postgres-only; SQLite (Lite build) and MySQL lack the keyword,
-	// so mirror the session-list search with LOWER() on both sides. ESCAPE ?
-	// pairs with escapeLikeKeyword: SQLite has no default LIKE escape
-	// character, so without it \% and \_ would never match a literal wildcard.
-	contentLikeExpr := "LOWER(messages.content) LIKE LOWER(?) ESCAPE ?"
-	if r.db.Name() == "postgres" {
-		contentLikeExpr = "messages.content ILIKE ? ESCAPE ?"
-	}
-
-	var results []*types.MessageWithSession
-
-	query := r.db.WithContext(ctx).
-		Table("messages").
-		Select("messages.*, sessions.title as session_title").
-		Joins("INNER JOIN sessions ON sessions.id = messages.session_id AND sessions.deleted_at IS NULL").
-		Where("sessions.tenant_id = ?", tenantID).
-		Where("messages.deleted_at IS NULL").
-		Where(contentLikeExpr, "%"+escapeLikeKeyword(keyword)+"%", likeEscapeChar)
-
-	// Matches the scoping used when listing sessions, including the legacy
-	// allowance for tenant-level sessions created before per-user ownership.
-	if ownerID != "" {
-		query = query.Where("(sessions.user_id = ? OR sessions.user_id IS NULL OR sessions.user_id = '')", ownerID)
-	}
-
-	if len(sessionIDs) > 0 {
-		query = query.Where("messages.session_id IN ?", sessionIDs)
-	}
-
-	if err := query.Order("messages.created_at DESC").Limit(limit).Find(&results).Error; err != nil {
-		return nil, err
-	}
-
-	return results, nil
-}
-
 // OwnedSessionIDs narrows a set of session ids to the ones this person owns.
 //
 // The vector path finds messages through a shared knowledge base that has no

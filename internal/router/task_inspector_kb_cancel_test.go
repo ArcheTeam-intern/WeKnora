@@ -18,7 +18,6 @@ func TestMatchesKnowledgeBase(t *testing.T) {
 		"knowledge-1": {},
 		"knowledge-2": {},
 	}
-	dataSourceIDs := map[string]struct{}{"datasource-1": {}}
 	tests := []struct {
 		name     string
 		taskType string
@@ -53,20 +52,12 @@ func TestMatchesKnowledgeBase(t *testing.T) {
 			name: "preserve index delete by knowledge", taskType: types.TypeIndexDelete,
 			payload: `{"knowledge_id":"knowledge-1"}`,
 		},
-		{
-			name: "data source sync", taskType: types.TypeDataSourceSync,
-			payload: `{"data_source_id":"datasource-1"}`, want: true,
-		},
-		{
-			name: "other data source sync", taskType: types.TypeDataSourceSync,
-			payload: `{"data_source_id":"datasource-other"}`,
-		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := matchesKnowledgeBase(
-				test.taskType, []byte(test.payload), "kb-1", knowledgeIDs, dataSourceIDs,
+				test.taskType, []byte(test.payload), "kb-1", knowledgeIDs,
 			)
 			if got != test.want {
 				t.Fatalf("matchesKnowledgeBase() = %v, want %v", got, test.want)
@@ -116,10 +107,6 @@ func TestCancelTasksForKnowledgeBaseRescansMutatedPages(t *testing.T) {
 	enqueueTask(t, asynqClient, types.TypeIndexDelete,
 		`{"knowledge_base_id":"kb-delete"}`, "index-delete-cleanup",
 	)
-	enqueueTask(t, asynqClient, types.TypeDataSourceSync,
-		`{"data_source_id":"datasource-delete"}`, "datasource-sync",
-	)
-
 	scheduleTask(t, asynqClient, types.TypeFAQImport,
 		`{"kb_id":"kb-delete"}`, "scheduled-kb-match",
 	)
@@ -131,12 +118,12 @@ func TestCancelTasksForKnowledgeBaseRescansMutatedPages(t *testing.T) {
 	)
 
 	deleted, cancelled, err := inspector.CancelTasksForKnowledgeBase(
-		context.Background(), "kb-delete", []string{"knowledge-associated"}, []string{"datasource-delete"},
+		context.Background(), "kb-delete", []string{"knowledge-associated"},
 	)
 	if err != nil {
 		t.Fatalf("cancel tasks: %v", err)
 	}
-	if want := matchingPending + 3; deleted != want {
+	if want := matchingPending + 2; deleted != want {
 		t.Fatalf("deleted = %d, want %d", deleted, want)
 	}
 	if cancelled != 0 {
@@ -229,7 +216,7 @@ func TestCancelTasksForKnowledgeBaseRemovesCancelledActiveRetry(t *testing.T) {
 	waitForTaskState(t, inspector.inspector, taskID, asynq.TaskStateActive)
 
 	deleted, cancelled, err := inspector.CancelTasksForKnowledgeBase(
-		context.Background(), "kb-delete", nil, nil,
+		context.Background(), "kb-delete", nil,
 	)
 	if err != nil {
 		t.Fatalf("cancel active task: %v", err)

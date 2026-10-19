@@ -181,6 +181,11 @@ func SessionListSourceRequiresAdmin(source string) bool {
 	return true
 }
 
+// EmbedSessionMarkerPrefix tags sessions created through an embed channel.
+// Embed channel management is retired, but stored rows still carry the marker,
+// so the classifier that hides them from non-admin consoles stays meaningful.
+const EmbedSessionMarkerPrefix = "embed_channel:"
+
 // SessionRequiresAdminConsoleRead reports whether a session row is channel-
 // managed traffic that non-admin web users must not open from the console.
 func SessionRequiresAdminConsoleRead(s *Session, imPlatform string) bool {

@@ -60,8 +60,6 @@ type runtimeTaskPayloadProbe struct {
 	TargetID        string   `json:"target_id,omitempty"`
 	SourceKBID      string   `json:"source_kb_id,omitempty"`
 	TargetKBID      string   `json:"target_kb_id,omitempty"`
-	DataSourceID    string   `json:"data_source_id,omitempty"`
-	SyncLogID       string   `json:"sync_log_id,omitempty"`
 	KnowledgeIDs    []string `json:"knowledge_ids,omitempty"`
 	EnqueuedAt      int64    `json:"enqueued_at,omitempty"`
 	CreatedAt       int64    `json:"created_at,omitempty"`
@@ -128,7 +126,7 @@ func (a *asynqTaskInspector) CancelTasksForKnowledge(
 // The kb:delete task is deliberately excluded because it performs the durable
 // storage cleanup and must remain queued.
 func (a *asynqTaskInspector) CancelTasksForKnowledgeBase(
-	ctx context.Context, knowledgeBaseID string, knowledgeIDs []string, dataSourceIDs []string,
+	ctx context.Context, knowledgeBaseID string, knowledgeIDs []string,
 ) (int, int, error) {
 	if a == nil || a.inspector == nil {
 		return 0, 0, nil
@@ -139,18 +137,12 @@ func (a *asynqTaskInspector) CancelTasksForKnowledgeBase(
 			knowledgeIDSet[knowledgeID] = struct{}{}
 		}
 	}
-	dataSourceIDSet := make(map[string]struct{}, len(dataSourceIDs))
-	for _, dataSourceID := range dataSourceIDs {
-		if dataSourceID != "" {
-			dataSourceIDSet[dataSourceID] = struct{}{}
-		}
-	}
-	if knowledgeBaseID == "" && len(knowledgeIDSet) == 0 && len(dataSourceIDSet) == 0 {
+	if knowledgeBaseID == "" && len(knowledgeIDSet) == 0 {
 		return 0, 0, nil
 	}
 
 	deleted, cancelled := a.cancelMatchingTasks(ctx, func(taskType string, payload []byte) bool {
-		return matchesKnowledgeBase(taskType, payload, knowledgeBaseID, knowledgeIDSet, dataSourceIDSet)
+		return matchesKnowledgeBase(taskType, payload, knowledgeBaseID, knowledgeIDSet)
 	})
 	logger.Infof(ctx,
 		"[TaskInspector] knowledge_base=%s cancel summary: deleted_from_queue=%d active_cancel_signaled=%d",
@@ -420,8 +412,6 @@ func projectRuntimeTask(task *asynq.TaskInfo, worker runtimeWorkerMetadata) (typ
 		TargetID:        probe.TargetID,
 		SourceKBID:      probe.SourceKBID,
 		TargetKBID:      probe.TargetKBID,
-		DataSourceID:    probe.DataSourceID,
-		SyncLogID:       probe.SyncLogID,
 		KnowledgeCount:  len(probe.KnowledgeIDs),
 	}
 	info.AllowedActions = runtimeTaskActions(info)
@@ -1095,7 +1085,6 @@ func matchesKnowledgeBase(
 	payload []byte,
 	knowledgeBaseID string,
 	knowledgeIDs map[string]struct{},
-	dataSourceIDs map[string]struct{},
 ) bool {
 	// These cleanup tasks carry snapshots specifically so they can still run
 	// after the KB row has been soft-deleted. Removing them leaks resources.
@@ -1130,9 +1119,6 @@ func matchesKnowledgeBase(
 		if _, ok := knowledgeIDs[knowledgeID]; ok && knowledgeID != "" {
 			return true
 		}
-	}
-	if _, ok := dataSourceIDs[probe.DataSourceID]; ok && probe.DataSourceID != "" {
-		return true
 	}
 	return false
 }

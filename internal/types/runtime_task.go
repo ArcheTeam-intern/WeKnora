@@ -77,8 +77,6 @@ type RuntimeTaskInfo struct {
 	TargetID        string              `json:"target_id,omitempty"`
 	SourceKBID      string              `json:"source_kb_id,omitempty"`
 	TargetKBID      string              `json:"target_kb_id,omitempty"`
-	DataSourceID    string              `json:"data_source_id,omitempty"`
-	SyncLogID       string              `json:"sync_log_id,omitempty"`
 	KnowledgeCount  int                 `json:"knowledge_count,omitempty"`
 }
 

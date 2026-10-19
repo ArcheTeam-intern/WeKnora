@@ -92,13 +92,11 @@ type KnowledgeBaseTaskCanceller interface {
 	// CancelTasksForKnowledgeBase removes pending/scheduled/retry tasks
 	// associated with kbID and signals matching active workers to stop.
 	// knowledgeIDs covers batch tasks whose payload references documents but
-	// does not carry the parent knowledge-base ID. dataSourceIDs covers sync
-	// tasks whose payload only identifies a data source.
+	// does not carry the parent knowledge-base ID.
 	CancelTasksForKnowledgeBase(
 		ctx context.Context,
 		kbID string,
 		knowledgeIDs []string,
-		dataSourceIDs []string,
 	) (deleted int, cancelled int, err error)
 }
 

@@ -30,7 +30,7 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 		Role:        types.TenantRoleAdmin,
 		SystemAdmin: true,
 		APIKeyScope: scope,
-		Extra:       map[types.ContextKey]any{types.EmbedChannelContextKey: &types.EmbedChannel{ID: "ch"}},
+		Extra:       map[types.ContextKey]any{types.LanguageContextKey: "zh-CN"},
 	})
 
 	ctx := c.Request.Context()
@@ -71,10 +71,10 @@ func TestApplyAuthSessionSetsBothSurfaces(t *testing.T) {
 	// Extra keys must land on both the request context and the gin key store.
 	// The value below is one of the shared context keys; its owning middleware
 	// is separate from this test, which only checks propagation.
-	if got, ok := ctx.Value(types.EmbedChannelContextKey).(*types.EmbedChannel); !ok || got.ID != "ch" {
+	if got, ok := ctx.Value(types.LanguageContextKey).(string); !ok || got != "zh-CN" {
 		t.Fatalf("ctx extra value = %#v, ok=%v", got, ok)
 	}
-	if got, ok := c.Get(types.EmbedChannelContextKey.String()); !ok || got.(*types.EmbedChannel).ID != "ch" {
+	if got, ok := c.Get(types.LanguageContextKey.String()); !ok || got.(string) != "zh-CN" {
 		t.Fatalf("keys extra value = %v, ok=%v", got, ok)
 	}
 }

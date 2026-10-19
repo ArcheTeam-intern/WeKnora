@@ -16,9 +16,8 @@ import (
 )
 
 type kbTaskCancelCall struct {
-	kbID          string
-	knowledgeIDs  []string
-	dataSourceIDs []string
+	kbID         string
+	knowledgeIDs []string
 }
 
 type recordingKBTaskInspector struct {
@@ -59,12 +58,10 @@ func (r *recordingKBTaskInspector) CancelTasksForKnowledgeBase(
 	_ context.Context,
 	kbID string,
 	knowledgeIDs []string,
-	dataSourceIDs []string,
 ) (int, int, error) {
 	r.calls = append(r.calls, kbTaskCancelCall{
-		kbID:          kbID,
-		knowledgeIDs:  append([]string(nil), knowledgeIDs...),
-		dataSourceIDs: append([]string(nil), dataSourceIDs...),
+		kbID:         kbID,
+		knowledgeIDs: append([]string(nil), knowledgeIDs...),
 	})
 	if r.repo != nil && r.repo.deletedID == kbID {
 		r.sawSoftDeletedRecord = true
@@ -362,11 +359,9 @@ func TestCancelTasksForKnowledgeBaseForwardsKnowledgeIDs(t *testing.T) {
 		context.Background(),
 		"kb-1",
 		[]string{"knowledge-1", "knowledge-2"},
-		[]string{"datasource-1"},
 	)
 
 	require.Len(t, inspector.calls, 1)
 	assert.Equal(t, "kb-1", inspector.calls[0].kbID)
 	assert.Equal(t, []string{"knowledge-1", "knowledge-2"}, inspector.calls[0].knowledgeIDs)
-	assert.Equal(t, []string{"datasource-1"}, inspector.calls[0].dataSourceIDs)
 }

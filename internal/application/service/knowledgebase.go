@@ -842,7 +842,7 @@ func (s *knowledgeBaseService) DeleteKnowledgeBase(ctx context.Context, id strin
 	kbCleanupCtx, cancelKBCleanup := context.WithTimeout(
 		context.WithoutCancel(ctx), kbTaskCleanupTimeout,
 	)
-	s.cleanupTasksForKnowledgeBase(kbCleanupCtx, id, nil, nil)
+	s.cleanupTasksForKnowledgeBase(kbCleanupCtx, id, nil)
 	cancelKBCleanup()
 
 	// Step 1b: Remove all organization shares for this KB so org settings no longer show them
@@ -921,7 +921,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 		// return path, including retryable failures and cancellation.
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), kbTaskCleanupTimeout)
 		defer cancel()
-		s.cleanupTasksForKnowledgeBase(cleanupCtx, kbID, knowledgeIDs, nil)
+		s.cleanupTasksForKnowledgeBase(cleanupCtx, kbID, knowledgeIDs)
 	}()
 
 	logger.Infof(ctx, "Processing KB delete task for knowledge base: %s", kbID)
@@ -944,7 +944,7 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 	// Repeat the best-effort queue scrub with document IDs. Some batch tasks
 	// only carry knowledge_id(s), and active work from the first pass may have
 	// enqueued another downstream task before cancellation reached it.
-	s.cleanupTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, nil)
+	s.cleanupTasksForKnowledgeBase(ctx, kbID, knowledgeIDs)
 
 	// Step 2: Delete all knowledge entries and their resources
 	if len(knowledgeList) > 0 {
@@ -1110,13 +1110,12 @@ func (s *knowledgeBaseService) cancelTasksForKnowledgeBase(
 	ctx context.Context,
 	kbID string,
 	knowledgeIDs []string,
-	dataSourceIDs []string,
 ) {
 	canceller, ok := s.taskInspector.(interfaces.KnowledgeBaseTaskCanceller)
 	if !ok || kbID == "" {
 		return
 	}
-	if _, _, err := canceller.CancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, dataSourceIDs); err != nil {
+	if _, _, err := canceller.CancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs); err != nil {
 		logger.Warnf(ctx, "Failed to cancel queued tasks for deleted KB %s: %v", kbID, err)
 	}
 }
@@ -1128,7 +1127,6 @@ func (s *knowledgeBaseService) cleanupTasksForKnowledgeBase(
 	ctx context.Context,
 	kbID string,
 	knowledgeIDs []string,
-	dataSourceIDs []string,
 ) {
 	if kbID == "" {
 		return
@@ -1142,7 +1140,7 @@ func (s *knowledgeBaseService) cleanupTasksForKnowledgeBase(
 			logger.Warnf(ctx, "Failed to clear durable tasks for deleted KB %s: %v", kbID, err)
 		}
 	}
-	s.cancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs, nil)
+	s.cancelTasksForKnowledgeBase(ctx, kbID, knowledgeIDs)
 }
 
 // SetEmbeddingModel sets the embedding model for a knowledge base
