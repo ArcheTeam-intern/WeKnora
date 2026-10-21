@@ -7,27 +7,35 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// Core tool names. The main product discovers exactly these five; the legacy
+// Core tool names. The main product discovers exactly these seven; the legacy
 // catalogue stays published on /mcp/:endpoint_id until its clients migrate.
 const (
-	CoreToolKnowledgeBase = "knowledge_base"
-	CoreToolIngest        = "ingest_document"
-	CoreToolSearch        = "search_knowledge"
-	CoreToolRead          = "read_document"
-	CoreToolAsk           = "ask"
+	CoreToolKnowledgeBase  = "knowledge_base"
+	CoreToolIngest         = "ingest_document"
+	CoreToolSearch         = "search_knowledge"
+	CoreToolRead           = "read_document"
+	CoreToolAsk            = "ask"
+	CoreToolWikiWorkspace  = "wiki_workspace"
+	CoreToolAgentWorkspace = "agent_workspace"
 )
 
 // Core actions. A tool without an `action` parameter (search_knowledge, ask)
 // has exactly one implicit action, named here so the permission table can be
 // keyed on (tool, action) uniformly.
 const (
-	CoreActionList   = "list"
-	CoreActionGet    = "get"
-	CoreActionCreate = "create"
-	CoreActionSubmit = "submit"
-	CoreActionStatus = "status"
-	CoreActionRead   = "read"
-	CoreActionSingle = "single"
+	CoreActionList      = "list"
+	CoreActionGet       = "get"
+	CoreActionCreate    = "create"
+	CoreActionSubmit    = "submit"
+	CoreActionStatus    = "status"
+	CoreActionRead      = "read"
+	CoreActionSingle    = "single"
+	CoreActionUpdate    = "update"
+	CoreActionDelete    = "delete"
+	CoreActionRevisions = "revisions"
+	CoreActionRestore   = "restore"
+	CoreActionGraph     = "graph"
+	CoreActionCopy      = "copy"
 )
 
 // corePermission is the set of legacy endpoint permissions a core call needs.
@@ -47,6 +55,19 @@ type corePermission struct {
 
 // coreActionPermissions is the whole authorization table for the core surface.
 var coreActionPermissions = map[string]corePermission{
+	CoreToolAgentWorkspace + "." + CoreActionList:     {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolAgentWorkspace + "." + CoreActionGet:      {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolAgentWorkspace + "." + CoreActionCreate:   {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolAgentWorkspace + "." + CoreActionUpdate:   {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolAgentWorkspace + "." + CoreActionDelete:   {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolAgentWorkspace + "." + CoreActionCopy:     {Tools: []string{types.MCPEndpointToolAgentWorkspace}},
+	CoreToolWikiWorkspace + "." + CoreActionGet:       {Tools: []string{types.MCPEndpointToolWikiReadPage}},
+	CoreToolWikiWorkspace + "." + CoreActionRevisions: {Tools: []string{types.MCPEndpointToolWikiReadPage}},
+	CoreToolWikiWorkspace + "." + CoreActionGraph:     {Tools: []string{types.MCPEndpointToolWikiGraph}},
+	CoreToolWikiWorkspace + "." + CoreActionCreate:    {Tools: []string{types.MCPEndpointToolWikiWorkspace}},
+	CoreToolWikiWorkspace + "." + CoreActionUpdate:    {Tools: []string{types.MCPEndpointToolWikiWorkspace}},
+	CoreToolWikiWorkspace + "." + CoreActionDelete:    {Tools: []string{types.MCPEndpointToolWikiWorkspace}},
+	CoreToolWikiWorkspace + "." + CoreActionRestore:   {Tools: []string{types.MCPEndpointToolWikiWorkspace}},
 	CoreToolKnowledgeBase + "." + CoreActionList: {
 		Tools: []string{types.MCPEndpointToolListKnowledgeBases},
 	},
@@ -111,6 +132,12 @@ func resolveCoreAction(tool, action string, args map[string]any) (corePermission
 	// Source-specific requirements are additive and must be present before
 	// the aggregated tool touches that source.
 	switch tool {
+	case CoreToolAsk:
+		if id, err := coreStringArg(args, "agent_id", ""); err != nil {
+			return corePermission{}, err
+		} else if id != "" {
+			perm.Tools = append(perm.Tools, types.MCPEndpointToolAgentWorkspace)
+		}
 	case CoreToolSearch:
 		sources, err := coreStringList(args, "sources")
 		if err != nil {
@@ -176,7 +203,7 @@ func resolveCoreAction(tool, action string, args map[string]any) (corePermission
 // and for the protocol test.
 func coreActionsFor(tool string) []string {
 	out := make([]string, 0, 3)
-	for _, action := range []string{CoreActionList, CoreActionGet, CoreActionCreate, CoreActionSubmit, CoreActionStatus, CoreActionRead} {
+	for _, action := range []string{CoreActionList, CoreActionGet, CoreActionCreate, CoreActionSubmit, CoreActionStatus, CoreActionRead, CoreActionUpdate, CoreActionDelete, CoreActionCopy, CoreActionRevisions, CoreActionRestore, CoreActionGraph} {
 		if _, ok := coreActionPermissions[tool+"."+action]; ok {
 			out = append(out, action)
 		}

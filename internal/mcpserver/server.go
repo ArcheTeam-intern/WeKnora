@@ -284,6 +284,9 @@ func (s *Server) guardTool(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 		if err != nil {
 			return result, err
 		}
+		if req.Params.Name == CoreToolWikiWorkspace {
+			return result, nil
+		}
 		return s.rewriteResourceURLs(ctx, ep, result), nil
 	}
 }
@@ -326,6 +329,8 @@ func (s *Server) toolCatalog() []server.ServerTool {
 		{Tool: wikiIndexTool(), Handler: s.handleWikiIndex},
 		{Tool: wikiListPagesTool(), Handler: s.handleWikiListPages},
 		{Tool: wikiGraphTool(), Handler: s.handleWikiGraph},
+		{Tool: coreWikiWorkspaceTool(), Handler: s.handleCoreWikiWorkspace},
+		{Tool: coreAgentWorkspaceTool(), Handler: s.handleCoreAgentWorkspace},
 		{Tool: knowledgeGraphQueryTool(), Handler: s.handleKnowledgeGraphQuery},
 		{Tool: getDocumentStatusTool(), Handler: s.handleGetDocumentStatus},
 		{Tool: getKnowledgeBaseStatusTool(), Handler: s.handleGetKnowledgeBaseStatus},

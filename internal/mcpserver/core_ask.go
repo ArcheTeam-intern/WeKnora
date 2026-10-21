@@ -27,6 +27,7 @@ func coreAskTool() mcp.Tool {
 			"endpoint default"), mcp.Enum("quick-answer", "smart-reasoning")),
 		mcp.WithString("profile_id", mcp.Description("A QA profile published by this endpoint "+
 			"(see knowledge_base.get). Internal agent ids are not accepted.")),
+		mcp.WithString("agent_id", mcp.Description("Visible native agent from agent_workspace. Requires explicit agent_workspace permission and a signed-in workspace user; mutually exclusive with mode and profile_id.")),
 		mcp.WithString("session_id", mcp.Description("Continue a previous answer's conversation")),
 		mcp.WithReadOnlyHintAnnotation(true),
 	)
@@ -42,8 +43,9 @@ type askPlan struct {
 	// mode, the endpoint's published profile (named or defaulted to), or the
 	// quick-answer fallback when the endpoint configured nothing.
 	Agent *types.CustomAgent
-	// Mode is the caller-facing mode label: "", "quick-answer" or
-	// "smart-reasoning". "" means the endpoint default decided.
+	// Mode is the effective mode label: "", "quick-answer" or
+	// "smart-reasoning". Explicit agent selection records its native mode;
+	// "" means the endpoint default decided.
 	Mode string
 	// ProfileID is the published profile the caller named, if any.
 	ProfileID string
@@ -123,7 +125,9 @@ func (s *Server) handleCoreAsk(ctx context.Context, req mcp.CallToolRequest) (*m
 	if len(plan.KBIDs) > 0 {
 		forward["knowledge_base_ids"] = plan.KBIDs
 	}
-	result, callErr := s.handleAsk(ctx, legacyRequest(forward))
+	// Forward the resolved objects, including a deliberately empty KB set.
+	// Re-resolving the endpoint default here would discard explicit agent_id.
+	result, callErr := s.handleAsk(context.WithValue(ctx, resolvedCoreAskPlanKey{}, plan), legacyRequest(forward))
 	if callErr != nil {
 		return nil, callErr
 	}
@@ -165,7 +169,17 @@ func (s *Server) resolveAskPlan(
 	if err != nil {
 		return nil, err
 	}
-	profileID := strings.TrimSpace(stringValue(args["profile_id"]))
+	profileID, err := coreStringArg(args, "profile_id", "")
+	if err != nil {
+		return nil, err
+	}
+	agentID, err := coreStringArg(args, "agent_id", "")
+	if err != nil {
+		return nil, err
+	}
+	if agentID != "" && (mode != "" || profileID != "") {
+		return nil, invalidArgument("agent_id, mode and profile_id are mutually exclusive")
+	}
 	plan := &askPlan{Mode: mode, ProfileID: profileID}
 
 	if profileID != "" {
@@ -197,7 +211,25 @@ func (s *Server) resolveAskPlan(
 	// endpoint configuration. The previous revision hard-coded quick-answer
 	// before forwarding, silently overriding both the endpoint default and a
 	// published profile.
-	agent, err := s.resolveAskAgent(ctx, ep, plan.Mode)
+	var agent *types.CustomAgent
+	if agentID != "" {
+		if !ep.HasTool(types.MCPEndpointToolAsk) {
+			return nil, forbidden("ask is not enabled on this endpoint")
+		}
+		ctx, err = requireAgentWorkspaceUser(ctx, ep)
+		if err != nil {
+			return nil, err
+		}
+		agent, err = s.visibleWorkspaceAgent(ctx, ep, agentID)
+		if err == nil {
+			agent, err = knowledgeOnlyAgent(agent)
+		}
+		if err == nil {
+			plan.Mode = agent.Config.AgentMode
+		}
+	} else {
+		agent, err = s.resolveAskAgent(ctx, ep, plan.Mode)
+	}
 	if err != nil {
 		return nil, &ToolError{Code: CodeInvalidArgument, Message: err.Error()}
 	}
@@ -207,14 +239,32 @@ func (s *Server) resolveAskPlan(
 	if err != nil {
 		return nil, err
 	}
-	resolved, err := s.resolveAskKnowledgeBases(ctx, ep, agent, kbIDs)
+	var resolved []string
+	if agentID != "" {
+		resolved, err = s.resolveSelectedAgentKnowledgeBases(ctx, ep, agent, kbIDs)
+	} else {
+		resolved, err = s.resolveAskKnowledgeBases(ctx, ep, agent, kbIDs)
+	}
 	if err != nil {
 		return nil, &ToolError{Code: CodeInvalidArgument, Message: err.Error()}
 	}
 	plan.KBIDs = sortDedupStrings(resolved)
 	plan.kbScopeKnown = resolved != nil
+	if agentID != "" {
+		// Native QA falls back to agent.Config when request ids are empty.
+		// Pin the runtime clone as well, including a known empty scope.
+		plan.Agent.Config.KBSelectionMode = "selected"
+		plan.Agent.Config.KnowledgeBases = append([]string{}, plan.KBIDs...)
+		if len(plan.KBIDs) == 0 {
+			plan.Agent.Config.KBSelectionMode = "none"
+		}
+	}
 	return plan, nil
 }
+
+// Only the core handler can carry an already-authorized execution plan.
+// A request argument cannot supply this private context key.
+type resolvedCoreAskPlanKey struct{}
 
 // validateAskSessionBinding checks a session reuse against the execution plan
 // of this call: another endpoint, another answering agent (an endpoint
@@ -283,10 +333,12 @@ func (s *Server) validateAskSessionBinding(
 // disagree about what a binding means.
 func bindingStateFor(ep *types.MCPEndpoint, plan *askPlan) *types.SessionLastRequestState {
 	state := &types.SessionLastRequestState{
-		Mode:       plan.Mode,
-		ProfileID:  plan.ProfileID,
-		EndpointID: ep.ID,
-		AskAgentID: plan.Agent.ID,
+		AgentID:      plan.Agent.ID,
+		AgentEnabled: plan.Agent.IsAgentMode(),
+		Mode:         plan.Mode,
+		ProfileID:    plan.ProfileID,
+		EndpointID:   ep.ID,
+		AskAgentID:   plan.Agent.ID,
 	}
 	if plan.kbScopeKnown {
 		state.KnowledgeBaseIDs = append([]string(nil), plan.KBIDs...)

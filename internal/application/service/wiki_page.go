@@ -131,6 +131,11 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if err != nil {
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
+	// Preserve the caller's optimistic precondition across the reload below.
+	// The repository separately guards races occurring after this lookup.
+	if page.Version > 0 && page.Version != existing.Version {
+		return nil, repository.ErrWikiPageConflict
+	}
 	stripWikiPageInlineChunkCitations(page)
 
 	// ── Truncation choke point ────────────────

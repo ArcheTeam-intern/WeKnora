@@ -96,15 +96,17 @@ func TestCoreSourcePermissionsStayIndependent(t *testing.T) {
 // ship without a permission entry (which would make it unreachable or, worse,
 // silently permitted).
 func TestCoreActionTableIsComplete(t *testing.T) {
-	require.Equal(t, []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk},
+	require.Equal(t, []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk, CoreToolWikiWorkspace, CoreToolAgentWorkspace},
 		CoreToolNames())
 
 	expected := map[string][]string{
-		CoreToolKnowledgeBase: {CoreActionList, CoreActionGet, CoreActionCreate},
-		CoreToolIngest:        {CoreActionSubmit, CoreActionStatus},
-		CoreToolSearch:        {CoreActionSingle},
-		CoreToolRead:          {CoreActionList, CoreActionRead},
-		CoreToolAsk:           {CoreActionSingle},
+		CoreToolKnowledgeBase:  {CoreActionList, CoreActionGet, CoreActionCreate},
+		CoreToolIngest:         {CoreActionSubmit, CoreActionStatus},
+		CoreToolSearch:         {CoreActionSingle},
+		CoreToolRead:           {CoreActionList, CoreActionRead},
+		CoreToolAsk:            {CoreActionSingle},
+		CoreToolWikiWorkspace:  {CoreActionGet, CoreActionCreate, CoreActionUpdate, CoreActionDelete, CoreActionRevisions, CoreActionRestore, CoreActionGraph},
+		CoreToolAgentWorkspace: {CoreActionList, CoreActionGet, CoreActionCreate, CoreActionUpdate, CoreActionDelete, CoreActionCopy},
 	}
 	for tool, actions := range expected {
 		require.ElementsMatchf(t, actions, coreActionsFor(tool), "actions published by %s", tool)

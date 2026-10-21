@@ -32,6 +32,8 @@ const (
 	MCPEndpointToolWikiIndex           = "wiki_index"
 	MCPEndpointToolWikiListPages       = "wiki_list_pages"
 	MCPEndpointToolWikiGraph           = "wiki_graph"
+	MCPEndpointToolWikiWorkspace       = "wiki_workspace"
+	MCPEndpointToolAgentWorkspace      = "agent_workspace"
 	MCPEndpointToolQueryKnowledgeGraph = "query_knowledge_graph"
 	MCPEndpointToolGetDocumentStatus   = "get_document_status"
 	MCPEndpointToolGetKBStatus         = "get_knowledge_base_status"
@@ -72,6 +74,8 @@ var mcpEndpointToolCatalog = []MCPEndpointToolDefinition{
 	{Name: MCPEndpointToolWikiIndex, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiListPages, Group: MCPEndpointToolGroupWiki},
 	{Name: MCPEndpointToolWikiGraph, Group: MCPEndpointToolGroupWiki},
+	{Name: MCPEndpointToolWikiWorkspace, Group: MCPEndpointToolGroupIngest, Destructive: true},
+	{Name: MCPEndpointToolAgentWorkspace, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolCreateKnowledgeBase, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolUploadFile, Group: MCPEndpointToolGroupIngest, Destructive: true},
 	{Name: MCPEndpointToolImportDocumentFile, Group: MCPEndpointToolGroupIngest, Destructive: true},

@@ -12,14 +12,16 @@ import (
 )
 
 // coreInstructions is the surface description the client sees.
-const coreInstructions = "WeKnora knowledge core: five tools for the knowledge workflow. " +
+const coreInstructions = "WeKnora knowledge core: seven tools for the knowledge workflow. " +
 	"knowledge_base lists, inspects and creates libraries; ingest_document submits file bytes and " +
 	"reports processing status; search_knowledge retrieves evidence from documents, wiki pages and " +
 	"the knowledge graph; read_document browses and re-reads the original text for citation checks; " +
-	"ask answers a question with the platform's native QA modes. Every action requires the " +
+	"ask answers a question with the platform's native QA modes; wiki_workspace edits native wiki pages, " +
+	"browses revision history and reads the wiki page-link graph; agent_workspace manages native " +
+	"knowledge QA agents for explicit selection in ask. Every action requires the " +
 	"corresponding permission on this endpoint."
 
-// coreToolCatalog lists exactly the five core tools, in discovery order.
+// coreToolCatalog lists exactly the seven core tools, in discovery order.
 func (s *Server) coreToolCatalog() []server.ServerTool {
 	return []server.ServerTool{
 		{Tool: coreKnowledgeBaseTool(), Handler: s.handleCoreKnowledgeBase},
@@ -27,6 +29,8 @@ func (s *Server) coreToolCatalog() []server.ServerTool {
 		{Tool: coreSearchTool(), Handler: s.handleCoreSearch},
 		{Tool: coreReadTool(), Handler: s.handleCoreRead},
 		{Tool: coreAskTool(), Handler: s.handleCoreAsk},
+		{Tool: coreWikiWorkspaceTool(), Handler: s.handleCoreWikiWorkspace},
+		{Tool: coreAgentWorkspaceTool(), Handler: s.handleCoreAgentWorkspace},
 	}
 }
 
@@ -34,13 +38,13 @@ func (s *Server) coreToolCatalog() []server.ServerTool {
 // documentation and for tests.
 //
 // Three of them (search_knowledge, read_document, ask) carry the same name as a
-// legacy tool on purpose: the plan fixes this five-tool contract, and the two
+// legacy tool on purpose: the knowledge tools keep their contract, and the two
 // surfaces are mounted on different paths (/mcp/core/:id versus /mcp/:id), so
 // no single tools/list ever mixes the two catalogues. Their schemas differ —
 // the core versions are action- and source-oriented — which is exactly why they
 // must not be published side by side.
 func CoreToolNames() []string {
-	return []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk}
+	return []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk, CoreToolWikiWorkspace, CoreToolAgentWorkspace}
 }
 
 // coreMCPServer builds (once) the second MCP server that exposes only the core
@@ -115,6 +119,11 @@ func (s *Server) guardCoreTool(next server.ToolHandlerFunc) server.ToolHandlerFu
 		result, err := next(ctx, req)
 		if err != nil {
 			return result, err
+		}
+		// Editable wiki content must keep canonical resource:// references.
+		// Signed transport URLs must never be saved back into a native page.
+		if req.Params.Name == CoreToolWikiWorkspace {
+			return result, nil
 		}
 		return s.rewriteResourceURLs(ctx, ep, result), nil
 	}

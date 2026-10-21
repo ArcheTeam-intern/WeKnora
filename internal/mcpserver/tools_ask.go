@@ -80,13 +80,19 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if err != nil {
 		return errorResult(&ToolError{Code: CodeInvalidArgument, Message: err.Error()}), nil
 	}
-	agent, err := s.resolveAskAgent(ctx, ep, mode)
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-	kbIDs, err := s.resolveAskKnowledgeBases(ctx, ep, agent, req.GetStringSlice("knowledge_base_ids", nil))
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+	var agent *types.CustomAgent
+	var kbIDs []string
+	if plan, ok := ctx.Value(resolvedCoreAskPlanKey{}).(*askPlan); ok {
+		agent, kbIDs, mode = plan.Agent, plan.KBIDs, plan.Mode
+	} else {
+		agent, err = s.resolveAskAgent(ctx, ep, mode)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		kbIDs, err = s.resolveAskKnowledgeBases(ctx, ep, agent, req.GetStringSlice("knowledge_base_ids", nil))
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
 	}
 	session, err := s.resolveAskSession(ctx, ep, req.GetString("session_id", ""), question)
 	if err != nil {
@@ -285,6 +291,40 @@ func (s *Server) resolveAskKnowledgeBases(
 	if len(ids) == 0 {
 		return nil, fmt.Errorf(
 			"the endpoint's default agent has no readable knowledge base on this endpoint; select knowledge_base_ids explicitly")
+	}
+	return ids, nil
+}
+
+// Explicit agent selection follows the native agent's configured default scope.
+// The older endpoint default path deliberately retains its historical fallback.
+func (s *Server) resolveSelectedAgentKnowledgeBases(ctx context.Context, ep *types.MCPEndpoint, agent *types.CustomAgent, requested []string) ([]string, error) {
+	if len(sortDedupStrings(requested)) > 0 {
+		return s.resolveAskKnowledgeBases(ctx, ep, agent, requested)
+	}
+	c := agent.Config
+	mode := strings.ToLower(strings.TrimSpace(c.KBSelectionMode))
+	if c.RetrieveKBOnlyWhenMentioned || mode == "none" || mode != "all" && len(c.KnowledgeBases) == 0 {
+		return []string{}, nil
+	}
+	allowed, err := s.allowedKnowledgeBases(ctx, ep)
+	if err != nil {
+		return nil, err
+	}
+	ids := []string{}
+	for _, kb := range allowed {
+		if mode == "all" {
+			filter := tools.DeriveKBFilterForAgent(c.AgentMode, c.AllowedTools)
+			if filter.IsEmpty() || tools.KBSatisfiesAgentRequirements(kb.Capabilities(), c.AgentMode, c.AllowedTools) {
+				ids = append(ids, kb.ID)
+			}
+			continue
+		}
+		for _, configured := range c.KnowledgeBases {
+			if matchKnowledgeBase([]*types.KnowledgeBase{kb}, configured) != nil {
+				ids = append(ids, kb.ID)
+				break
+			}
+		}
 	}
 	return ids, nil
 }

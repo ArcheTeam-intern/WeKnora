@@ -12,20 +12,20 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
-// The core surface publishes exactly five tools, and no legacy name may leak
+// The core surface publishes exactly seven tools, and no legacy name may leak
 // into it: the main product's discovery has to be stable, and a caller who
 // guessed a legacy tool name must not reach it here.
-func TestCoreSurfacePublishesExactlyFiveTools(t *testing.T) {
+func TestCoreSurfacePublishesExactlySevenTools(t *testing.T) {
 	srv := &Server{}
 	catalog := srv.coreToolCatalog()
-	if len(catalog) != 5 {
-		t.Fatalf("core surface publishes %d tools, want 5", len(catalog))
+	if len(catalog) != 7 {
+		t.Fatalf("core surface publishes %d tools, want 7", len(catalog))
 	}
 	got := make([]string, 0, len(catalog))
 	for _, entry := range catalog {
 		got = append(got, entry.Tool.Name)
 	}
-	want := []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk}
+	want := []string{CoreToolKnowledgeBase, CoreToolIngest, CoreToolSearch, CoreToolRead, CoreToolAsk, CoreToolWikiWorkspace, CoreToolAgentWorkspace}
 	sort.Strings(got)
 	sorted := append([]string{}, want...)
 	sort.Strings(sorted)
