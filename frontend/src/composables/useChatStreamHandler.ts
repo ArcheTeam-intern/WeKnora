@@ -1,4 +1,4 @@
-import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
+import { applyFinalContent } from '@/utils/finalContent'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
@@ -955,16 +955,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)
           // This closes only the answer segment. Both Agent and quick-answer
-          // turns still have to collect artifacts/checkpoint/persist before
-          // `complete` makes their files readable and marks the session idle.
-        }
-        break
-      }
-      case 'artifacts_pending': {
-        const pendingCount = Number((dataPayload as any)?.count)
-        message.artifactsCollecting = true
-        if (Number.isFinite(pendingCount) && pendingCount > 0) {
-          message.artifactsPendingCount = pendingCount
+          // turns still have to checkpoint/persist before `complete` makes
+          // their files readable and marks the session idle.
         }
         break
       }
@@ -1023,7 +1015,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       case 'complete': {
         if (dataId) replaySegments.delete(dataId)
         log('[Agent] Complete event received')
-        applyFinalArtifactContent(message, (dataPayload as any)?.final_content)
+        applyFinalContent(message, (dataPayload as any)?.final_content)
         loading.value = false
         isReplying.value = false
         message.is_completed = true
@@ -1031,17 +1023,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         onTurnComplete?.(message)
         fullContent.value = ''
         currentAssistantMessageId.value = ''
-        // Hydrate skill-generated artifacts as soon as the SSE completion
-        // event arrives — without this the download button only appears
-        // after a page refresh (the assistant message row is fetched via
-        // getMessageList which does include the artifacts JSON column).
-        // botmsg.vue / AgentStreamDisplay.vue read `message.artifacts`
-        // reactively to decide whether to render the download button.
-        const streamedArtifacts = (dataPayload as any)?.artifacts
-        if (Array.isArray(streamedArtifacts) && streamedArtifacts.length) {
-          message.artifacts = streamedArtifacts
-        }
-        message.artifactsCollecting = false
         const usage = (dataPayload as any)?.usage || (data as any).usage
         if (usage) {
           message.usage = usage
@@ -1069,7 +1050,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         isReplying.value = false
         fullContent.value = ''
         currentAssistantMessageId.value = ''
-        message.artifactsCollecting = false
         break
       }
     }
@@ -1098,7 +1078,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         message.persistence_error = errorMsg
         message.is_completed = true
         message.thinking = false
-        message.artifactsCollecting = false
         emitMessageUpdated(message)
       }
       loading.value = false
@@ -1180,7 +1159,6 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'tool_result' ||
       data.response_type === 'command_output' ||
       data.response_type === 'reflection' ||
-      data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||
       data.response_type === 'user_message_injected'
 
@@ -1253,11 +1231,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (data.response_type === 'complete' && existingMessage) {
       if (existingMessage.is_completed) return
       const metadata = data.data as ChatMessage | undefined
-      applyFinalArtifactContent(existingMessage, metadata?.final_content)
-      if (Array.isArray(metadata?.artifacts)) existingMessage.artifacts = metadata.artifacts
+      applyFinalContent(existingMessage, metadata?.final_content)
       const usage = metadata?.usage || data.usage
       if (usage) existingMessage.usage = usage
-      existingMessage.artifactsCollecting = false
       existingMessage.thinking = false
       existingMessage.is_completed = true
       loading.value = false

@@ -87,7 +87,7 @@
                         <div class="menu_item-box">
                             <div class="menu_icon">
                                 <img class="icon"
-                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
+                                    :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
                             </div>
                             <template v-if="!uiStore.sidebarCollapsed">
@@ -204,9 +204,8 @@
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { getSessionsList, batchDelSessions, deleteAllSessions, getSession } from "@/api/chat/index";
+import { getSessionsList, batchDelSessions, deleteAllSessions } from "@/api/chat/index";
 import { useChatResourcesStore } from '@/stores/chatResources';
-import { listAllIMChannels } from '@/api/agent/index';
 import SessionSidebarRow from './SessionSidebarRow.vue';
 import PanelResizeHandle from './PanelResizeHandle.vue';
 import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/utils/sidebarWidth';
@@ -235,10 +234,8 @@ import {
     type SidebarSessionBucket,
 } from './sessionSidebarBuckets';
 import type { SessionForGrouping } from './sessionGrouping';
-import { listAllEmbedChannels } from '@/api/embed/index';
 import {
     classifyDateBucket,
-    configuredPlatforms,
     groupSessionsByDate,
     originGroupKey,
     resolveSessionOrigin,
@@ -266,31 +263,6 @@ import { useEditorResourcesStore } from '@/stores/editorResources';
 
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
-// Platform logos reused from IMChannelsOverviewPanel — keeps the session list
-// visually consistent with the channels admin view.
-import wecomLogo from '@/assets/img/im/wecom.svg';
-import feishuLogo from '@/assets/img/im/feishu.svg';
-import larkLogo from '@/assets/img/im/lark.svg';
-import slackLogo from '@/assets/img/im/slack.svg';
-import telegramLogo from '@/assets/img/im/telegram.svg';
-import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
-import mattermostLogo from '@/assets/img/im/mattermost.svg';
-import wechatLogo from '@/assets/img/im/wechat.svg';
-import qqbotLogo from '@/assets/img/im/qqbot.png';
-
-const PLATFORM_LOGO: Record<string, string> = {
-    wecom: wecomLogo,
-    feishu: feishuLogo,
-    lark: larkLogo,
-    slack: slackLogo,
-    telegram: telegramLogo,
-    dingtalk: dingtalkLogo,
-    mattermost: mattermostLogo,
-    wechat: wechatLogo,
-    qqbot: qqbotLogo,
-};
-
-const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
@@ -318,8 +290,6 @@ let bucketRequestToken = 0;
 const sessionListBooting = ref(false);
 const currentSecondpath = ref('');
 const scrollContainer = ref<HTMLElement | null>(null);
-const imPlatforms = ref<string[]>([]);
-const embedChannelNames = ref<Record<string, string>>({});
 const activeSessionBucketKey = ref(DEFAULT_SESSION_BUCKET_KEY);
 const sessionListCanScroll = ref(false);
 const visibleChannelBuckets = computed(() =>
@@ -339,9 +309,7 @@ const sessionSourceOptions = computed(() =>
         visibleChannelBuckets.value.map((bucket) => ({
             key: bucket.key,
             label: bucket.label,
-            platform: bucket.platform,
         })),
-        (platform) => platformLogo(platform),
     ),
 );
 const activeBucket = computed(() => sessionBuckets.value[activeSessionBucketKey.value]);
@@ -416,8 +384,6 @@ const isMenuItemActive = (itemPath: string): boolean => {
                 currentRoute === 'knowledgeBaseSettings';
         case 'agents':
             return currentRoute === 'agentList';
-        case 'artifacts':
-            return currentRoute === 'artifactLibrary';
         case 'organizations':
             return currentRoute === 'organizationList';
         case 'creatChat':
@@ -446,7 +412,7 @@ const getIconActiveState = (itemPath: string) => {
 };
 
 // 分离上下两部分菜单（使用 visibleMenuArr 以便 lite 模式过滤 logout）
-const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'artifacts', 'agents', 'organizations']);
+const TOP_MENU_PATHS = new Set(['creatChat', 'knowledge-bases', 'agents', 'organizations']);
 
 const topMenuItems = computed<MenuItem[]>(() => {
     return (visibleMenuArr.value as unknown as MenuItem[]).filter((item: MenuItem) => TOP_MENU_PATHS.has(item.path));
@@ -647,7 +613,7 @@ const handleSessionMenuClick = (data: { value: string }, item: any) => {
     }
 };
 
-// 基于会话来源推导展示用的短标签已经被 platformLogo(<img>) 取代，Web 会话没有图标。
+// 基于会话来源推导展示用的短标签已经被文件夹切换取代，Web 会话没有图标。
 
 const buildSessionMenuOptions = (item: any) => {
     const options: any[] = [];
@@ -738,7 +704,6 @@ const mapSessionRow = (item: any) => ({
     updated_at: item.updated_at,
     is_pinned: !!item.is_pinned,
     pinned_at: item.pinned_at || null,
-    im_platform: item.im_platform || '',
     description: item.description || '',
     user_id: item.user_id || '',
     parent_session_id: item.parent_session_id || '',
@@ -760,7 +725,6 @@ const menuChildToSessionRow = (item: Record<string, unknown>): SessionForGroupin
         is_pinned: !!item.is_pinned,
         created_at: typeof item.created_at === 'string' ? item.created_at : undefined,
         updated_at: typeof item.updated_at === 'string' ? item.updated_at : undefined,
-        im_platform: typeof item.im_platform === 'string' ? item.im_platform : '',
         description: typeof item.description === 'string' ? item.description : '',
         user_id: typeof item.user_id === 'string' ? item.user_id : '',
         parent_session_id: typeof item.parent_session_id === 'string' ? item.parent_session_id : '',
@@ -790,14 +754,7 @@ const ensureSessionInSidebar = (sessionId: string) => {
 };
 
 const rebuildBucketDefinitions = () => buildBucketDefinitions(
-    imPlatforms.value,
-    embedChannelNames.value,
-    {
-        web: t('menu.myChats'),
-        imPlatform: (platform) => t(`agentEditor.im.${platform}`),
-        embedChannel: (name) => name,
-        api: t('menu.apiChats'),
-    },
+    { web: t('menu.myChats'), api: t('menu.apiChats') },
     { includeAdminChannelBuckets: authStore.hasRole('admin') },
 );
 
@@ -881,27 +838,6 @@ const syncActiveBucketFromChat = async (sessionId: string | undefined) => {
             bucketKey = originGroupKey(resolveSessionOrigin(menuChildToSessionRow(fromStore)));
         }
     }
-    // On a hard refresh only the web bucket is loaded, so a session opened from
-    // any other folder (IM, embed, or the admin-only API folder) isn't in any
-    // bucket or the menu store. Fetch its detail and classify its origin folder
-    // so the sidebar stays in sync with the chat pane instead of snapping back
-    // to "my chats". Only switch when that folder is actually present.
-    if (!bucketKey) {
-        try {
-            const res: any = await getSession(sessionId);
-            const candidate = originGroupKey(resolveSessionOrigin({
-                id: sessionId,
-                im_platform: res?.data?.im_platform || '',
-                description: res?.data?.description || '',
-                user_id: res?.data?.user_id || '',
-            }));
-            if (sessionBuckets.value[candidate]) {
-                bucketKey = candidate;
-            }
-        } catch {
-            // Fall through: leave the default bucket active on lookup failure.
-        }
-    }
     if (!bucketKey || bucketKey === activeSessionBucketKey.value) return;
 
     activeSessionBucketKey.value = bucketKey;
@@ -979,25 +915,6 @@ async function loadCurrentKbInfo(kbId: string) {
     }
 }
 
-const loadSessionOriginMeta = async () => {
-    try {
-        const res: any = await listAllIMChannels();
-        imPlatforms.value = configuredPlatforms(res?.data || []);
-    } catch {
-        imPlatforms.value = [];
-    }
-    try {
-        const res: any = await listAllEmbedChannels();
-        const names: Record<string, string> = {};
-        for (const ch of res?.data || []) {
-            if (ch?.id && ch?.name) names[ch.id] = ch.name;
-        }
-        embedChannelNames.value = names;
-    } catch {
-        embedChannelNames.value = {};
-    }
-};
-
 const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
@@ -1037,7 +954,6 @@ onMounted(async () => {
 
     await loadCurrentKbInfo((route.params as any)?.kbId as string)
 
-    await loadSessionOriginMeta();
     await getMessageList();
     const initialChatId = route.params.chatid as string | undefined;
     if (initialChatId) {
@@ -1087,7 +1003,6 @@ let prefixIcon = ref('prefixIcon.svg');
 let logoutIcon = ref('logout.svg');
 let settingIcon = ref('setting.svg');
 let agentIcon = ref('agent.svg');
-let artifactIcon = ref('artifact.svg');
 let organizationIcon = ref('organization.svg');
 let pathPrefix = ref(route.name)
 const getIcon = (path: string) => {
@@ -1096,7 +1011,6 @@ const getIcon = (path: string) => {
     const creatChatActiveState = getIconActiveState('creatChat');
     const settingsActiveState = getIconActiveState('settings');
     const agentsActiveState = route.name === 'agentList';
-    const artifactsActiveState = route.name === 'artifactLibrary';
     const organizationsActiveState = route.name === 'organizationList';
 
     // 知识库图标：只在知识库页面显示绿色
@@ -1104,9 +1018,6 @@ const getIcon = (path: string) => {
 
     // 智能体图标：只在智能体页面显示绿色
     agentIcon.value = agentsActiveState ? 'agent-green.svg' : 'agent.svg';
-
-    // 产物图标：只在产物页面显示绿色
-    artifactIcon.value = artifactsActiveState ? 'artifact-green.svg' : 'artifact.svg';
 
     // 组织图标：只在组织页面显示绿色
     organizationIcon.value = organizationsActiveState ? 'organization-green.svg' : 'organization.svg';

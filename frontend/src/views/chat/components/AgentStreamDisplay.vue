@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-embedded': embeddedMode, 'is-rag-mode': ragMode, 'is-steer-prefix': session?.steerForked }">
+  <div ref="rootElement" class="agent-stream-display" :class="{ 'is-rag-mode': ragMode, 'is-steer-prefix': session?.steerForked }">
 
     <!-- Collapsed intermediate steps (tree root) -->
     <div v-if="shouldShowCollapsedSteps" class="tree-container">
@@ -18,14 +18,6 @@
       </div>
       <!-- Tree children (intermediate steps) -->
       <div v-if="showIntermediateSteps" class="tree-children">
-        <ChatMemoryStep
-          v-if="hasMemory"
-          :memories="memoryItems"
-          :expanded="memoryExpanded"
-          :forgetting-id="memoryForgettingId"
-          @toggle="toggleMemory"
-          @forget="forgetMemory"
-        />
         <template v-for="(event, index) in visibleIntermediateEvents" :key="getEventKey(event, index)">
           <div v-if="event && event.type" class="tree-child"
             :class="{ 'tree-child-last': !isSegmentDone && index === visibleIntermediateEvents.length - 1 }">
@@ -111,25 +103,6 @@
                 </div>
               </div>
 
-              <!-- MCP tool human approval (issue #1173) -->
-              <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-                <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
-                  :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
-                  :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
-                  :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
-                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
-              </div>
-
-              <!-- MCP OAuth in-conversation authorization prompt -->
-              <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
-                <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
-                  :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
-                  :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at"
-                  :resolved="event.resolved" :authorized="event.authorized"
-                  :resolve-reason="event.resolve_reason" :timed-out="event.timed_out" :canceled="event.canceled"
-                  v-bind="embedAuthProps" />
-              </div>
-
               <!-- Tool Call Event (non-thinking) -->
               <div v-else-if="event.type === 'tool_call'" class="tool-event">
                 <div class="action-card" :class="{
@@ -146,8 +119,7 @@
                   <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                     :class="{ 'no-results': !hasActionResult(event) }">
                     <div class="action-title">
-                      <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
-                      <t-icon v-else-if="event.tool_name" class="action-title-icon"
+                      <t-icon v-if="event.tool_name" class="action-title-icon"
                         :name="getToolIconName(event.tool_name)" />
                       <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                         :content="t('agent.updatePlan')" placement="top">
@@ -156,17 +128,6 @@
                       <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                         <span class="action-name">{{ getToolTitle(event) }}</span>
                       </t-tooltip>
-                      <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
-                        <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
-                        <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
-                      </span>
-                    </div>
-                  </div>
-
-                  <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
-                    <pre>{{ getSandboxFilePreview(event) }}</pre>
-                    <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
-                      {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                     </div>
                   </div>
 
@@ -187,13 +148,6 @@
                     <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
                   </div>
 
-                  <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
-                    class="search-results-summary-fixed">
-                    <div class="results-summary-text"
-                      v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
-                    </div>
-                  </div>
-
                   <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
                     class="search-results-summary-fixed grep-summary">
                     <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
@@ -204,11 +158,6 @@
                     <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                   </div>
 
-                  <SandboxCommandProgress
-                    v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
-                    :progress="event.command_output"
-                  />
-
                   <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                     class="search-results-summary-fixed attachment-parsing-summary">
                     <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
@@ -216,10 +165,9 @@
 
                     <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                     class="action-details">
-                    <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
-                    <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                    <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                       <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                        :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                        :output="event.output" :arguments="event.arguments" :success="event.success" />
                     </div>
                     <div v-else-if="event.output" class="tool-output-wrapper">
                       <div class="fallback-header">
@@ -253,24 +201,11 @@
     </div>
 
     <!-- Event Stream (non-tree mode: before answer starts, or answer events) -->
-    <div v-if="displayEvents.length > 0 || showMemoryRow || showAgentActivityIndicator" ref="streamingStepsContainer"
+    <div v-if="displayEvents.length > 0 || showAgentActivityIndicator" ref="streamingStepsContainer"
       class="streaming-steps-container" :class="{
         'streaming-steps-constrained': !answerEverStarted && !isSegmentDone,
         'is-streaming-timeline': showStreamingTimeline
       }">
-      <!-- Recalled memory leads the timeline: it is what the turn knew before it
-           started, so it belongs on the same line as the steps that follow it
-           rather than in a card of its own above them. -->
-      <ChatMemoryStep
-        v-if="showMemoryRow"
-        class="event-item"
-        :memories="memoryItems"
-        :expanded="memoryExpanded"
-        :is-last="memoryIsLast"
-        :forgetting-id="memoryForgettingId"
-        @toggle="toggleMemory"
-        @forget="forgetMemory"
-      />
       <template v-for="(event, index) in displayEvents" :key="getEventKey(event, index)">
         <div v-if="event && event.type" class="event-item" :class="{
           'event-answer': event.type === 'answer',
@@ -336,23 +271,6 @@
               </div>
             </div>
 
-            <!-- MCP tool human approval -->
-            <div v-else-if="event.type === 'tool_approval_required'" class="tool-event">
-              <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
-                :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :approved="event.approved" :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
-            </div>
-
-            <!-- MCP OAuth in-conversation authorization prompt -->
-            <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
-              <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
-                :service-name="event.service_name || ''" :mcp-tool-name="event.mcp_tool_name || ''"
-                :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :authorized="event.authorized" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
-                :canceled="event.canceled" v-bind="embedAuthProps" />
-            </div>
-
             <!-- Thinking Tool Call -->
             <div v-else-if="event.type === 'tool_call' && event.tool_name === 'thinking'" class="tool-event">
               <div class="action-card"
@@ -382,7 +300,7 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
-              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
+              <div v-if="answerFullyRendered && event.done && event.content && event.content.trim()"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
                   <t-button size="small" variant="outline" shape="round" @click.stop="emitFork">
@@ -413,22 +331,6 @@
                   :title="$t('agent.addToKnowledgeBase')">
                   <t-icon name="bookmark-add" />
                 </t-button>
-                <!-- Skill artifact download: only shown when the persisted
-                     assistant message recorded any generated files. Agent
-                     mode is the primary path for skills, so this is where
-                     the button is most likely to appear. -->
-                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
-                  :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
-                  @animationend="onArtifactArriveEnd">
-                  <t-button size="small" variant="outline" shape="round"
-                    :disabled="artifactButtonCollecting"
-                    :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
-                    @click.stop="openArtifactDrawer()">
-                    <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
-                    <t-icon v-else name="folder" />
-                  </t-button>
-                  <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
-                </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
@@ -467,8 +369,7 @@
                 <div class="action-header" @click.stop="handleActionHeaderClick(event)"
                   :class="{ 'no-results': !hasActionResult(event) }">
                   <div class="action-title">
-                    <BrowserIcon v-if="event.tool_name === 'local_browser'" class="action-title-icon browser-tool-icon" />
-                    <t-icon v-else-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
+                    <t-icon v-if="event.tool_name" class="action-title-icon" :name="getToolIconName(event.tool_name)" />
                     <t-tooltip v-if="event.tool_name === 'todo_write' && event.tool_data?.steps"
                       :content="t('agent.updatePlan')" placement="top">
                       <span class="action-name">
@@ -478,17 +379,6 @@
                     <t-tooltip v-else :content="getToolTitle(event)" placement="top">
                       <span class="action-name">{{ getToolTitle(event) }}</span>
                     </t-tooltip>
-                    <span v-if="getSandboxDiffStat(event)" class="sandbox-diff-stat">
-                      <span v-if="getSandboxDiffStat(event)?.added" class="diff-add">+{{ getSandboxDiffStat(event)?.added }}</span>
-                      <span v-if="getSandboxDiffStat(event)?.removed" class="diff-del">-{{ getSandboxDiffStat(event)?.removed }}</span>
-                    </span>
-                  </div>
-                </div>
-
-                <div v-if="event.pending && getSandboxFilePreview(event)" class="sandbox-file-preview">
-                  <pre>{{ getSandboxFilePreview(event) }}</pre>
-                  <div v-if="sandboxPreviewRemaining(event) > 0" class="sandbox-file-preview-more">
-                    {{ t('agentStream.sandboxFiles.moreLines', { count: sandboxPreviewRemaining(event) }) }}
                   </div>
                 </div>
 
@@ -509,13 +399,6 @@
                   <div class="results-summary-text" v-html="getSearchResultsSummary(event)"></div>
                 </div>
 
-                <div v-if="!event.pending && event.tool_name === 'web_search' && event.tool_data"
-                  class="search-results-summary-fixed">
-                  <div class="results-summary-text"
-                    v-html="t('agent.webSearchFound', { count: getResultsCount(event.tool_data) })">
-                  </div>
-                </div>
-
                 <div v-if="!event.pending && event.tool_name === 'grep_chunks' && event.tool_data"
                   class="search-results-summary-fixed grep-summary">
                   <div class="results-summary-text" v-html="getGrepResultsSummary(event.tool_data)"></div>
@@ -526,11 +409,6 @@
                   <div class="results-summary-text" v-html="getKnowledgeChunksSummary(event.tool_data)"></div>
                 </div>
 
-                <SandboxCommandProgress
-                  v-if="event.tool_name === 'shell_exec' && event.pending && event.command_output && !event.command_output.done"
-                  :progress="event.command_output"
-                />
-
                 <div v-if="!event.pending && event.tool_name === 'attachment_parsing'"
                   class="search-results-summary-fixed attachment-parsing-summary">
                   <div class="results-summary-text" v-html="getAttachmentParsingSummary(event)"></div>
@@ -538,10 +416,9 @@
 
                 <div v-if="isEventExpanded(event.tool_call_id) && !event.pending && hasExpandableResults(event)"
                   class="action-details">
-                  <BrowserToolDetails v-if="event.tool_name === 'local_browser'" :event="event" />
-                    <div v-else-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
+                    <div v-if="resolveToolDisplayType(event)" class="tool-result-wrapper">
                     <ToolResultRenderer :display-type="resolveToolDisplayType(event)" :tool-data="event.tool_data"
-                      :output="mcpToolResultOutput(event)" :arguments="event.arguments" :success="event.success" />
+                      :output="event.output" :arguments="event.arguments" :success="event.success" />
                   </div>
 
                   <div v-else-if="event.output" class="tool-output-wrapper">
@@ -617,14 +494,6 @@
       </div>
     </template>
   </t-drawer>
-  <ChatArtifactsDrawer
-    v-if="hasArtifacts && embeddedMode && sessionIdForArtifacts && messageIdForArtifacts"
-    v-model:visible="showArtifactDrawer"
-    :session-id="sessionIdForArtifacts"
-    :message-id="messageIdForArtifacts"
-    :artifacts="liveArtifacts"
-    :preview-index="artifactPreviewIndex"
-  />
 </template>
 
 <script setup lang="ts">
@@ -634,20 +503,11 @@ import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick }
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
 import 'katex/dist/katex.min.css';
-import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
-import ToolApprovalCard from './ToolApprovalCard.vue';
-import McpOAuthCard from './McpOAuthCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
-import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
-import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
-import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { persistedAssistantId } from '@/utils/steerStreamFork';
-import ChatMemoryStep from './ChatMemoryStep.vue';
-import { useChatMemoryRow, type UsedMemory } from '@/composables/useChatMemoryRow';
 import { countGrepDocuments, groupGrepChunkResults } from '@/utils/grepResultsGroup';
 import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
@@ -665,27 +525,10 @@ import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security';
 import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
-import {
-  artifactIndexFromEventTarget,
-  hydrateArtifactImages,
-  renderArtifactReference,
-} from '@/utils/sandboxArtifactRefs';
 import type { ProtectedFileAccessContext } from '@/utils/protectedFileAccess';
 import { unwrapFinalAnswerWrappers, thinkingEqualsAnswer } from '@/utils/finalAnswer';
 import { getAgentToolIconName } from '@/utils/agent-tool-icons';
-import { getMcpToolDisplayType, getMcpToolTitle, mcpToolResultOutput } from '@/utils/mcpToolDisplay';
 import { getQueryText, getWikiPageText } from '@/utils/agent-tool-display';
-import {
-  formatToolTitleWithDetail,
-  getEventSkillName,
-  getReadSkillTarget,
-  getSandboxDiffStat,
-  getSandboxFilePreview,
-  getSandboxToolPath,
-  sandboxPreviewRemaining,
-  skillScriptTitleCommand,
-} from '@/utils/skillToolDisplay';
-import { previewShellCommand } from '@/utils/shellExecResult';
 import type { DisplayType } from '@/types/tool-results';
 import { parseWikiToolReferences } from '@/utils/wikiToolReferences';
 import {
@@ -713,9 +556,6 @@ import { attachMarkdownEnhancementListeners, refreshMarkdownEnhancements } from 
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
 
-import BrowserToolDetails from './BrowserToolDetails.vue';
-import { browserToolTitle } from '@/utils/browserToolDisplay';
-import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 const getToolIconName = getAgentToolIconName;
 
 const router = useRouter();
@@ -736,8 +576,6 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   // Retired names still present in stored chat history
   knowledge_search: 'agentStream.tools.searchKnowledge',
   grep_chunks: 'agentStream.tools.grepChunks',
-  web_search: 'agentStream.tools.webSearch',
-  web_fetch: 'agentStream.tools.webFetch',
   get_document_info: 'agentStream.tools.getDocumentInfo',
   list_knowledge_chunks: 'agentStream.tools.listKnowledgeChunks',
   get_related_documents: 'agentStream.tools.getRelatedDocuments',
@@ -759,15 +597,6 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   image_analysis: 'agentStream.tools.imageAnalysis',
   query_understand: 'agentStream.tools.queryUnderstand',
   query_knowledge_graph: 'agentStream.tools.queryKnowledgeGraph',
-  read_skill: 'agentStream.tools.readSkill',
-  read_file: 'agentStream.tools.readFile',
-  execute_skill_script: 'agentStream.tools.executeSkillScript',
-  list_sandbox_files: 'agentStream.tools.listSandboxFiles',
-  read_sandbox_file: 'agentStream.tools.readSandboxFile',
-  write_sandbox_file: 'agentStream.tools.writeSandboxFile',
-  edit_sandbox_file: 'agentStream.tools.editSandboxFile',
-  shell_exec: 'agentStream.tools.shellExec',
-  local_browser: 'localBrowser.local',
   data_analysis: 'agentStream.tools.dataAnalysis',
   data_schema: 'agentStream.tools.dataSchema',
   database_query: 'agentStream.tools.databaseQuery',
@@ -986,11 +815,6 @@ const props = defineProps<{
   session: SessionData;
   sessionId?: string;
   userQuery?: string;
-  embeddedMode?: boolean;
-  embedChannelId?: string;
-  embedToken?: string;
-  embedSessionSig?: string;
-  embedVisitorId?: string;
   ragMode?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
@@ -1003,8 +827,8 @@ const emit = defineEmits<{
   (event: 'rewind', messageId: string): void;
 }>();
 
-const canFork = computed(() => props.canFork === true && !props.embeddedMode)
-const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
+const canFork = computed(() => props.canFork === true)
+const canRewind = computed(() => props.canRewind === true)
 const forkTooltip = '从这条回答继续分叉'
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
@@ -1016,104 +840,23 @@ const emitRewind = () => {
   if (messageId) emit('rewind', messageId)
 }
 
-const embedAuthProps = computed(() => ({
-  embeddedMode: props.embeddedMode,
-  embedChannelId: props.embedChannelId,
-  embedToken: props.embedToken,
-  embedSessionId: props.sessionId,
-  embedSessionSig: props.embedSessionSig,
-  embedVisitorId: props.embedVisitorId,
-}));
-
 const showRequestInfo = computed(
-  () => !props.embeddedMode && !!(props.session?.request_id || props.session?.id),
+  () => !!(props.session?.request_id || props.session?.id),
 );
-
-const {
-  memoryItems,
-  hasMemory,
-  expanded: memoryExpanded,
-  forgettingId: memoryForgettingId,
-  toggle: toggleMemory,
-  forget: forgetMemory,
-} = useChatMemoryRow(() => props.session?.used_memories as UsedMemory[] | undefined);
 
 const resolveAssistantMessageId = (session?: SessionData) =>
   String(session?.assistant_message_id || session?.id || '').trim();
 
 // Agent answers embed exported charts and knowledge-base images as
-// `resource://` handles. Embed visitors use the channel-scoped proxy. Logged-in
-// users use the persisted assistant message as the authorization anchor, which
-// also covers resources owned by a shared agent's source workspace.
+// `resource://` handles. The persisted assistant message is the authorization
+// anchor, which also covers resources owned by a shared agent's source workspace.
 const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() => {
-  if (props.embeddedMode && props.embedChannelId && props.embedToken) {
-    return { mode: 'embed', channelId: props.embedChannelId, token: props.embedToken };
-  }
   const messageId = resolveAssistantMessageId(props.session);
   if (props.sessionId && messageId) {
     return { mode: 'message', sessionId: props.sessionId, messageId };
   }
   return undefined;
 });
-
-// -----------------------------------------------------------------------------
-// Skill artifact download drawer (Agent path)
-// -----------------------------------------------------------------------------
-// Same contract as botmsg.vue: only render the button when the persisted
-// assistant message actually recorded files, then open the sandbox panel's
-// artifacts tab (or ChatArtifactsDrawer in embedded mode).
-const showArtifactDrawer = ref(false);
-const sandboxPanel = useChatSandboxPanel();
-const artifactList = computed(() => {
-  const list = ((props.session?.artifacts as any[]) || []);
-  return list.map((a, i) => ({ index: i, ...a }));
-});
-// Deleted files stay in artifactList on purpose: the inline renderer needs the
-// tombstone to tell "you deleted this" apart from "this handle belongs to some
-// other message", and its position is still the download address of the files
-// after it. Everything that counts or lists files uses the live view.
-const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
-const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
-const artifactCount = computed(() => liveArtifacts.value.length);
-const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
-const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
-const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
-const sessionIdForArtifacts = computed(() => props.sessionId ?? '');
-const messageIdForArtifacts = computed(() =>
-  persistedAssistantId(props.session) || String(props.session?.request_id || ''),
-);
-// Set when the drawer is opened from an inline artifact card in the answer, so
-// it lands on that file's preview instead of the list.
-const artifactPreviewIndex = ref<number | null>(null);
-function openArtifactDrawer(previewIndex: number | null = null) {
-  if (!hasArtifacts.value) return;
-  if (sandboxPanel && !props.embeddedMode) {
-    if (previewIndex == null) {
-      sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
-    } else {
-      sandboxPanel.open('artifacts', {
-        messageId: messageIdForArtifacts.value,
-        previewIndex,
-      });
-    }
-    return;
-  }
-  artifactPreviewIndex.value = previewIndex;
-  showArtifactDrawer.value = true;
-}
-
-const artifactRefContext = computed(() => {
-  const sessionId = sessionIdForArtifacts.value;
-  const messageId = messageIdForArtifacts.value;
-  if (!sessionId || !messageId) return null;
-  return { sessionId, messageId };
-});
-
-const artifactRefLabels = computed(() => ({
-  previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
-  missingHint: t('agent.artifactDrawer.inlineMissing'),
-  deletedHint: t('agent.artifactDrawer.inlineDeleted'),
-}));
 
 const {
   float: citationFloat,
@@ -1122,8 +865,6 @@ const {
   scheduleClose: scheduleCitationClose,
 } = useChatCitationPopover(rootElement, {
   getKnowledgeReferences: () => props.session?.knowledge_references,
-  embedChannelId: () => (props.embeddedMode ? props.embedChannelId : undefined),
-  embedToken: () => (props.embeddedMode ? props.embedToken : undefined),
   sessionId: () => props.sessionId,
 });
 
@@ -1193,24 +934,7 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
-  const mcpType = getMcpToolDisplayType(event?.tool_name)
-  if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType
-  if (event?.tool_name === 'shell_exec' || event?.tool_name === 'execute_skill_script') {
-    return 'shell_exec'
-  }
-  if (event?.tool_name === 'list_sandbox_files' && event?.success !== false) {
-    return 'list_sandbox_files'
-  }
-  if (event?.tool_name === 'write_sandbox_file' && event?.success !== false) {
-    return 'write_sandbox_file'
-  }
-  if (event?.tool_name === 'edit_sandbox_file' && event?.success !== false) {
-    return 'edit_sandbox_file'
-  }
-  if (event?.tool_name === 'read_skill' && event?.success !== false) {
-    return 'read_skill'
-  }
   return undefined
 };
 
@@ -1330,42 +1054,6 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
       event,
       formatWikiEditResultContent(toolData) || formatToolResultContent(event.output),
     );
-  }
-
-  if (toolName === 'web_search') {
-    const results = Array.isArray(toolData.results) ? toolData.results : [];
-    return results
-      .filter((item: any) => item?.url)
-      .map((item: any, index: number) => ({
-        id: item.url,
-        chunk_type: 'web_search',
-        knowledge_title: item.title || item.source || item.url,
-        content: item.snippet || item.content || '',
-        metadata: {
-          url: item.url,
-          title: item.title || '',
-          snippet: item.snippet || item.content || '',
-        },
-        chunk_index: item.result_index ?? index + 1,
-      }));
-  }
-
-  if (toolName === 'web_fetch') {
-    const results = Array.isArray(toolData.results) ? toolData.results : [];
-    return results
-      .filter((item: any) => item?.url && (!item.status || item.status === 'success'))
-      .map((item: any, index: number) => ({
-        id: item.url,
-        chunk_type: 'web_search',
-        knowledge_title: item.url,
-        content: item.summary || item.raw_content || '',
-        metadata: {
-          url: item.url,
-          title: item.url,
-          snippet: item.summary || item.raw_content || '',
-        },
-        chunk_index: index + 1,
-      }));
   }
 
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
@@ -1664,7 +1352,7 @@ const hasPendingStreamingActivity = computed(() => {
     ) {
       return true;
     }
-    return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
+    return false;
   });
 });
 
@@ -1822,19 +1510,6 @@ const shouldShowCollapsedSteps = computed(() => {
   const hasSteps = intermediateStepsCount.value > 0;
   return hasSteps && isConversationDone.value;
 });
-
-// Once the steps collapse, the memory row travels with them into the tree —
-// showing it here as well would leave two rows saying the same thing. In
-// quick-answer mode the pipeline component owns the timeline and its memory row.
-const showMemoryRow = computed(
-  () => !props.ragMode && hasMemory.value && !shouldShowCollapsedSteps.value,
-);
-
-// Memory leads the timeline, so it is only the last node while nothing has
-// followed it yet — and a lone node has no trunk line to draw below it.
-const memoryIsLast = computed(
-  () => lastStreamingTimelineEventIndex.value === -1 && !showAgentActivityIndicator.value,
-);
 
 // Check if event is a "deep thinking" type (either streaming thinking or thinking tool call)
 const isThinkingLikeEvent = (event: any): boolean => {
@@ -2126,12 +1801,6 @@ const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
   if (event.event_id) return `event-${event.event_id}`;
   if (event.tool_call_id) return `tool-${event.tool_call_id}`;
-  if (event.type === 'tool_approval_required' && event.pending_id) {
-    return `approval-${event.pending_id}`;
-  }
-  if (event.type === 'mcp_oauth_required' && event.pending_id) {
-    return `mcp-oauth-${event.pending_id}`;
-  }
   return `event-${index}-${event.type || 'unknown'}`;
 };
 
@@ -2177,8 +1846,6 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   WIKI_ISSUE_TOOL_NAMES.has(String(toolName || '')) ||
   toolName === 'search_knowledge' ||
   toolName === 'knowledge_search' ||
-  toolName === 'web_search' ||
-  toolName === 'web_fetch' ||
   toolName === 'grep_chunks' ||
   toolName === 'read_document' ||
   toolName === 'list_knowledge_chunks' ||
@@ -2201,12 +1868,6 @@ const hasResults = (event: any): boolean => {
 
   // For knowledge search tools
   if (toolName === 'search_knowledge' || toolName === 'knowledge_search') {
-    const count = event.tool_data.results?.length || event.tool_data.count || 0;
-    return count > 0;
-  }
-
-  // For web search tools
-  if (toolName === 'web_search') {
     const count = event.tool_data.results?.length || event.tool_data.count || 0;
     return count > 0;
   }
@@ -2303,15 +1964,6 @@ const onRootClick = (e: Event) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
-  // Inline artifact card -> open the drawer straight on that file's preview.
-  const artifactIndex = artifactIndexFromEventTarget(target);
-  if (artifactIndex !== null) {
-    e.preventDefault();
-    e.stopPropagation();
-    openArtifactDrawer(artifactIndex);
-    return;
-  }
-
   // Handle image clicks -> open preview (only for images inside markdown/answer content, not icons)
   if (target.tagName === 'IMG') {
     const imgEl = target as HTMLImageElement;
@@ -2353,7 +2005,7 @@ const onRootClick = (e: Event) => {
       documentTitle: title,
       knowledgeBaseId: kbId,
       anchorText: citationAnchorText(kbEl),
-      openSource: !props.embeddedMode,
+      openSource: true,
     })) {
       return;
     }
@@ -2402,15 +2054,6 @@ const onRootKeydown = (e: KeyboardEvent) => {
   const target = e.target as HTMLElement;
   if (!target) return;
 
-  const artifactIndex = artifactIndexFromEventTarget(target);
-  if (artifactIndex !== null) {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openArtifactDrawer(artifactIndex);
-    }
-    return;
-  }
-
   // Handle web citation keyboard
   const webEl = target.closest?.('.citation-web') as HTMLElement | null;
   if (webEl) {
@@ -2440,7 +2083,7 @@ const onRootKeydown = (e: KeyboardEvent) => {
         documentTitle: title,
         knowledgeBaseId: kbId,
         anchorText: citationAnchorText(kbEl),
-        openSource: !props.embeddedMode,
+        openSource: true,
       })) {
         return;
       }
@@ -2484,7 +2127,6 @@ onMounted(() => {
     root.addEventListener('keydown', keydownListener, true);
     rebindCitations();
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
-    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
@@ -2509,32 +2151,12 @@ onUpdated(() => {
     // de-duped, and failures back off for a cooldown — so a not-yet-ready file
     // simply retries later (and the answerFullyRendered pass is the backstop).
     await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
-    await hydrateArtifactImages(rootElement.value, artifactRefContext.value);
   });
 });
 
 // 自定义渲染器 - 支持 Mermaid
 const agentRenderer = new marked.Renderer();
 agentRenderer.code = createMermaidCodeRenderer('mermaid-agent');
-
-// Files the agent generated in its sandbox carry the same `resource://` handle
-// as any other stored file, so they are matched against this reply's artifacts
-// before marked's default <img>. Everything else — including a handle that
-// belongs to a knowledge-base image rather than to this reply — keeps the
-// default output, which protectProviderImageSrcInHTML still rewrites.
-const defaultImageRenderer = new marked.Renderer().image;
-agentRenderer.image = function agentImageRenderer(token) {
-  const artifactHtml = renderArtifactReference({
-    href: token.href || '',
-    alt: token.text || '',
-    artifacts: artifactList.value,
-    labels: artifactRefLabels.value,
-    context: artifactRefContext.value,
-    streaming: !isSegmentDone.value,
-  });
-  if (artifactHtml !== null) return artifactHtml;
-  return defaultImageRenderer.call(this, token);
-};
 
 const hasCachedMermaidSvg = (cached: CachedMermaidSvgHtml): boolean => {
   if (!cached) return false;
@@ -2762,22 +2384,6 @@ const getSearchResultsSummary = (event: any): string => {
   return summary;
 };
 
-// Get web search results summary text
-const getWebSearchResultsSummary = (toolData: any): string => {
-  if (!toolData) return '';
-
-  const count = Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
-  if (count === 0) return '';
-
-  return t('agentStream.search.webResults', { count });
-};
-
-// Get results count (number only) for web search summary
-const getResultsCount = (toolData: any): number => {
-  if (!toolData) return 0;
-  return Number(toolData.results?.length ?? toolData.count ?? 0) || 0;
-};
-
 // Get grep results summary text (returns HTML with colored numbers)
 const getGrepResultsSummary = (toolData: any): string => {
   if (!toolData) return '';
@@ -2805,9 +2411,6 @@ const getAttachmentParsingSummary = (event: any): string => {
 
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
-  if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
-  const mcpTitle = getMcpToolTitle(t, event)
-  if (mcpTitle) return mcpTitle
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -2818,28 +2421,12 @@ const getToolTitle = (event: any): string => {
     if (event.tool_name === 'wiki_search' || event.tool_name === 'wiki_read_page') {
       return `${getLocalizedToolName(event.tool_name)}...`;
     }
-    if (event.tool_name === 'read_skill') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
-    }
-    if (event.tool_name === 'execute_skill_script') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
-    }
-    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
-    }
-    if (event.tool_name === 'shell_exec') {
-      return t('agentStream.toolStatus.shellExecRunning');
-    }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
   }
 
   const toolName = event.tool_name;
   const isSearchTool = toolName === 'search_knowledge' || toolName === 'knowledge_search' || toolName === 'wiki_search';
-  const isWebSearchTool = toolName === 'web_search';
   const isGrepTool = toolName === 'grep_chunks';
 
   // For search tools, use description with query text
@@ -2848,34 +2435,6 @@ const getToolTitle = (event: any): string => {
     const queryText =
       getQueryText(event.arguments) ||
       getQueryText(event.tool_data);
-    if (queryText) {
-      return `${baseTitle}：「${queryText}」`;
-    }
-    return baseTitle;
-  }
-
-  // For web search tools, use description with query text
-  if (isWebSearchTool) {
-    const baseTitle = getToolDescription(event);
-    // Try to get query from arguments or tool_data
-    let queryText = '';
-    if (event.arguments && typeof event.arguments === 'object' && event.arguments.query) {
-      const query = event.arguments.query;
-      // Handle both string and array formats
-      if (Array.isArray(query)) {
-        queryText = query.filter((q: any) => q && typeof q === 'string').join('，');
-      } else if (typeof query === 'string') {
-        queryText = query;
-      }
-    } else if (event.tool_data && event.tool_data.query) {
-      const query = event.tool_data.query;
-      // Handle both string and array formats
-      if (Array.isArray(query)) {
-        queryText = query.filter((q: any) => q && typeof q === 'string').join('，');
-      } else if (typeof query === 'string') {
-        queryText = query;
-      }
-    }
     if (queryText) {
       return `${baseTitle}：「${queryText}」`;
     }
@@ -2928,48 +2487,13 @@ const getToolTitle = (event: any): string => {
     return pageLabel ? `${baseTitle}：「${sanitizeForDisplay(pageLabel)}」` : baseTitle;
   }
 
-  if (toolName === 'read_skill') {
-    return formatToolTitleWithDetail(getToolDescription(event), getReadSkillTarget(event));
-  }
-
-  if (toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
-    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
-  }
-
-  if (toolName === 'execute_skill_script') {
-    const command = previewShellCommand(skillScriptCommandLabel(event))
-    const baseTitle = formatToolTitleWithDetail(getToolDescription(event), getEventSkillName(event))
-    const rest = skillScriptTitleCommand(getEventSkillName(event), command)
-    return rest ? `${baseTitle}：${rest}` : baseTitle
-  }
-
-  if (toolName === 'shell_exec') {
-    const command = previewShellCommand(skillScriptCommandLabel(event))
-    const baseTitle = getToolDescription(event)
-    return command ? `${baseTitle}：${command}` : baseTitle
-  }
-
   // Use tool summary if available
   const summary = getToolSummary(event);
   return summary || getToolDescription(event);
 };
 
-const skillScriptCommandLabel = (event: any): string => {
-  const fromData = String(event?.tool_data?.command || event?.arguments?.command || '').trim()
-  if (fromData) return fromData
-  const skill = String(event?.tool_data?.skill_name || event?.arguments?.skill_name || '').trim()
-  const script = String(event?.tool_data?.script_path || event?.arguments?.script_path || '').trim()
-  const path = [skill, script].filter(Boolean).join('/')
-  const args = event?.tool_data?.args || event?.arguments?.args
-  if (Array.isArray(args) && args.length) {
-    return [path, ...args.map((arg: unknown) => String(arg))].filter(Boolean).join(' ')
-  }
-  return path
-}
-
 // Tool description
 const getToolDescription = (event: any): string => {
-  if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
   if (event.pending) {
     if (event.tool_name === 'image_analysis') {
       return t('agentStream.toolStatus.imageAnalyzing');
@@ -2979,21 +2503,6 @@ const getToolDescription = (event: any): string => {
     }
     if (event.tool_name === 'query_understand') {
       return t('agentStream.toolStatus.queryUnderstanding');
-    }
-    if (event.tool_name === 'read_skill') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getReadSkillTarget(event))}...`;
-    }
-    if (event.tool_name === 'execute_skill_script') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getEventSkillName(event))}...`;
-    }
-    if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
-      const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
-    }
-    if (event.tool_name === 'shell_exec') {
-      return t('agentStream.toolStatus.shellExecRunning');
     }
     const localizedName = getLocalizedToolName(event.tool_name);
     return t('agentStream.toolStatus.calling', { name: localizedName });
@@ -3007,8 +2516,6 @@ const getToolDescription = (event: any): string => {
   } else if (toolName === 'wiki_search' || toolName === 'wiki_read_page') {
     const localizedName = getLocalizedToolName(toolName);
     return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
-  } else if (toolName === 'web_search') {
-    return success ? t('agentStream.toolStatus.webSearch') : t('agentStream.toolStatus.webSearchFailed');
   } else if (toolName === 'grep_chunks') {
     return success ? t('agentStream.toolStatus.grepSearch') : t('agentStream.toolStatus.grepSearchFailed');
   } else if (toolName === 'get_document_info' || toolName === 'list_documents') {
@@ -3025,9 +2532,6 @@ const getToolDescription = (event: any): string => {
     return success ? t('agentStream.toolStatus.attachmentParsingDone') : t('agentStream.toolStatus.attachmentParsingFailed');
   } else if (toolName === 'query_understand') {
     return success ? t('agentStream.toolStatus.queryUnderstandDone') : t('agentStream.toolStatus.calledFailed', { name: getLocalizedToolName(toolName) });
-  } else if (toolName === 'shell_exec' || toolName === 'execute_skill_script' || toolName === 'read_skill' || toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
-    const localizedName = getLocalizedToolName(toolName);
-    return success ? localizedName : t('agentStream.toolStatus.calledFailed', { name: localizedName });
   } else {
     const localizedName = getLocalizedToolName(toolName);
     return success ? t('agentStream.toolStatus.called', { name: localizedName }) : t('agentStream.toolStatus.calledFailed', { name: localizedName });
@@ -3151,10 +2655,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
 
   &.is-rag-mode {
     margin-top: 0;
-  }
-
-  &.is-embedded {
-    margin-bottom: 0;
   }
 }
 
@@ -3459,8 +2959,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   .action-title-icon {
     flex-shrink: 0;
 
-    &.browser-tool-icon { width: 18px; height: 18px; color: var(--agent-step-icon-color); }
-
     &.t-icon {
       width: 18px;
       height: 18px;
@@ -3556,51 +3054,6 @@ const handleAddToKnowledge = (answerEvent: any) => {
   display: inline-block;
   max-width: 100%;
   vertical-align: middle;
-}
-
-.sandbox-diff-stat {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: 4px;
-  font-variant-numeric: tabular-nums;
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  flex-shrink: 0;
-  letter-spacing: 0.02em;
-
-  .diff-add {
-    color: var(--td-success-color);
-  }
-
-  .diff-del {
-    color: var(--td-error-color);
-  }
-}
-
-.sandbox-file-preview {
-  margin: 6px 0 0;
-  padding: 8px 10px;
-  font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: var(--app-radius-sm);
-
-  pre {
-    margin: 0;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 180px;
-    overflow: hidden;
-  }
-}
-
-.sandbox-file-preview-more {
-  margin-top: 4px;
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
 }
 
 .action-show-icon {

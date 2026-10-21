@@ -120,7 +120,7 @@ test('injected user messages fork a continuation assistant below the bubble', ()
 
 test('answer.done never marks the session idle before persisted completion', () => {
   const chunkStart = source.indexOf("case 'answer':")
-  const chunkEnd = source.indexOf("case 'artifacts_pending'", chunkStart)
+  const chunkEnd = source.indexOf("case 'user_message_injected'", chunkStart)
   assert.notEqual(chunkStart, -1)
   assert.notEqual(chunkEnd, -1)
   const chunk = source.slice(chunkStart, chunkEnd)
@@ -163,7 +163,7 @@ test('agent and non-agent stop notify onGenerationStopped', () => {
 // the message.content seed, duplicating it on screen with no way to retract.
 const runAnswerCase = () => {
   const chunkStart = source.indexOf("case 'answer':")
-  const chunkEnd = source.indexOf("case 'artifacts_pending'", chunkStart)
+  const chunkEnd = source.indexOf("case 'user_message_injected'", chunkStart)
   const chunk = source.slice(chunkStart, chunkEnd)
   const recompose = (message) => {
     let out = ''
@@ -271,7 +271,7 @@ test('an ordinary finished turn is not marked truncated', () => {
 
 test('the live answer path carries truncated onto the event and the message', () => {
   const chunkStart = source.indexOf("case 'answer':")
-  const chunk = source.slice(chunkStart, source.indexOf("case 'artifacts_pending'", chunkStart))
+  const chunk = source.slice(chunkStart, source.indexOf("case 'user_message_injected'", chunkStart))
   const state = { fullContent: { value: '' } }
   const process = vm.runInNewContext(
     ts.transpile(`(message, data, dataPayload) => { switch ('answer') { ${chunk} } }`),

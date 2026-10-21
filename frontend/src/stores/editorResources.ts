@@ -11,14 +11,6 @@ import {
   type ParserEngineInfo,
   type SystemInfo,
 } from '@/api/system'
-import { listMCPServices, type MCPService } from '@/api/mcp-service'
-import {
-  listSkillCatalog,
-  listSkills,
-  type AgentScope,
-  type SkillCatalogItem,
-  type SkillInfo,
-} from '@/api/skill'
 import { getAgentTypePresets, getPlaceholders, type AgentTypePreset, type PlaceholdersResponse } from '@/api/agent'
 import { getTenantRetrievalConfig } from '@/api/retrieval'
 import { isStorageConfigDenied } from './storageEngineAccess'
@@ -47,9 +39,6 @@ export function pickUsableStorageProvider(
 
 type EditorResourceKey =
   | 'storageEngine'
-  | 'mcpServices'
-  | 'skills'
-  | 'skillCatalog'
   | 'agentTypePresets'
   | 'promptTemplates'
   | 'placeholders'
@@ -66,12 +55,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   const storageConfig = ref<Awaited<ReturnType<typeof getStorageEngineConfig>>['data'] | null>(null)
   const storageStatus = ref<StorageEngineStatusItem[]>([])
   const storageAllowedProviders = ref<string[]>([])
-  const mcpServices = ref<MCPService[]>([])
-  const mcpServicesScope = ref('')
-  const skills = ref<SkillInfo[]>([])
-  const skillsAvailable = ref(false)
-  const skillsConfigId = ref('')
-  const skillCatalog = ref<SkillCatalogItem[]>([])
   const agentTypePresets = ref<AgentTypePreset[]>([])
   const promptTemplates = ref<PromptTemplatesConfig | null>(null)
   const placeholders = ref<PlaceholdersResponse | null>(null)
@@ -99,67 +82,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageConfig.value = configRes?.data ?? null
       storageStatus.value = statusRes?.data?.engines ?? []
       storageAllowedProviders.value = statusRes?.data?.allowed_providers ?? []
-    },
-  )
-
-  // A shared agent's skills and MCP services live in its owner's workspace and
-  // are an entirely different set from this workspace's. The cache key has to
-  // carry the agent, or switching agents would leave another workspace's
-  // entries in the @ picker.
-  function scopeKey(configId: string, agent?: AgentScope): string {
-    if (!agent?.agentId || !agent?.sourceTenantId) return configId
-    return `${configId}@${agent.sourceTenantId}:${agent.agentId}`
-  }
-
-  let mcpServicesRequestScope: { key: string; agent?: AgentScope } = { key: '' }
-  const mcpServicesResource = createCachedResource(
-    async () => {
-      const scope = mcpServicesRequestScope
-      const list = await listMCPServices(scope.agent)
-      return { key: scope.key, list: Array.isArray(list) ? list : [] }
-    },
-    ({ key, list }) => {
-      mcpServicesScope.value = key
-      mcpServices.value = list
-    },
-  )
-
-  let skillsRequestScope: { key: string; configId: string; agent?: AgentScope } = { key: '', configId: '' }
-  const skillsResource = createCachedResource(
-    async () => {
-      const scope = skillsRequestScope
-      // No sandbox config means no skills, for a shared agent too: its config
-      // id is part of the agent config this caller already holds. The backend
-      // re-reads it from the agent, so what is sent here only has to be
-      // non-empty when the agent actually has one.
-      if (!scope.configId) {
-        return { key: scope.key, available: false, list: [] as SkillInfo[] }
-      }
-      try {
-        const skillsRes = await listSkills(scope.configId, scope.agent)
-        return {
-          key: scope.key,
-          available: skillsRes.skills_available !== false,
-          list: skillsRes.data && skillsRes.data.length > 0 ? skillsRes.data : [],
-        }
-      } catch {
-        return { key: scope.key, available: false, list: [] as SkillInfo[] }
-      }
-    },
-    ({ key, available, list }) => {
-      skillsConfigId.value = key
-      skillsAvailable.value = available
-      skills.value = list
-    },
-  )
-
-  const skillCatalogResource = createCachedResource(
-    async () => {
-      const res = await listSkillCatalog()
-      return Array.isArray(res?.data) ? res.data : []
-    },
-    (rows) => {
-      skillCatalog.value = rows
     },
   )
 
@@ -225,9 +147,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
 
   const resources: Record<EditorResourceKey, ReturnType<typeof createCachedResource>> = {
     storageEngine: storageEngineResource,
-    mcpServices: mcpServicesResource,
-    skills: skillsResource,
-    skillCatalog: skillCatalogResource,
     agentTypePresets: agentTypePresetsResource,
     promptTemplates: promptTemplatesResource,
     placeholders: placeholdersResource,
@@ -246,36 +165,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageStatus.value || [],
       storageAllowedProviders.value || [],
     )
-  }
-
-  async function ensureMcpServices(agent?: AgentScope, force = false): Promise<void> {
-    const key = scopeKey('', agent)
-    // 换了作用域：作废飞行中的旧请求，且必须排在它后面重新发。
-    if (key !== mcpServicesRequestScope.key) {
-      mcpServicesResource.invalidate()
-      force = true
-    }
-    mcpServicesRequestScope = { key, agent }
-    return mcpServicesResource.ensure(force)
-  }
-
-  async function ensureSkills(
-    sandboxConfigId?: string,
-    agent?: AgentScope,
-    force = false,
-  ): Promise<void> {
-    const configId = sandboxConfigId?.trim() || ''
-    const key = scopeKey(configId, agent)
-    if (key !== skillsRequestScope.key) {
-      skillsResource.invalidate()
-      force = true
-    }
-    skillsRequestScope = { key, configId, agent }
-    return skillsResource.ensure(force)
-  }
-
-  async function ensureSkillCatalog(force = false): Promise<void> {
-    return skillCatalogResource.ensure(force)
   }
 
   async function ensureAgentTypePresets(force = false): Promise<void> {
@@ -305,9 +194,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
   /** 智能体编辑器打开时预取的依赖（不含 IM channels / 单 KB shares） */
   async function prefetchAgentEditorDeps(force = false): Promise<void> {
     await Promise.all([
-      // The editor only edits this workspace's agents, so its MCP services
-      // are this workspace's too.
-      ensureMcpServices(undefined, force),
       ensureAgentTypePresets(force),
       ensurePromptTemplates(force),
       ensureStorageEngine(force),
@@ -322,14 +208,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
       storageConfig.value = null
       storageStatus.value = []
       storageAllowedProviders.value = []
-      mcpServices.value = []
-      mcpServicesScope.value = ''
-      mcpServicesRequestScope = { key: '' }
-      skills.value = []
-      skillsAvailable.value = false
-      skillsConfigId.value = ''
-      skillsRequestScope = { key: '', configId: '' }
-      skillCatalog.value = []
       agentTypePresets.value = []
       promptTemplates.value = null
       placeholders.value = null
@@ -345,10 +223,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     storageConfig,
     storageStatus,
     storageAllowedProviders,
-    mcpServices,
-    skills,
-    skillsAvailable,
-    skillCatalog,
     agentTypePresets,
     promptTemplates,
     placeholders,
@@ -357,9 +231,6 @@ export const useEditorResourcesStore = defineStore('editorResources', () => {
     systemInfo,
     ensureStorageEngine,
     resolveUsableStorageProvider,
-    ensureMcpServices,
-    ensureSkills,
-    ensureSkillCatalog,
     ensureAgentTypePresets,
     ensurePromptTemplates,
     ensurePlaceholders,

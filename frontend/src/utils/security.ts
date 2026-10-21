@@ -72,7 +72,7 @@ const DOMPurifyConfig = {
   // 允许的属性
   ALLOWED_ATTR: [
     'href', 'title', 'alt', 'src', 'class', 'id', 'style', 'data-protected-src', 'data-img-loading',
-    'data-artifact-index', 'data-protected-resource', 'download',
+    'data-protected-resource', 'download',
     'target', 'rel', 'width', 'height', 'open',
     'type', 'aria-label', 'disabled', 'role', 'tabindex',
     // Mermaid SVG 支持的属性

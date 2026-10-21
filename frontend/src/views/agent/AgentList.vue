@@ -249,27 +249,10 @@
                           size="14px" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="agent.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
-                      placement="top">
-                      <div class="feature-badge web-search">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2" />
-                          <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2" />
-                        </svg>
-                      </div>
-                    </t-tooltip>
                     <t-tooltip v-if="agent.config?.knowledge_bases?.length || agent.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
                       <div class="feature-badge knowledge">
                         <t-icon name="folder" size="16px" />
-                      </div>
-                    </t-tooltip>
-                    <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
-                      :content="$t('agent.features.mcp')" placement="top">
-                      <div class="feature-badge mcp">
-                        <t-icon name="extension" size="16px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
@@ -420,27 +403,10 @@
                           size="14px" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="agent.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
-                      placement="top">
-                      <div class="feature-badge web-search">
-                        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2" />
-                          <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2" />
-                        </svg>
-                      </div>
-                    </t-tooltip>
                     <t-tooltip v-if="agent.config?.knowledge_bases?.length || agent.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
                       <div class="feature-badge knowledge">
                         <t-icon name="folder" size="16px" />
-                      </div>
-                    </t-tooltip>
-                    <t-tooltip v-if="agent.config?.mcp_services?.length || agent.config?.mcp_selection_mode === 'all'"
-                      :content="$t('agent.features.mcp')" placement="top">
-                      <div class="feature-badge mcp">
-                        <t-icon name="extension" size="16px" />
                       </div>
                     </t-tooltip>
                     <t-tooltip v-if="agent.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
@@ -557,25 +523,10 @@
                           size="14px" />
                       </div>
                     </t-tooltip>
-                    <t-tooltip v-if="shared.agent?.config?.web_search_enabled" :content="$t('agent.features.webSearch')"
-                      placement="top">
-                      <div class="feature-badge web-search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"
-                          xmlns="http://www.w3.org/2000/svg">
-                          <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <ellipse cx="8" cy="8" rx="2.5" ry="6" stroke="currentColor" stroke-width="1.2" fill="none" />
-                          <line x1="2" y1="6" x2="14" y2="6" stroke="currentColor" stroke-width="1.2" />
-                          <line x1="2" y1="10" x2="14" y2="10" stroke="currentColor" stroke-width="1.2" />
-                        </svg></div>
-                    </t-tooltip>
                     <t-tooltip
                       v-if="shared.agent?.config?.knowledge_bases?.length || shared.agent?.config?.kb_selection_mode === 'all'"
                       :content="$t('agent.features.knowledgeBase')" placement="top">
                       <div class="feature-badge knowledge"><t-icon name="folder" size="16px" /></div>
-                    </t-tooltip>
-                    <t-tooltip
-                      v-if="shared.agent?.config?.mcp_services?.length || shared.agent?.config?.mcp_selection_mode === 'all'"
-                      :content="$t('agent.features.mcp')" placement="top">
-                      <div class="feature-badge mcp"><t-icon name="extension" size="16px" /></div>
                     </t-tooltip>
                     <t-tooltip v-if="shared.agent?.config?.multi_turn_enabled" :content="$t('agent.features.multiTurn')"
                       placement="top">
@@ -703,15 +654,6 @@
                 <span class="shared-detail-label">{{ $t('agent.shareScope.rerankModel') }}</span>
                 <span class="shared-detail-value">{{ currentSharedAgent.agent.config.rerank_model_id ?
                   $t('agent.shareScope.modelConfigured') : $t('agent.shareScope.modelNotSet') }}</span>
-              </div>
-              <div class="shared-detail-row">
-                <span class="shared-detail-label">{{ $t('agent.shareScope.webSearch') }}</span>
-                <span class="shared-detail-value">{{ currentSharedAgent.agent.config.web_search_enabled ?
-                  $t('agent.shareScope.enabled') : $t('agent.shareScope.disabled') }}</span>
-              </div>
-              <div class="shared-detail-row">
-                <span class="shared-detail-label">{{ $t('agent.shareScope.mcp') }}</span>
-                <span class="shared-detail-value">{{ sharedAgentMcpScopeText }}</span>
               </div>
             </template>
           </div>
@@ -1024,13 +966,6 @@ const sharedAgentKbScopeText = computed(() => {
   if (c.kb_selection_mode === 'selected' && c.knowledge_bases?.length) return t('agent.shareScope.kbSelected', { count: c.knowledge_bases.length })
   return t('agent.shareScope.kbNone')
 })
-const sharedAgentMcpScopeText = computed(() => {
-  const c = currentSharedAgent.value?.agent?.config
-  if (!c) return t('agent.shareScope.mcpNone')
-  if (c.mcp_selection_mode === 'all') return t('agent.shareScope.mcpAll')
-  if (c.mcp_selection_mode === 'selected' && c.mcp_services?.length) return t('agent.shareScope.mcpSelected', { count: c.mcp_services.length })
-  return t('agent.shareScope.mcpNone')
-})
 const editorVisible = ref(false)
 const editorMode = ref<'create' | 'edit'>('create')
 const editingAgent = ref<CustomAgent | null>(null)
@@ -1139,9 +1074,9 @@ const checkAndOpenEditModal = async () => {
 }
 
 // Also re-run when the query mutates while this view is already mounted —
-// e.g. the IM overview dialog navigating here via router.push lands on the
-// same route, so onMounted alone never fires and the editor would only open
-// after a manual refresh.
+// e.g. a link that navigates here via router.push lands on the same route,
+// so onMounted alone never fires and the editor would only open after a
+// manual refresh.
 watch(
   () => route.query.edit,
   (v) => {
@@ -1749,30 +1684,12 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
     }
   }
 
-  &.web-search {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
   &.knowledge {
     background: var(--td-bg-color-secondarycontainer);
     color: var(--td-text-color-secondary);
 
     &:hover {
       background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  &.mcp {
-    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
-    color: var(--td-error-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
     }
   }
 

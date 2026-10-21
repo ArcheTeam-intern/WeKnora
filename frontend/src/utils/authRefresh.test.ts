@@ -4,7 +4,6 @@ import test from 'node:test'
 
 import {
   StreamAuthError,
-  forceReloginRedirect,
   isStreamAuthError,
   refreshAccessTokenShared,
   resetAuthRefreshStateForTests,
@@ -117,7 +116,6 @@ test('runStreamWithAuthRetry refreshes once and replays with the new token', asy
   const tokens: string[] = []
   const result = await runStreamWithAuthRetry({
     initialToken: 'expired',
-    isEmbed: false,
     isCurrent: () => true,
     refreshAccessToken: async () => 'fresh',
     reloginMessage: 'please-relogin',
@@ -131,27 +129,6 @@ test('runStreamWithAuthRetry refreshes once and replays with the new token', asy
   assert.equal(result, 'ok:fresh')
 })
 
-test('embed visitors are not refreshed or redirected', async () => {
-  let refreshed = 0
-  await assert.rejects(
-    () => runStreamWithAuthRetry({
-      initialToken: 'embed-token',
-      isEmbed: true,
-      isCurrent: () => true,
-      refreshAccessToken: async () => {
-        refreshed += 1
-        return 'nope'
-      },
-      reloginMessage: 'please-relogin',
-      run: async () => {
-        throw new StreamAuthError(401)
-      },
-    }),
-    (err: unknown) => err instanceof StreamAuthError,
-  )
-  assert.equal(refreshed, 0)
-})
-
 test('a second handshake 401 after a successful refresh does not wipe tokens', async () => {
   const { store, location } = installBrowser()
   store.weknora_token = 'expired'
@@ -161,7 +138,6 @@ test('a second handshake 401 after a successful refresh does not wipe tokens', a
   await assert.rejects(
     () => runStreamWithAuthRetry({
       initialToken: 'expired',
-      isEmbed: false,
       isCurrent: () => true,
       refreshAccessToken: async () => {
         const token = await refreshAccessTokenShared({
@@ -188,7 +164,6 @@ test('a superseded send skips the replay', async () => {
   let runs = 0
   const result = await runStreamWithAuthRetry({
     initialToken: 'expired',
-    isEmbed: false,
     isCurrent: () => false,
     refreshAccessToken: async () => 'fresh',
     reloginMessage: 'please-relogin',
@@ -199,14 +174,6 @@ test('a superseded send skips the replay', async () => {
   })
   assert.equal(runs, 1)
   assert.equal(result, undefined)
-})
-
-test('forceReloginRedirect does not bounce embed visitors to /login', () => {
-  const { store, location } = installBrowser('/embed/ch-1')
-  store.weknora_token = 'jwt'
-  forceReloginRedirect()
-  assert.equal(store.weknora_token, undefined)
-  assert.equal(location.href, 'http://localhost/embed/ch-1')
 })
 
 test('chat stream wires the shared retry and keeps the abort controller', () => {

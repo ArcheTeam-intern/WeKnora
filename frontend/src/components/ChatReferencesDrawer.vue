@@ -4,7 +4,7 @@
       <aside
         v-if="visible"
         class="chat-references-panel"
-        :class="{ 'is-overlay': useOverlay, 'is-embedded': embeddedMode, 'is-source': !!sourceTarget }"
+        :class="{ 'is-overlay': useOverlay, 'is-source': !!sourceTarget }"
         :style="panelStyle"
         role="complementary"
         :aria-label="panelTitle"
@@ -114,7 +114,7 @@
                           <t-icon name="file-search" size="14px" />
                         </button>
                         <a
-                          v-if="item.knowledgeBaseId && !embeddedMode"
+                          v-if="item.knowledgeBaseId"
                           class="reference-item__open"
                           :href="getDocumentHref(item)"
                           target="_blank"
@@ -193,7 +193,6 @@ import {
 } from '@/utils/referenceSources'
 
 const props = defineProps<{
-  embeddedMode?: boolean
   overlayBreakpoint?: number
 }>()
 
@@ -210,8 +209,7 @@ const panelEntered = ref(false)
 const visible = computed(() => drawer?.visible.value ?? false)
 const references = computed(() => drawer?.references.value ?? [])
 const highlight = computed(() => drawer?.highlight.value ?? null)
-// The embed has no access to original files, so it always lists sources.
-const sourceTarget = computed(() => (props.embeddedMode ? null : drawer?.source.value ?? null))
+const sourceTarget = computed(() => drawer?.source.value ?? null)
 
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 const onViewportResize = () => {
@@ -231,13 +229,10 @@ onMounted(() => {
         preferredWidths[key] = stored[key]
       }
     }
-  } catch { /* Storage can be unavailable in embedded/private contexts. */ }
+  } catch { /* Storage can be unavailable in private browsing contexts. */ }
 })
 
-const useOverlay = computed(() => {
-  if (props.embeddedMode) return true
-  return viewportWidth.value < (props.overlayBreakpoint ?? 960)
-})
+const useOverlay = computed(() => viewportWidth.value < (props.overlayBreakpoint ?? 960))
 
 const maxPanelWidth = computed(() => useOverlay.value
   ? viewportWidth.value
@@ -267,7 +262,7 @@ function savePanelWidths() {
 }
 
 function canOpenSource(item: ReferenceListItem) {
-  return !props.embeddedMode && item.kind === 'document' && !!item.knowledgeId
+  return item.kind === 'document' && !!item.knowledgeId
 }
 
 function openItemSource(item: ReferenceListItem) {

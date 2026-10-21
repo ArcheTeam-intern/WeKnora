@@ -252,22 +252,6 @@
               }) }}
             </p>
           </section>
-
-          <section v-if="usageConflict.long_term_memory.bindings.length" class="model-usage-group">
-            <h3>{{ $t('modelSettings.usage.longTermMemory') }}</h3>
-            <div class="model-usage-memory">
-              <div class="model-usage-bindings">
-                <t-tag
-                  v-for="(binding, index) in usageConflict.long_term_memory.bindings"
-                  :key="`${binding}-${index}`"
-                  size="small"
-                  variant="light"
-                >
-                  {{ $t(modelUsageBindingI18nKey(binding)) }}
-                </t-tag>
-              </div>
-            </div>
-          </section>
         </div>
 
         <div class="model-usage-dialog__actions">
@@ -1288,12 +1272,6 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-}
-
-.model-usage-memory {
-  padding: 10px 12px;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-md);
 }
 
 .model-usage-dialog__actions {

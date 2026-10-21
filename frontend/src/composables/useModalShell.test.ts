@@ -19,19 +19,18 @@ function fixture() {
   const errors: unknown[][] = []
   const ui = vue.reactive({ showSettingsModal: false })
   const resources = {
-    agentTypePresets: [], promptTemplates: null, storageStatus: [], skillCatalog: [],
+    agentTypePresets: [], promptTemplates: null, storageStatus: [],
     parserEngines: [
       { Name: 'builtin', Available: true, FileTypes: ['pdf', 'xlsx'] },
       { Name: 'anydoc', Available: true, FileTypes: ['pdf', 'xlsx'] },
     ],
-    async prefetchAgentEditorDeps() {}, async ensureSkills() {}, async ensureSkillCatalog() {},
+    async prefetchAgentEditorDeps() {},
     async ensureParserEngines(_force = false) {},
   }
   const chat = {
     allModels: [{ id: 'model', type: 'KnowledgeQA', is_default: true, capabilities: { thinking_levels: ['auto', 'high'] } }],
-    rawKnowledgeBases: [], webSearchProviders: [], sandboxConfigs: [],
+    rawKnowledgeBases: [],
     async ensureModels() {}, async ensureKnowledgeBases() {},
-    async ensureWebSearchProviders() {}, async ensureSandboxConfigs() {},
   }
   const modules: Record<string, any> = {
     vue,
@@ -50,10 +49,8 @@ function fixture() {
     '@/stores/deploymentCapabilities': {
       useDeploymentCapabilitiesStore: () => ({ isSupported: () => true, async ensureLoaded() {} }),
     },
-    '@/api/agent': { listIMChannels: async () => ({ data: [] }) },
-    '@/api/embed': { listEmbedChannels: async () => ({ data: [] }) },
-    '@/api/skill': {},
-    '@/api/system': { isNamedSandboxBackend: () => true },
+    '@/api/agent': {},
+    '@/api/system': {},
     '@/utils/clipboard': { copyWithToast() {} },
   }
   function evaluate(code: string) {
@@ -140,7 +137,7 @@ test('closing during initialization does not warn or let a stale load replace th
   const f = fixture()
   let release!: () => void
   const pending = new Promise<void>(resolve => { release = resolve })
-  f.resources.ensureSkills = () => pending
+  f.resources.prefetchAgentEditorDeps = () => pending
   const props = vue.reactive({
     visible: false, mode: 'edit', agent: { id: 'agent', name: 'Original', config: { model_id: 'model' } },
     'onUpdate:visible': (value: boolean) => { props.visible = value },
@@ -154,7 +151,7 @@ test('closing during initialization does not warn or let a stale load replace th
     assert.equal(props.visible, false)
     assert.equal(f.dialogs.length, 0)
     await settle()
-    f.resources.ensureSkills = async () => {}
+    f.resources.prefetchAgentEditorDeps = async () => {}
     props.visible = true
     await settle()
     vm.formData.name = 'Keep this edit'

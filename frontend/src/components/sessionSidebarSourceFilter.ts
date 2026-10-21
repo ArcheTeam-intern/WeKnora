@@ -1,11 +1,10 @@
-// Sidebar session list source filter: web chats default, optional IM / embed buckets.
+// Sidebar session list source filter: web chats default, optional API bucket.
 
 export const DEFAULT_SESSION_BUCKET_KEY = 'web'
 
 export interface SessionSourceOption {
   value: string
   label: string
-  logo?: string
 }
 
 export function shouldShowSessionSourceFilter(visibleChannelCount: number): boolean {
@@ -14,15 +13,13 @@ export function shouldShowSessionSourceFilter(visibleChannelCount: number): bool
 
 export function buildSessionSourceOptions(
   webLabel: string,
-  channelBuckets: Array<{ key: string; label: string; platform?: string }>,
-  logoForPlatform: (platform: string) => string,
+  channelBuckets: Array<{ key: string; label: string }>,
 ): SessionSourceOption[] {
   return [
     { value: DEFAULT_SESSION_BUCKET_KEY, label: webLabel },
     ...channelBuckets.map((bucket) => ({
       value: bucket.key,
       label: bucket.label,
-      logo: bucket.platform ? logoForPlatform(bucket.platform) : undefined,
     })),
   ]
 }

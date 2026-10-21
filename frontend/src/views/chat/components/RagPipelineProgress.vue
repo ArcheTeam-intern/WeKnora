@@ -4,21 +4,7 @@
          readers miss a live region that appears together with its own text. -->
     <div class="sr-only" role="status" aria-live="polite">{{ liveStatusText }}</div>
 
-    <!-- A turn that only recalled memory has no pipeline to draw. It borrows
-         this component for the memory row alone, so anything derived from the
-         agent event stream must stay out of the way — the agent timeline is
-         rendering those same steps itself. -->
-    <ChatMemoryStep
-      v-if="memoryOnly"
-      variant="root"
-      :memories="memoryItems"
-      :expanded="memoryExpanded"
-      :forgetting-id="forgettingId"
-      @toggle="toggleMemory"
-      @forget="forgetMemory"
-    />
-
-    <div v-else-if="showPrePipelineWait" class="tree-children">
+    <div v-if="showPrePipelineWait" class="tree-children">
       <div class="tree-child tree-child-last streaming-loading-node">
         <div class="tree-branch" />
         <div class="tree-child-content">
@@ -37,16 +23,6 @@
     </div>
 
     <div v-else-if="!showCollapsedRoot" class="tree-children">
-      <ChatMemoryStep
-        v-if="hasMemory"
-        :memories="memoryItems"
-        :expanded="memoryExpanded"
-        :is-last="memoryIsLast"
-        :forgetting-id="forgettingId"
-        @toggle="toggleMemory"
-        @forget="forgetMemory"
-      />
-
       <div v-for="(step, index) in steps" :key="step.id" class="tree-child" :class="{
         'tree-child-last':
           !showDoneRow
@@ -167,16 +143,6 @@
       </div>
 
       <div v-if="showExpandedTimeline" class="tree-children tree-children-expanded">
-        <ChatMemoryStep
-          v-if="hasMemory"
-          :memories="memoryItems"
-          :expanded="memoryExpanded"
-          :is-last="memoryIsLast"
-          :forgetting-id="forgettingId"
-          @toggle="toggleMemory"
-          @forget="forgetMemory"
-        />
-
         <div v-for="(step, index) in steps" :key="step.id" class="tree-child"
           :class="{ 'tree-child-last': index === steps.length - 1 && !showDoneRow && !showThinkingStep }">
           <div class="tree-branch" />
@@ -250,8 +216,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ChatMemoryStep from './ChatMemoryStep.vue'
-import { useChatMemoryRow } from '@/composables/useChatMemoryRow'
 import { getAgentToolIconName } from '@/utils/agent-tool-icons'
 import {
   getKnowledgeSearchSummaryHtml,
@@ -274,13 +238,8 @@ const props = defineProps<{
     agentEventStream?: Array<Record<string, unknown>>
     content?: string
     knowledge_references?: Array<{ chunk_type?: string; knowledge_id?: string; knowledge_title?: string }>
-    used_memories?: Array<{ id: string; kind: string; content: string }>
     is_completed?: boolean
   }
-  embeddedMode?: boolean
-  // Set by hosts that already render their own timeline (the agent stream) and
-  // only need the memory row from here.
-  memoryOnly?: boolean
 }>()
 
 const { t } = useI18n()
@@ -293,17 +252,7 @@ const waitController = createRagWaitController((view) => {
   waitView.value = view
 })
 
-// Long-term memory is shown as a timeline row rather than as a card of its
-// own: it is one more thing the turn did before answering, and giving it a
-// separate visual language would make it read as unrelated to the pipeline.
-const {
-  memoryItems,
-  hasMemory,
-  expanded: memoryExpanded,
-  forgettingId,
-  toggle: toggleMemory,
-  forget: forgetMemory,
-} = useChatMemoryRow(() => props.session?.used_memories)
+// Long-term memory is no longer recorded, so the timeline only shows pipeline steps.
 
 const thinkingContent = computed(() => {
   const stream = props.session?.agentEventStream
@@ -434,9 +383,6 @@ const showExpandedTimeline = computed(() => {
 const showDoneRow = computed(() => {
   const turnDone = hasAnswer.value || Boolean(props.session?.is_completed)
   if (!turnDone) return false
-  // A timeline rendered only because memory was used has nothing to report as
-  // finished; adding a "done" row there would put a step into plain chat that
-  // never had one.
   if (steps.value.length === 0 && !hasThinking.value) return false
   if (steps.value.length > 0 && !allStepsDone.value) return false
   return true
@@ -446,9 +392,7 @@ const showPrePipelineWait = computed(() => {
   if (hasAnswer.value || props.session?.is_completed || steps.value.length > 0 || hasThinking.value) {
     return false
   }
-  // Memory is recalled before the first token, so once it is on screen the
-  // turn is visibly under way and the placeholder would be redundant.
-  return !hasMemory.value
+  return true
 })
 
 // Only show the thinking row once the backend actually streams thinking events.
@@ -471,20 +415,11 @@ const isThinkingStreaming = computed(
     !props.session?.is_completed,
 )
 
-// Memory alone is enough to render: a plain-chat answer that used memory still
-// needs somewhere to say so.
 const visible = computed(() => {
-  if (props.memoryOnly) return hasMemory.value
   return (
-    steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value || hasMemory.value
+    steps.value.length > 0 || showPrePipelineWait.value || showThinkingStep.value
   )
 })
-
-// The memory row leads the timeline, so it is only the last node when nothing
-// else rendered.
-const memoryIsLast = computed(
-  () => steps.value.length === 0 && !showWaitStep.value && !showThinkingStep.value && !showDoneRow.value,
-)
 
 const liveStatusText = computed(() => {
   if (showPrePipelineWait.value) return t('chat.preparingAnswer')

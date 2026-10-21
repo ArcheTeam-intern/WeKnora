@@ -2,21 +2,21 @@ import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import { clearProtectedFileFailureCache, hydrateProtectedFileImages, protectProviderImageSrcInHTML } from './security.ts'
 import { responseFileName } from './protectedResource.ts'
-import { applyFinalArtifactContent } from './finalArtifactContent.ts'
+import { applyFinalContent } from './finalContent.ts'
 
 test('completion updates both streaming timeline and persisted-style content', () => {
   const message: any = { content: 'old', agentEventStream: [
     { type: 'answer', content: 'preamble' }, { type: 'answer', content: 'old' },
   ] }
-  applyFinalArtifactContent(message, 'new resource')
+  applyFinalContent(message, 'new resource')
   assert.equal(message.content, 'new resource')
   assert.equal(message.agentEventStream[0].superseded, true)
   assert.equal(message.agentEventStream[1].content, 'new resource')
   assert.equal(message.agentEventStream[1].done, true)
-  applyFinalArtifactContent(message, undefined)
+  applyFinalContent(message, undefined)
   assert.equal(message.content, 'new resource')
-  applyFinalArtifactContent(message, '')
-  applyFinalArtifactContent(message, '   ')
+  applyFinalContent(message, '')
+  applyFinalContent(message, '   ')
   assert.equal(message.content, 'new resource')
   assert.equal(message.agentEventStream[1].content, 'new resource')
 })

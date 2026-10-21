@@ -7,7 +7,6 @@ import { computed, reactive, ref } from 'vue'
 import { chatSubmitShortcut } from '../utils/chatSubmitShortcut.ts'
 
 const inputField = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8')
-const settingsStore = readFileSync(new URL('../stores/settings.ts', import.meta.url), 'utf8')
 
 test('composer shortcuts queue Enter, inject drafts, and promote the first queued message when empty', () => {
   const code = inputField.slice(inputField.indexOf('const steerShortcutLabel ='), inputField.indexOf('const onPaste ='))
@@ -36,15 +35,7 @@ test('composer shortcuts queue Enter, inject drafts, and promote the first queue
   assert.equal(promotes.length, 1, 'IME confirmation must not promote a message')
 })
 
-test('selecting an agent leaves web search off until the user enables it', () => {
-  const selectAgentStart = settingsStore.indexOf('selectAgent(agentId: string')
-  const getSelectedAgentStart = settingsStore.indexOf('getSelectedAgentId()', selectAgentStart)
-  const selectAgentAction = settingsStore.slice(selectAgentStart, getSelectedAgentStart)
-
-  assert.notEqual(selectAgentStart, -1)
-  assert.notEqual(getSelectedAgentStart, -1)
-  assert.match(selectAgentAction, /this\.settings\.webSearchEnabled = false/)
-
+test('selecting an agent routes through the settings store', () => {
   const handleSelectAgentStart = inputField.indexOf('const handleSelectAgent = async')
   const handleSelectAgentEnd = inputField.indexOf('const clearvalue', handleSelectAgentStart)
   const handleSelectAgent = inputField.slice(handleSelectAgentStart, handleSelectAgentEnd)
@@ -52,19 +43,6 @@ test('selecting an agent leaves web search off until the user enables it', () =>
   assert.notEqual(handleSelectAgentStart, -1)
   assert.notEqual(handleSelectAgentEnd, -1)
   assert.match(handleSelectAgent, /settingsStore\.selectAgent\(agent\.id, sourceTenantId\)/)
-  assert.doesNotMatch(handleSelectAgent, /agentWebSearch/)
-  assert.doesNotMatch(handleSelectAgent, /settingsStore\.toggleWebSearch/)
-})
-
-test('shared-agent web search button waits for source readiness metadata', () => {
-  const showWebSearchStart = inputField.indexOf('const showWebSearchButton = computed')
-  const showWebSearchEnd = inputField.indexOf('const showImageUploadButton', showWebSearchStart)
-  const showWebSearchButton = inputField.slice(showWebSearchStart, showWebSearchEnd)
-
-  assert.notEqual(showWebSearchStart, -1)
-  assert.notEqual(showWebSearchEnd, -1)
-  assert.match(showWebSearchButton, /isWebSearchReadinessKnown/)
-  assert.match(showWebSearchButton, /selectedSharedAgent\.value\?\.web_search_ready/)
 })
 
 test('one composer action switches between stop and send', () => {

@@ -140,11 +140,6 @@
             </div>
             <div class="item-main">
               <span class="name">{{ item.name }}</span>
-              <span
-                v-if="item.type === 'mcp' && item.catalogSynced"
-                class="count"
-                :class="{ 'is-stale': item.catalogStale }"
-              >{{ item.toolCount ?? 0 }}</span>
             </div>
           </div>
           <template #content>
@@ -153,19 +148,7 @@
                 <span class="detail-name">{{ item.name }}</span>
               </div>
               <p v-if="item.description" class="detail-desc">{{ item.description }}</p>
-              <div v-if="item.type === 'mcp'" class="detail-meta">
-                <span class="detail-kb">
-                  <t-icon name="tools" class="detail-icon" />
-                  <span v-if="item.catalogSynced" class="detail-value">
-                    {{ $t('mentionDetail.mcpToolCount', { count: item.toolCount ?? 0 }) }}
-                  </span>
-                  <span v-else class="detail-value">{{ $t('mentionDetail.mcpNotSynced') }}</span>
-                </span>
-                <span v-if="item.catalogSynced && item.catalogStale" class="detail-stale">
-                  {{ $t('mentionDetail.mcpStale') }}
-                </span>
-              </div>
-              <div v-else-if="item.kbName || item.serviceName" class="detail-meta">
+              <div v-if="item.kbName" class="detail-meta">
                 <span v-if="item.kbName" class="detail-kb">
                   <t-icon name="folder" class="detail-icon" />
                   <span class="detail-label">{{ $t('mentionDetail.belongsToKb') }}</span>
@@ -175,11 +158,6 @@
                   >
                     {{ item.kbName }}
                   </span>
-                </span>
-                <span v-if="item.serviceName" class="detail-kb">
-                  <t-icon name="tools" class="detail-icon" />
-                  <span class="detail-label">MCP：</span>
-                  <span class="detail-value">{{ item.serviceName }}</span>
                 </span>
               </div>
             </div>
@@ -282,7 +260,7 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useOrganizationStore } from '@/stores/organization';
 import { useSettingsStore } from '@/stores/settings';
-import { SKILL_ICON, type MentionItem, type MentionItemType } from '@/types/mention';
+import { type MentionItem, type MentionItemType } from '@/types/mention';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
@@ -333,8 +311,6 @@ const fileItems = computed(() => props.items.filter(item => item.type === 'file'
 const mentionGroupDefs = computed<Array<{ type: MentionItemType; label: string; icon: string }>>(() => [
   { type: 'kb', label: t('common.knowledgeBase'), icon: 'folder' },
   { type: 'tag', label: '标签', icon: 'tag' },
-  { type: 'mcp', label: 'MCP', icon: 'tools' },
-  { type: 'skill', label: t('common.skill'), icon: SKILL_ICON },
   { type: 'file', label: t('common.file'), icon: 'file' },
 ]);
 
@@ -769,8 +745,6 @@ const scrollToItem = (index: number) => {
 .kb-icon,
 .faq-icon,
 .file-icon,
-.mcp-icon,
-.skill-icon,
 .tag-icon {
   background: transparent;
   color: var(--td-text-color-secondary);
@@ -811,10 +785,6 @@ const scrollToItem = (index: number) => {
   font-size: var(--td-font-size-mark-small);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-placeholder);
-}
-
-.count.is-stale {
-  color: var(--td-warning-color);
 }
 
 .org-name {
@@ -991,8 +961,5 @@ const scrollToItem = (index: number) => {
 .mention-detail-content .detail-value.clickable:hover {
   color: var(--td-brand-color);
   text-decoration-color: var(--td-brand-color);
-}
-.mention-detail-content .detail-stale {
-  color: var(--td-warning-color);
 }
 </style>

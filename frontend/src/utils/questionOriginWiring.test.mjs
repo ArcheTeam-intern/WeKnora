@@ -15,7 +15,7 @@ test('the composer forwards send options from triggerSend to send-msg', () => {
   assert.match(inputField, /triggerSend\(text: string, options: SendMessageOptions = \{\}\)/)
   assert.match(inputField, /nextTick\(\(\) => createSession\(text, 'after', options\)\)/)
   const emits = inputField.match(/emit\('send-msg',[^\n]*\)/g) || []
-  assert.ok(emits.length >= 2)
+  assert.ok(emits.length >= 1)
   for (const call of emits) {
     assert.match(call, /, options\)$/, `send-msg must forward options: ${call}`)
   }

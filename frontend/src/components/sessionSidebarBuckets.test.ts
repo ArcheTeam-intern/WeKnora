@@ -10,26 +10,25 @@ import {
   type BucketDefinition,
 } from './sessionSidebarBuckets.ts'
 
-const imDef: BucketDefinition = {
-  key: 'im:feishu',
-  apiSource: 'feishu',
-  label: 'Feishu',
-  kind: 'im',
-  platform: 'feishu',
+const apiDef: BucketDefinition = {
+  key: 'api',
+  apiSource: 'api',
+  label: 'API',
+  kind: 'api',
 }
 
 test('bucketVisible hides channel buckets until count is known', () => {
-  const bucket = createEmptyBucket(imDef)
+  const bucket = createEmptyBucket(apiDef)
   assert.equal(bucketVisible(bucket), false)
 })
 
 test('bucketVisible hides channel buckets with zero sessions after probe', () => {
-  const bucket = applyBucketCountProbe(createEmptyBucket(imDef), 0)
+  const bucket = applyBucketCountProbe(createEmptyBucket(apiDef), 0)
   assert.equal(bucketVisible(bucket), false)
 })
 
 test('bucketVisible shows channel buckets with sessions after probe', () => {
-  const bucket = applyBucketCountProbe(createEmptyBucket(imDef), 3)
+  const bucket = applyBucketCountProbe(createEmptyBucket(apiDef), 3)
   assert.equal(bucketVisible(bucket), true)
 })
 
@@ -59,31 +58,13 @@ test('prependSessionToWebBucket is idempotent for existing session', () => {
 })
 
 test('buildBucketDefinitions hides channel buckets unless admin', () => {
-  const defs = buildBucketDefinitions(
-    ['feishu'],
-    { ch1: 'Embed' },
-    {
-      web: 'Chats',
-      imPlatform: (platform) => platform,
-      embedChannel: (name) => name,
-      api: 'API',
-    },
-  )
+  const labels = { web: 'Chats', api: 'API' }
+  const defs = buildBucketDefinitions(labels)
   assert.deepEqual(defs.map((def) => def.key), ['web'])
 
-  const adminDefs = buildBucketDefinitions(
-    ['feishu'],
-    { ch1: 'Embed' },
-    {
-      web: 'Chats',
-      imPlatform: (platform) => platform,
-      embedChannel: (name) => name,
-      api: 'API',
-    },
-    { includeAdminChannelBuckets: true },
-  )
+  const adminDefs = buildBucketDefinitions(labels, { includeAdminChannelBuckets: true })
   assert.deepEqual(
     adminDefs.map((def) => def.key),
-    ['im:feishu', 'embed:ch1', 'api', 'web'],
+    ['api', 'web'],
   )
 })

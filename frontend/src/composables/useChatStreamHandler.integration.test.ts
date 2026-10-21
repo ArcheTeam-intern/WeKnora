@@ -4,7 +4,7 @@ import test, { type TestContext } from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 import * as vue from 'vue'
-import * as finalContent from '../utils/finalArtifactContent.ts'
+import * as finalContent from '../utils/finalContent.ts'
 import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
@@ -21,7 +21,7 @@ const compiled = ts.transpileModule(source, {
 }).outputText
 const modules: Record<string, unknown> = {
   vue, 'vue-i18n': { useI18n: () => ({ t: (key: string) => key }) },
-  '@/utils/finalArtifactContent': finalContent,
+  '@/utils/finalContent': finalContent,
   '@/utils/rag-pipeline-history': history,
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
@@ -111,7 +111,7 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
     await h.render() // Actual streaming render before authorization evidence is saved.
     assert.equal(h.requests.length, 1)
     h.send('answer', '', true, { event_id: 'answer', done: true })
-    await h.flush() // Arbitrarily slow checkpoint/artifact collection can run here.
+    await h.flush() // Arbitrarily slow checkpoint/persistence can run here.
     assert.equal(h.message.is_completed, false)
     assert.equal(h.isReplying.value, true)
     assert.equal(h.currentAssistantMessageId.value, 'assistant')
@@ -119,7 +119,7 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
     assert.equal(h.turns.length, 0)
     assert.equal(h.requests.length, 1, 'answer.done must not trigger the final retry')
     h.persist()
-    h.send('complete', '', true, { final_content: h.answer, artifacts: [{ file_name: 'chart.png' }] })
+    h.send('complete', '', true, { final_content: h.answer })
     await h.flush()
     assert.match(h.img.src, /^blob:/)
     assert.equal(h.requests.length, 2, 'completion bypasses the earlier 403 cooldown')
@@ -128,7 +128,6 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
     assert.equal(h.isReplying.value, false)
     assert.equal(h.replies.length, 1)
     assert.equal(h.turns.length, 1)
-    assert.equal(h.message.artifacts[0].file_name, 'chart.png')
   })
 
   test(`${mode}: persistence failure preserves the streamed answer and timeline`, async t => {
@@ -174,20 +173,5 @@ test('corrected message IDs reauthorize images without requiring completion', as
   await h.flush()
   assert.equal(h.requests.length, 2)
   assert.ok(h.requests[1].url.startsWith('/api/v1/sessions/session/messages/corrected/files?'))
-  assert.match(h.img.src, /^blob:/)
-})
-
-test('completion retries preserve the embed authentication plane', async t => {
-  const h = setup(t, 'ordinary')
-  setDefaultProtectedFileAccess({ mode: 'embed', channelId: 'channel', token: 'embed-token' })
-  h.send('answer', h.answer)
-  await h.render()
-  h.send('answer', '', true)
-  h.persist()
-  h.send('complete', '', true, { final_content: h.answer })
-  await h.flush()
-  assert.equal(h.requests.length, 2)
-  assert.ok(h.requests.every(request => request.url.startsWith('/api/v1/embed/channel/files?')))
-  assert.deepEqual(h.requests[1].headers, { Authorization: 'Embed embed-token' })
   assert.match(h.img.src, /^blob:/)
 })

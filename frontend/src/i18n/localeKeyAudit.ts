@@ -193,11 +193,15 @@ function isAuditableSourceFile(path: string): boolean {
   return true
 }
 
+/** Build outputs carry stale bundled code whose $t keys would otherwise
+ *  "protect" locales from pruning long after the real sources moved on. */
+const SKIPPED_SOURCE_DIRS = new Set(['node_modules', 'dist'])
+
 function listSourceFiles(dir: string, results: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const path = join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (entry.name !== 'node_modules') listSourceFiles(path, results)
+      if (!SKIPPED_SOURCE_DIRS.has(entry.name)) listSourceFiles(path, results)
       continue
     }
     if (isAuditableSourceFile(path)) results.push(path)

@@ -11,7 +11,7 @@ import { compileScript, parse } from 'vue/compiler-sfc'
 // The popover watches its cache-scope getter, so Vue evaluates it during
 // setup; callers must not read props that <script setup> has not declared yet.
 const srcDir = fileURLToPath(new URL('..', import.meta.url))
-const composables = ['useCitationPopover', 'useChatCitationPopover', 'useEmbedCitationPopover']
+const composables = ['useCitationPopover', 'useChatCitationPopover']
 const callPattern = new RegExp(`\\b(${composables.join('|')})\\(`)
 
 const transpile = (source: string) => ts.transpileModule(source, {
@@ -93,7 +93,6 @@ for (const file of callers) {
   test(`${relative(srcDir, file)}: citation popover options can be read during setup`, () => {
     assert.doesNotThrow(() => runSetup(file, {
       content: '', session: {}, sessionId: 'session-1', userQuery: '',
-      embedChannelId: '', embedToken: '',
     }))
   })
 }

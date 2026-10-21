@@ -1,13 +1,11 @@
 // src/utils/request.js
 import axios from "axios";
-import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from "./index";
+import { generateRandomString, MAX_FILE_SIZE_MB } from "./index";
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
-import { isSkillBundleUploadUrl } from './uploadLimit';
 import { isTimeoutError, uploadTimeoutMs } from './requestTimeouts';
 import {
   forceReloginRedirect,
-  isEmbedPage,
   refreshAccessTokenShared,
 } from './authRefresh';
 
@@ -71,21 +69,14 @@ export function getCurrentLanguage(): string {
 
 instance.interceptors.request.use(
   (config) => {
-    const existingAuth = config.headers?.Authorization ?? config.headers?.authorization;
-    const isEmbedAuth = typeof existingAuth === 'string' && existingAuth.startsWith('Embed ');
-    const isEmbedPath = typeof config.url === 'string' && config.url.includes('/api/v1/embed/');
-
-    // 嵌入渠道使用 Embed token；勿用本地 JWT 覆盖（否则调试页会 401）
-    if (!isEmbedAuth) {
-      const token = localStorage.getItem('weknora_token');
-      if (token) {
-        config.headers["Authorization"] = `Bearer ${token}`;
-      }
+    const token = localStorage.getItem('weknora_token');
+    if (token) {
+      config.headers["Authorization"] = `Bearer ${token}`;
     }
-    
+
     // 添加用户语言偏好
     config.headers["Accept-Language"] = getCurrentLanguage();
-    
+
     // 添加跨空间访问请求头：只要 setSelectedTenant 写过激活空间，
     // 每个请求都要附 X-Tenant-ID。早期版本会 short-circuit
     // "selectedTenantId === defaultTenantId 时不附"以减少 header 体积，
@@ -95,13 +86,11 @@ instance.interceptors.request.use(
     // 换之后只有第一批请求带 X-Tenant-ID"调成永久状态。
     // 后端 IsTenantAccessible 已经允许 header 指向 home 空间（自家），
     // 所以无脑附不会引入新风险。
-    if (!isEmbedAuth && !isEmbedPath) {
-      const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
-      if (selectedTenantId) {
-        config.headers["X-Tenant-ID"] = selectedTenantId;
-      }
+    const selectedTenantId = localStorage.getItem('weknora_selected_tenant_id');
+    if (selectedTenantId) {
+      config.headers["X-Tenant-ID"] = selectedTenantId;
     }
-    
+
     config.headers["X-Request-ID"] = `${generateRandomString(12)}`;
     return config;
   },
@@ -110,7 +99,7 @@ instance.interceptors.request.use(
   }
 );
 
-const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login', '/api/v1/embed/'];
+const PUBLIC_AUTH_PATHS = ['/auth/auto-setup', '/auth/login'];
 
 function isPublicAuthRequest(url?: string): boolean {
   if (!url) return false;
@@ -161,15 +150,6 @@ instance.interceptors.response.use(
       return Promise.reject(withHttpStatus({ status, message: msg || t('error.invalidCredentials') }, status));
     }
 
-    // Embed 调试页/挂件：无 JWT 时直接拒绝，勿走 refresh → /login
-    if (error.response.status === 401 && isEmbedPage()) {
-      const { status, data } = error.response;
-      const msg = typeof data === 'object'
-        ? (typeof data?.error === 'string' ? data.error : (data?.error?.message || data?.message))
-        : data;
-      return Promise.reject(withHttpStatus({ status, message: msg || t('error.invalidCredentials') }, status));
-    }
-
     // 如果是401错误且不是刷新token的请求，尝试刷新token
     if (error.response.status === 401 && !originalRequest._retry && !originalRequest.url?.includes('/auth/refresh')) {
       originalRequest._retry = true;
@@ -191,12 +171,9 @@ instance.interceptors.response.use(
     // 处理 Nginx 413 Request Entity Too Large
     const ERR_ENTITY_TOO_LARGE = 413;
     if (error.response.status === ERR_ENTITY_TOO_LARGE) {
-      const skillUpload = isSkillBundleUploadUrl(error.config?.url)
       return Promise.reject(withHttpStatus({
         status: ERR_ENTITY_TOO_LARGE,
-        message: skillUpload
-          ? i18n.global.t('settings.sandbox.skillBundleTooLarge', { size: MAX_SKILL_BUNDLE_SIZE_MB })
-          : i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
+        message: i18n.global.t('error.fileSizeExceeded', { size: MAX_FILE_SIZE_MB }),
         success: false
       }, ERR_ENTITY_TOO_LARGE));
     }

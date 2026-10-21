@@ -74,11 +74,6 @@
           <ModelSettings />
         </div>
 
-        <!-- 沙箱密钥（成员自己的技能 / 沙箱密钥） -->
-        <div v-if="currentSection === 'envvars'" class="section">
-          <EnvVarSettings />
-        </div>
-
         <!-- 向量数据库引擎 -->
         <div v-if="currentSection === 'vectorstore'" class="section">
           <VectorStoreSettings />
@@ -164,7 +159,6 @@ import GeneralSettings from './GeneralSettings.vue'
 import ModelSettings from './ModelSettings.vue'
 import ModelCatalog from '../system/ModelCatalog.vue'
 import OllamaSettings from './OllamaSettings.vue'
-import EnvVarSettings from './EnvVarSettings.vue'
 import VectorStoreSettings from './VectorStoreSettings.vue'
 import ParserEngineSettings from './ParserEngineSettings.vue'
 import StorageBackendSettings from './StorageBackendSettings.vue'
@@ -184,8 +178,7 @@ import {
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
-import { SETTINGS_SECTION_CAPABILITY, skillSettingsSupported } from '@/config/deploymentCapabilities'
-import { hostSkillsOnly } from '@/utils/skillTarget'
+import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -200,16 +193,7 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const { t, te } = useI18n()
-const hostSkills = computed(() => hostSkillsOnly(
-  deploymentCapabilities.isSupported('settings.sandbox.remote'),
-  deploymentCapabilities.isSupported('settings.sandbox.host'),
-))
-function envNavLabel(): string {
-  const hostKey = 'envVarSettings.host.title'
-  if (hostSkills.value && te(hostKey)) return t(hostKey)
-  return t('envVarSettings.title')
-}
+const { t } = useI18n()
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -232,8 +216,7 @@ type NavGroup = {
 // 设置二级导航的最低可见角色来自 settingsAccess.ts，和
 // internal/router/router.go 的守卫矩阵对齐。
 // 以「页面里至少有 1 个有意义的写操作所要求的最低角色」为基准，把基础设
-// 施配置（models 写、ollama 下载、websearch 写、parser/storage/vector/mcp
-// CRUD、sandbox 连接、skills 安装、chat-history 配置）统一收到 admin；只读类（general / system info /
+// 施配置（models 写、ollama 下载、parser/storage/vector 写）统一收到 admin；只读类（general / system info /
 // tenant-info / members 名册）保留 viewer 可见；最高敏感的 reset api
 // key 是 owner-only。改这张表前请在 router.go 里复核对应路由组。
 //
@@ -265,9 +248,6 @@ const isSectionSupported = (key: string): boolean => {
     return deploymentCapabilities.isSupported(
       INTEGRATION_TAB_CAPABILITY[integrationTabFromSection(key)],
     )
-  }
-  if (key === 'skills' || key === 'envvars') {
-    return skillSettingsSupported(deploymentCapabilities.capabilities)
   }
   return deploymentCapabilities.isSupported(SETTINGS_SECTION_CAPABILITY[key])
 }
@@ -314,7 +294,6 @@ const navItems = computed(() => {
     { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
-    { key: 'envvars', icon: 'key', label: envNavLabel() },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,
@@ -339,7 +318,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'account',
       label: t('settings.navGroups.account'),
-      items: pickItems(['general', 'userprofile', 'envvars']),
+      items: pickItems(['general', 'userprofile']),
     },
     {
       key: 'workspace',
@@ -393,7 +372,7 @@ const handleNavClick = (item: any) => {
     currentSubSection.value = ''
   }
 
-  // 切换到对应页面，并同步 URL 为 ?section=<navKey>（含 integration-claw）。
+  // 切换到对应页面，并同步 URL 为 ?section=<navKey>。
   // 否则从其它 section 点进来时 query 不变，路由监听会把内容拉回去。
   currentSection.value = item.key
   syncSettingsRoute(item.key)

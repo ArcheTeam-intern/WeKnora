@@ -6,12 +6,8 @@ import { onBeforeRouteUpdate } from 'vue-router';
 import { MessagePlugin } from "tdesign-vue-next";
 import type { SendMessageOptions } from '@/utils/questionOrigin';
 import { useSettingsStore } from '@/stores/settings';
-import { useBrowserConnectionStore } from '@/stores/browserConnection';
-import { useUIStore } from '@/stores/ui';
-import BrowserIcon from '@/components/icons/BrowserIcon.vue';
 import { useMenuStore } from '@/stores/menu';
 import { listKnowledgeBases, searchKnowledge, batchQueryKnowledge, listKnowledgeTags } from '@/api/knowledge-base';
-import { listMCPServices, type MCPService } from '@/api/mcp-service';
 import { stopSession } from '@/api/chat';
 import type { SteerQueueItem } from '@/api/chat/steer';
 import { chatSubmitShortcut } from '@/utils/chatSubmitShortcut';
@@ -29,9 +25,6 @@ import {
 } from '@/utils/contextWindow';
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
-import { useEditorResourcesStore } from '@/stores/editorResources';
-import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
-import { hostSkillsOnly, mentionSkillTargetId } from '@/utils/skillTarget';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -41,11 +34,6 @@ import {
   type ScopeCapabilities,
 } from '@/utils/tool-capabilities';
 import {
-  isAgentWebSearchEnabled,
-  isAgentWebSearchReady,
-  isTenantWebSearchReady,
-} from '@/utils/agentWebSearch';
-import {
   getAgentNotReadyReasonKeys,
   resolveAgentNotReadySection,
   resolveAgentNotReadyHighlight,
@@ -53,25 +41,20 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
-import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
+import { type MentionItem, type MentionItemType, type MentionRequestItem } from '@/types/mention';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
-const browserConnection = useBrowserConnectionStore();
-const uiStore = useUIStore();
 const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
-const editorResources = useEditorResourcesStore();
-const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const {
   agents,
   disabledOwnAgentIds,
   allModels,
   chatModels: availableModels,
-  webSearchProviders,
 } = storeToRefs(chatResources);
 const { t, locale } = useI18n();
 
@@ -243,7 +226,7 @@ const agentKBSelectionMode = computed(() => {
 // 共享智能体下的知识库列表（来自 listKnowledgeBases(agent_id)），用于已选知识库展示与 org 角标
 const sharedAgentKbList = ref<Array<{ id: string; name: string; type?: string; knowledge_count?: number; chunk_count?: number }>>([]);
 
-// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置；网络搜索由用户主动开启
+// 当智能体改变时，模型、可@知识库列表均跟随新智能体配置
 // 知识库：用新智能体配置的列表替换当前选中，使已选与可@列表一致（含共享智能体）
 watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId, newAgentKbs, newKbMode], [oldAgentId]) => {
   if (settingsStore._isApplyingSessionState) return;
@@ -285,17 +268,6 @@ watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async 
   }
 }, { immediate: true });
 
-// 智能体是否启用了网络搜索（仅显式开启才算支持）
-const isWebSearchEnabledByAgent = computed(() => {
-  if (!hasAgentConfig.value) return null;
-  return isAgentWebSearchEnabled(currentAgentConfig.value);
-});
-
-// 网络搜索是否被智能体禁用
-const isWebSearchDisabledByAgent = computed(() => {
-  return hasAgentConfig.value && isWebSearchEnabledByAgent.value !== true;
-});
-
 // 知识库选择是否被智能体锁定
 // 1. 如果智能体配置了 kb_selection_mode = 'none' → 完全禁用知识库
 // 其他情况用户都可以在允许的范围内通过 @ 选择知识库
@@ -311,10 +283,8 @@ const isKnowledgeBaseDisabledByAgent = computed(() => {
   return agentKBSelectionMode.value === 'none';
 });
 const isMentionDisabled = computed(() => {
-  if (settingsStore.isAgentStreamMode && isKnowledgeBaseDisabledByAgent.value) {
-    return agentMCPSelectionMode.value === 'none' && agentSkillsSelectionMode.value === 'none';
-  }
-  return isKnowledgeBaseLockedByAgent.value && !settingsStore.isAgentStreamMode;
+  if (settingsStore.isAgentStreamMode) return isKnowledgeBaseDisabledByAgent.value;
+  return isKnowledgeBaseLockedByAgent.value;
 });
 
 // 智能体配置的模型 ID
@@ -333,71 +303,6 @@ const agentSupportedFileTypes = computed(() => {
 const agentAllowedTools = computed<string[]>(() => {
   if (!hasAgentConfig.value) return [];
   return currentAgentConfig.value?.allowed_tools || [];
-});
-
-type SelectionMode = 'all' | 'selected' | 'none';
-const normalizeSelectionMode = (mode?: string): SelectionMode => {
-  return mode === 'all' || mode === 'selected' || mode === 'none' ? mode : 'none';
-};
-
-const agentMCPSelectionMode = computed<SelectionMode>(() => {
-  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
-  return normalizeSelectionMode(currentAgentConfig.value?.mcp_selection_mode);
-});
-
-const agentMCPServiceIds = computed<string[]>(() => {
-  if (agentMCPSelectionMode.value !== 'selected') return [];
-  return currentAgentConfig.value?.mcp_services || [];
-});
-
-const isMCPAllowedByAgent = (service: MCPService) => {
-  if (!settingsStore.isAgentStreamMode || !service.enabled) return false;
-  const mode = agentMCPSelectionMode.value;
-  if (mode === 'none') return false;
-  if (mode === 'selected') return agentMCPServiceIds.value.includes(service.id);
-  return true;
-};
-
-const agentSkillsSelectionMode = computed<SelectionMode>(() => {
-  if (!settingsStore.isAgentStreamMode || !hasAgentConfig.value) return 'none';
-  return normalizeSelectionMode(currentAgentConfig.value?.skills_selection_mode);
-});
-
-const agentSelectedSkills = computed<string[]>(() => {
-  if (agentSkillsSelectionMode.value !== 'selected') return [];
-  return currentAgentConfig.value?.selected_skills || [];
-});
-
-const isSkillAllowedByAgent = (skillName: string) => {
-  if (!settingsStore.isAgentStreamMode || !editorResources.skillsAvailable) return false;
-  const mode = agentSkillsSelectionMode.value;
-  if (mode === 'none') return false;
-  if (mode === 'selected') return agentSelectedSkills.value.includes(skillName);
-  return true;
-};
-
-// 切换智能体时清理不允许的 MCP / Skill @mention
-watch([selectedAgentId, agentMCPSelectionMode, agentSkillsSelectionMode], ([newAgentId], [oldAgentId]) => {
-  if (settingsStore._isApplyingSessionState) return;
-  if (newAgentId === oldAgentId || oldAgentId === undefined) return;
-
-  const mcpMode = agentMCPSelectionMode.value;
-  if (mcpMode === 'none') {
-    settingsStore.settings.selectedMCPServices = [];
-  } else if (mcpMode === 'selected') {
-    const allowed = new Set(agentMCPServiceIds.value);
-    settingsStore.settings.selectedMCPServices = (settingsStore.settings.selectedMCPServices || [])
-      .filter(id => allowed.has(id));
-  }
-
-  const skillsMode = agentSkillsSelectionMode.value;
-  if (skillsMode === 'none') {
-    settingsStore.settings.selectedSkills = [];
-  } else if (skillsMode === 'selected') {
-    const allowed = new Set(agentSelectedSkills.value);
-    settingsStore.settings.selectedSkills = (settingsStore.settings.selectedSkills || [])
-      .filter(name => allowed.has(name));
-  }
 });
 
 // 从 KB 对象里抽能力位，优先用 backend 显式的 capabilities 字段；否则回退到 indexing_strategy，
@@ -455,20 +360,7 @@ const isImageUploadEnabledByAgent = computed(() => {
   return currentAgentConfig.value?.image_upload_enabled === true;
 });
 
-// Input 工具栏：仅当智能体已启用且搜索引擎可用时才显示
-const showWebSearchButton = computed(() => {
-  if (hasAgentConfig.value && settingsStore.selectedAgentSourceTenantId && !isWebSearchReadinessKnown.value) {
-    return false;
-  }
-  if (!hasAgentConfig.value) {
-    return isTenantWebSearchReady(webSearchProviders.value);
-  }
-  return isAgentWebSearchReady(
-    currentAgentConfig.value,
-    webSearchProviders.value,
-    selectedSharedAgent.value?.web_search_ready,
-  );
-});
+// Input 工具栏：仅当智能体已启用图片上传时才显示
 const showImageUploadButton = computed(() => isImageUploadEnabledByAgent.value);
 
 // 模型选择是否被智能体锁定 - 已移除锁定逻辑，允许用户自由切换模型
@@ -482,7 +374,6 @@ const mentionQuery = ref("");
 const mentionItems = ref<MentionItem[]>([]);
 /** 文件 ID -> 知识库 ID（用于批量查询时传 kb_id，支持共享知识库下的文档） */
 const fileIdToKbId = ref<Record<string, string>>({});
-const mcpServices = ref<MCPService[]>([]);
 const mentionActiveIndex = ref(0);
 const mentionStyle = ref<Record<string, string>>({});
 const textareaRef = ref<any>(null); // Ref to t-textarea component
@@ -535,10 +426,6 @@ const props = defineProps({
     type: String,
     required: false
   },
-  embeddedMode: {
-    type: Boolean,
-    default: false
-  },
   queuedSteers: {
     type: Array as PropType<SteerQueueItem[]>,
     default: () => []
@@ -553,12 +440,9 @@ const props = defineProps({
 });
 
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
-const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
 const selectedKbIds = computed(() => settingsStore.settings.selectedKnowledgeBases || []);
 const selectedFileIds = computed(() => settingsStore.settings.selectedFiles || []);
 const selectedTags = computed(() => settingsStore.settings.selectedTags || []);
-const selectedMCPServiceIds = computed(() => settingsStore.settings.selectedMCPServices || []);
-const selectedSkillNames = computed(() => settingsStore.settings.selectedSkills || []);
 
 // 已就绪的知识库（来自空间级缓存）
 const knowledgeBases = computed(() => chatResources.validKnowledgeBases);
@@ -601,38 +485,6 @@ const selectedFiles = computed(() => {
     const found = fileList.value.find(f => f.id === id);
     return found || { id, name: 'Loading...' };
   });
-});
-
-const skillMentionItems = computed<MentionItem[]>(() => {
-  return selectedSkillNames.value
-    .filter((name: string) => isSkillAllowedByAgent(name))
-    .map((name: string) => {
-    const skill = editorResources.skills.find(s => s.name === name);
-    return {
-      id: name,
-      name: skill?.name || name,
-      type: 'skill' as const,
-      skillName: name,
-      description: skill?.description || '',
-    };
-  });
-});
-
-const toMCPMentionItem = (svc: MCPService): MentionItem => ({
-  id: svc.id,
-  name: svc.name,
-  type: 'mcp',
-  description: svc.usage_instructions || svc.description || '',
-  toolCount: svc.catalog?.tool_count,
-  catalogStale: Boolean(svc.catalog?.stale),
-  catalogSynced: Boolean(svc.catalog),
-});
-
-const selectedMCPItems = computed<MentionItem[]>(() => {
-  return selectedMCPServiceIds.value
-    .map((id: string) => mcpServices.value.find(service => service.id === id))
-    .filter((svc): svc is MCPService => !!svc && isMCPAllowedByAgent(svc))
-    .map(toMCPMentionItem);
 });
 
 // 合并所有选中项（用于输入框内显示）
@@ -685,7 +537,7 @@ const allSelectedItems = computed(() => {
     isAgentConfigured: false,
   }));
 
-  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags, ...selectedMCPItems.value, ...skillMentionItems.value];
+  return [...agentConfiguredKbs, ...userSelectedKbs, ...files, ...tags];
 });
 
 // 移除选中项（智能体配置的项也可以移除）
@@ -696,10 +548,6 @@ const removeSelectedItem = (item: MentionItem) => {
     settingsStore.removeFile(item.id);
   } else if (item.type === 'tag') {
     settingsStore.removeTag(item.id, item.kbId);
-  } else if (item.type === 'mcp') {
-    settingsStore.removeMCPService(item.id);
-  } else if (item.type === 'skill') {
-    settingsStore.removeSkill(item.skillName || item.id);
   }
 };
 
@@ -707,8 +555,6 @@ const getMentionIcon = (item: MentionItem) => {
   switch (item.type) {
     case 'file': return 'file';
     case 'tag': return 'tag';
-    case 'mcp': return 'tools';
-    case 'skill': return SKILL_ICON;
     default: return 'folder';
   }
 };
@@ -813,88 +659,9 @@ const loadFiles = async () => {
   }
 };
 
-// A shared agent @mentions its OWNER's MCP services; this workspace's service
-// ids match none of its preset, and the backend drops such a mention outright.
-// So the list follows the selected agent and is refetched when it changes.
-const currentAgentScope = computed(() => {
-  const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
-  if (!sourceTenantId || !selectedAgentId.value) return undefined;
-  return { agentId: selectedAgentId.value, sourceTenantId };
-});
-
-const agentScopeKey = (scope?: { agentId: string; sourceTenantId: string | number }) =>
-  scope ? `${scope.sourceTenantId}:${scope.agentId}` : '';
-
-// Guards against a slow response for a previously selected agent overwriting
-// the list with another workspace's services after the user switched away.
-let mcpServicesRequestKey = '';
-
-const loadMCPServices = async () => {
-  const scope = currentAgentScope.value;
-  const requestKey = agentScopeKey(scope);
-  mcpServicesRequestKey = requestKey;
-  try {
-    const list = await listMCPServices(scope);
-    if (mcpServicesRequestKey !== requestKey) return;
-    mcpServices.value = list;
-  } catch (error) {
-    console.error('Failed to load MCP services:', error);
-    if (mcpServicesRequestKey !== requestKey) return;
-    mcpServices.value = [];
-  }
-};
-
-watch(currentAgentScope, () => {
-  void loadMCPServices();
-});
-
 watch(selectedFileIds, () => {
   loadFiles();
 }, { immediate: true });
-
-const isWebSearchConfigured = computed(() => {
-  if (hasAgentConfig.value) {
-    return isAgentWebSearchReady(
-      currentAgentConfig.value,
-      webSearchProviders.value,
-      selectedSharedAgent.value?.web_search_ready,
-    );
-  }
-  return isTenantWebSearchReady(webSearchProviders.value);
-});
-const isWebSearchReadinessKnown = computed(
-  () => !settingsStore.selectedAgentSourceTenantId || selectedSharedAgent.value !== undefined
-);
-
-const browserSourceUnavailableHint = computed(() => {
-  if (!browserConnection.enabled) return 'localBrowser.unavailable';
-  if (browserConnection.device) return 'localBrowser.reconnectHint';
-  return 'localBrowser.settingsHint';
-});
-
-const toggleBrowserSource = () => {
-  showMention.value = false;
-  showModelSelector.value = false;
-  showAgentModeSelector.value = false;
-  if (browserConnection.knownOffline) return;
-  settingsStore.toggleLocalBrowser(!settingsStore.isLocalBrowserEnabled);
-};
-
-const loadWebSearchConfig = async (force = false) => {
-  try {
-    await chatResources.ensureWebSearchProviders(force);
-
-    if (isWebSearchReadinessKnown.value && !isWebSearchConfigured.value && settingsStore.isWebSearchEnabled) {
-      settingsStore.toggleWebSearch(false);
-    }
-  } catch (error) {
-    console.error('Failed to load web search config:', error);
-    chatResources.invalidate('webSearchProviders');
-    if (!settingsStore.selectedAgentSourceTenantId && settingsStore.isWebSearchEnabled) {
-      settingsStore.toggleWebSearch(false);
-    }
-  }
-};
 
 // 加载智能体列表（我的 + 共享，供选中态与就绪检查用）
 const loadAgents = async (force = false) => {
@@ -1274,8 +1041,6 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
   // 根据智能体的 kb_selection_mode 过滤知识库；选中共享智能体时使用该空间下的知识库，否则使用本空间 + 共享给自己的
   let kbItems: any[] = [];
   let tagItems: MentionItem[] = [];
-  let mcpItems: MentionItem[] = [];
-  let skillItems: MentionItem[] = [];
   if (!append) {
     let availableKbs: any[];
     const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -1407,47 +1172,6 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       console.error('[Mention] listKnowledgeTags error:', e);
       tagItems = [];
     }
-
-    const mcpMode = agentMCPSelectionMode.value;
-    if (mcpMode !== 'none') {
-      mcpItems = mcpServices.value
-        .filter(service => isMCPAllowedByAgent(service))
-        .filter(service => !q || service.name?.toLowerCase().includes(q.toLowerCase()) || (service.usage_instructions || service.description || '').toLowerCase().includes(q.toLowerCase()))
-        .map(toMCPMentionItem);
-    }
-
-    const skillsMode = agentSkillsSelectionMode.value;
-    if (skillsMode !== 'none') {
-      // The scope makes a shared agent's skills resolve in its owner's
-      // workspace, where they are actually installed. Lite agents store no
-      // sandbox config id; their skills live on the host target.
-      await deploymentCapabilities.ensureLoaded();
-      await editorResources.ensureSkills(
-        mentionSkillTargetId(
-          hostSkillsOnly(
-            deploymentCapabilities.isSupported('settings.sandbox.remote'),
-            deploymentCapabilities.isSupported('settings.sandbox.host'),
-          ),
-          currentAgentConfig.value?.sandbox_config_id,
-        ),
-        currentAgentScope.value,
-      );
-      skillItems = editorResources.skills
-        .filter(skill => isSkillAllowedByAgent(skill.name))
-        .map(skill => ({
-          id: skill.name,
-          name: skill.name,
-          type: 'skill' as const,
-          skillName: skill.name,
-          description: skill.description || '',
-        }))
-        .filter(skill => {
-          if (!q) return true;
-          const keyword = q.toLowerCase();
-          return skill.name.toLowerCase().includes(keyword)
-            || (skill.description || '').toLowerCase().includes(keyword);
-        });
-    }
   }
 
   // Fetch Files from API
@@ -1542,9 +1266,9 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     // Append file items to existing list
     mentionItems.value = [...mentionItems.value, ...fileItems];
   } else {
-    mentionItems.value = [...kbItems, ...tagItems, ...mcpItems, ...skillItems, ...fileItems];
+    mentionItems.value = [...kbItems, ...tagItems, ...fileItems];
   }
-  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length, mcpItems: mcpItems.length, skillItems: skillItems.length });
+  console.log('[Mention] Total items:', mentionItems.value.length, { kbItems: kbItems.length, fileItems: fileItems.length, tagItems: tagItems.length });
 
   // Only reset index if query changed or explicitly requested
   if (resetIndex || q !== lastMentionQuery) {
@@ -1769,10 +1493,6 @@ const onMentionSelect = (item: any) => {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
     }
-  } else if (item.type === 'mcp') {
-    settingsStore.addMCPService(item.id);
-  } else if (item.type === 'skill') {
-    settingsStore.addSkill(item.skillName || item.id);
   }
 
   const textarea = getTextareaEl();
@@ -1876,19 +1596,13 @@ let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
   if (props.autoFocus) void focusInput();
-  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
-  if (props.embeddedMode) return;
-
-  browserConnection.watchStatus();
 
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
   initChatModelSelection();
   void Promise.all([
     loadKnowledgeBases(),
-    loadWebSearchConfig(),
     loadChatModels(),
     loadAgents(),
-    loadMCPServices(),
   ]);
   window.addEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
 
@@ -1952,7 +1666,6 @@ onBeforeUnmount(() => {
 });
 
 onUnmounted(() => {
-  if (!props.embeddedMode) browserConnection.unwatchStatus();
   window.removeEventListener(CHAT_FILE_DROP_EVENT, handleChatFileDrop as EventListener);
   document.removeEventListener('click', closeAgentModeSelector);
   document.removeEventListener('click', closeModelSelector);
@@ -1972,15 +1685,8 @@ watch(() => route.params.kbId, (newKbId) => {
   }
 });
 
-// 模型 / 联网搜索列表由设置页在写操作后直接写回 chatResources
-// （replaceModels / ensureWebSearchProviders(true)），这里读的是同一份快照，
-// 不再靠「设置弹窗关闭」「离开设置路由」两个信号各强刷一次。
-watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
-  if (prevVisible && !visible && !props.embeddedMode) {
-    void browserConnection.refresh();
-  }
-});
-
+// 模型列表由设置页在写操作后直接写回 chatResources（replaceModels），
+// 这里读的是同一份快照，不再靠「设置弹窗关闭」「离开设置路由」两个信号各强刷一次。
 watch([selectedKbIds, selectedFileIds], ([kbIds, fileIds]) => {
   if (!kbIds.length && !fileIds.length) {
     closeModelSelector();
@@ -2040,8 +1746,6 @@ const createSession = async (
       kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
       kb_id: item.kbId,
       kb_name: item.kbName,
-      service_id: item.serviceId,
-      skill_name: item.skillName,
     }));
     emit('steer-msg', val.trim(), steerMentions, delivery);
     clearvalue();
@@ -2061,14 +1765,6 @@ const createSession = async (
   const failedAttachment = uploadedAttachments.value.find(item => item.status === 'failed');
   if (failedAttachment) {
     MessagePlugin.error(failedAttachment.error || t('chat.attachmentParseFailed'));
-    return;
-  }
-
-  // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
-  if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
-    clearvalue();
-    void focusInput();
     return;
   }
 
@@ -2123,8 +1819,6 @@ const createSession = async (
     kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
     kb_id: item.kbId,
     kb_name: item.kbName,
-    service_id: item.serviceId,
-    skill_name: item.skillName,
   }));
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
@@ -2451,12 +2145,6 @@ const onDragOver = (e: DragEvent) => {
   e.preventDefault();
 };
 
-const handleGoToWebSearchConfig = () => {
-  if (hasAgentConfig.value && selectedAgent.value) {
-    handleGoToAgentSettings('websearch');
-  }
-};
-
 const handleGoToAgentSettings = (section?: string) => {
   const agent = selectedAgent.value;
   if (!agent) {
@@ -2566,49 +2254,6 @@ const showAgentNotReadyMessage = (
   });
 }
 
-const toggleWebSearch = () => {
-  // 互斥：虽然不是弹出层，但操作时关闭其他弹出层体验更好
-  showMention.value = false;
-  showModelSelector.value = false;
-  showAgentModeSelector.value = false;
-
-  // 如果智能体禁用了网络搜索，不允许开启
-  if (isWebSearchDisabledByAgent.value) {
-    MessagePlugin.warning(t('input.webSearchDisabledByAgent'));
-    return;
-  }
-
-  if (!isWebSearchConfigured.value) {
-    const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 6px; max-width: 280px;' }, [
-      h('span', { style: 'color: var(--td-text-color-primary); line-height: 1.5;' }, t('input.messages.webSearchNotConfigured')),
-      h('a', {
-        href: '#',
-        onClick: (e: Event) => {
-          e.preventDefault();
-          handleGoToWebSearchConfig();
-        },
-        style: 'color: var(--td-brand-color); text-decoration: none; font-weight: 500; cursor: pointer; align-self: flex-start;',
-        onMouseenter: (e: Event) => {
-          (e.target as HTMLElement).style.textDecoration = 'underline';
-        },
-        onMouseleave: (e: Event) => {
-          (e.target as HTMLElement).style.textDecoration = 'none';
-        }
-      }, t('input.goToAgentSettings'))
-    ]);
-    MessagePlugin.warning({
-      content: () => messageContent,
-      duration: 5000
-    });
-    return;
-  }
-
-  const currentValue = settingsStore.isWebSearchEnabled;
-  const newValue = !currentValue;
-  settingsStore.toggleWebSearch(newValue);
-  MessagePlugin.success(newValue ? t('input.messages.webSearchEnabled') : t('input.messages.webSearchDisabled'));
-};
-
 const toggleKbSelector = () => {
   showKbSelector.value = !showKbSelector.value;
 }
@@ -2669,7 +2314,7 @@ defineExpose({
 
 </script>
 <template>
-  <div class="answers-input" :class="{ 'is-embedded': embeddedMode, 'is-compact': compact }" @drop="onDrop" @dragover="onDragOver">
+  <div class="answers-input" :class="{ 'is-compact': compact }" @drop="onDrop" @dragover="onDragOver">
     <!-- Hidden file input for image upload -->
     <input ref="imageInputRef" type="file" accept="image/jpeg,image/png,image/gif,image/webp" multiple
       style="display:none" @change="handleImageSelect" />
@@ -2741,9 +2386,9 @@ defineExpose({
         @paste="onPaste" />
 
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
-      <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
+      <div class="control-bar">
         <!-- 左侧控制按钮 -->
-        <div class="control-left" v-if="!embeddedMode">
+        <div class="control-left">
           <!-- Agent 模式切换按钮 -->
           <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
             'is-normal': !isCustomAgent && !isAgentEnabled,
@@ -2763,58 +2408,6 @@ defineExpose({
           <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
-
-          <t-tooltip v-if="settingsStore.isAgentStreamMode" placement="top" theme="light"
-            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-            <template #content>
-              <div v-if="!browserConnection.knownOffline" class="browser-source-tooltip">
-                <strong>{{ $t('localBrowser.local') }}</strong>
-                <span>{{ $t('localBrowser.sourceHint') }}</span>
-              </div>
-              <div v-else class="tooltip-with-link">
-                <span>{{ $t(browserSourceUnavailableHint) }}</span>
-              </div>
-            </template>
-            <button type="button" class="control-btn browser-source-btn"
-              :class="{
-                active: settingsStore.isLocalBrowserEnabled && browserConnection.online,
-                disabled: browserConnection.knownOffline,
-              }"
-              :aria-pressed="settingsStore.isLocalBrowserEnabled && browserConnection.online"
-              :aria-disabled="browserConnection.knownOffline"
-              :aria-label="$t('localBrowser.local')"
-              @click.stop="toggleBrowserSource">
-              <BrowserIcon class="control-icon" />
-            </button>
-          </t-tooltip>
-
-          <!-- WebSearch 开关按钮（智能体未启用时不显示） -->
-          <t-tooltip v-if="showWebSearchButton" placement="top" theme="light"
-            :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-            <template #content>
-              <span v-if="isWebSearchConfigured">{{ isWebSearchEnabled ? $t('input.webSearch.toggleOff') :
-                $t('input.webSearch.toggleOn') }}</span>
-              <div v-else class="tooltip-with-link">
-                <span>{{ $t('input.webSearch.notConfigured') }}</span>
-                <a href="#" @click.prevent="handleGoToWebSearchConfig">{{ $t('input.goToAgentSettings') }}</a>
-              </div>
-            </template>
-            <div class="control-btn websearch-btn" :class="{
-              'active': isWebSearchEnabled && isWebSearchConfigured,
-              'disabled': !isWebSearchConfigured
-            }" @click.stop="toggleWebSearch">
-              <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg"
-                class="control-icon websearch-icon" :class="{ 'active': isWebSearchEnabled && isWebSearchConfigured }">
-                <circle cx="9" cy="9" r="7" stroke="currentColor" stroke-width="1.2" fill="none" />
-                <path d="M 9 2 A 3.5 7 0 0 0 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-                <path d="M 9 2 A 3.5 7 0 0 1 9 16" stroke="currentColor" stroke-width="1.2" fill="none" />
-                <line x1="2.94" y1="5.5" x2="15.06" y2="5.5" stroke="currentColor" stroke-width="1.2"
-                  stroke-linecap="round" />
-                <line x1="2.94" y1="12.5" x2="15.06" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                  stroke-linecap="round" />
-              </svg>
-            </div>
-          </t-tooltip>
 
           <!-- 图片上传按钮（智能体未启用时不显示） -->
           <t-tooltip v-if="showImageUploadButton" placement="top" theme="light"
@@ -3019,19 +2612,6 @@ const getImgSrc = (url: string) => {
   display: flex;
   flex-direction: column;
   align-items: center;
-
-  &.is-embedded {
-    position: relative;
-    bottom: auto;
-    left: auto;
-    transform: none;
-    z-index: auto;
-
-    .rich-input-container,
-    .steer-queue {
-      max-width: 100%;
-    }
-  }
 }
 
 .steer-queue {
@@ -3251,22 +2831,12 @@ const getImgSrc = (url: string) => {
   color: var(--td-text-color-secondary);
 }
 
-.mention-chip--tag,
-.mention-chip--mcp,
-.mention-chip--tool {
+.mention-chip--tag {
   color: var(--td-text-color-primary);
 }
 
 .mention-chip--tag .mention-chip__icon-wrap {
   color: #9f7aea;
-}
-
-.mention-chip--mcp .mention-chip__icon-wrap {
-  color: #0f766e;
-}
-
-.mention-chip--tool .mention-chip__icon-wrap {
-  color: #b7791f;
 }
 
 /* 智能体预配置：虚线边框区分 */
@@ -3324,10 +2894,6 @@ const getImgSrc = (url: string) => {
   z-index: 10;
   pointer-events: auto;
   padding-top: 8px;
-
-  &.is-embedded {
-    justify-content: flex-end;
-  }
 }
 
 .answers-input.is-compact {
@@ -3614,94 +3180,6 @@ const getImgSrc = (url: string) => {
   }
 }
 
-.browser-source-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: transparent;
-
-  &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary);
-  }
-
-  &.active {
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-secondarycontainer);
-
-    &:hover {
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--td-brand-color);
-    outline-offset: 2px;
-  }
-}
-
-.browser-source-tooltip {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  max-width: 240px;
-  line-height: 1.5;
-
-  strong {
-    font-weight: 500;
-  }
-}
-
-.websearch-btn {
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  min-width: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-
-  &.active {
-    background: var(--td-bg-color-secondarycontainer);
-
-    .websearch-icon {
-      color: var(--td-brand-color);
-    }
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  &:not(.active) {
-    .websearch-icon {
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer-hover);
-
-      .websearch-icon {
-        color: var(--td-text-color-primary);
-      }
-    }
-  }
-
-  &.agent-controlled {
-    cursor: not-allowed;
-    opacity: 0.85;
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    &.active:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-}
-
 :global(.input-field-tooltip) {
   .t-popup__content {
     box-shadow: var(--td-shadow-2);
@@ -3726,11 +3204,6 @@ const getImgSrc = (url: string) => {
 
 :global(.tooltip-with-link a:hover) {
   text-decoration: underline;
-}
-
-.websearch-icon {
-  width: 18px;
-  height: 18px;
 }
 
 .dropdown-arrow {

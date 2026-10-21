@@ -33,15 +33,14 @@ function setup(t) {
   })
   const props = reactive({ active: true, sourceKey: 'artifact:one' })
   const docxContainer = ref(null)
-  const htmlViewMode = ref('render')
   const isFullscreen = ref(false)
   const state = scope.run(() => vm.runInNewContext(`${focusSource}; ({
     previewRoot, previewContent, focusPreviewContent, onPreviewFrameLoad,
   })`, {
-    ref, watch, nextTick, props, document, docxContainer, htmlViewMode, isFullscreen,
+    ref, watch, nextTick, props, document, docxContainer, isFullscreen,
     getPreviewSourceKey: () => props.sourceKey,
   }))
-  return { ...state, props, document, docxContainer, htmlViewMode, isFullscreen, calls, element }
+  return { ...state, props, document, docxContainer, isFullscreen, calls, element }
 }
 
 test('opening a preview focuses its scroll container without scrolling ancestors', async t => {
@@ -96,7 +95,6 @@ test('switching files, source mode and fullscreen restores content focus', async
   await flush()
   for (const update of [
     () => { ctx.props.sourceKey = 'artifact:two' },
-    () => { ctx.htmlViewMode.value = 'source' },
     () => { ctx.isFullscreen.value = true },
     () => { ctx.isFullscreen.value = false },
   ]) {
@@ -139,6 +137,5 @@ test('every document scroll target is tabbable and key events keep native behavi
     assert.ok(/tabindex="0"|\bcontrols\b/.test(tag[0]), tag[0])
   }
   assert.doesNotMatch(template, /@key(?:down|up)/)
-  assert.match(template, /sandbox="allow-scripts"/)
   assert.deepEqual(compileTemplate({ source: template, filename: 'document-preview.vue', id: 'preview' }).errors, [])
 })

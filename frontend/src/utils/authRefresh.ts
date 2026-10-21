@@ -56,15 +56,9 @@ export function isStreamAuthError(err: unknown): boolean {
   return (err as { name?: string }).name === 'StreamAuthError'
 }
 
-export function isEmbedPage(): boolean {
-  if (typeof window === 'undefined') return false
-  return window.location.pathname.startsWith('/embed/')
-}
-
 export function redirectToLogin() {
   if (typeof window === 'undefined') return
   if (window.location.pathname === '/login') return
-  if (isEmbedPage()) return
   window.location.href = '/login'
 }
 
@@ -159,7 +153,6 @@ export async function refreshAccessTokenShared(
 export async function runStreamWithAuthRetry<T>(options: {
   run: (token: string) => Promise<T>
   initialToken: string
-  isEmbed: boolean
   isCurrent: () => boolean
   refreshAccessToken: () => Promise<string>
   reloginMessage: string
@@ -167,7 +160,7 @@ export async function runStreamWithAuthRetry<T>(options: {
   try {
     return await options.run(options.initialToken)
   } catch (err) {
-    if (!isStreamAuthError(err) || options.isEmbed) throw err
+    if (!isStreamAuthError(err)) throw err
 
     let refreshedToken: string
     try {

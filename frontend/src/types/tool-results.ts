@@ -18,21 +18,12 @@ export type DisplayType =
     | 'thinking'
     | 'plan'
     | 'database_query'
-    | 'web_search_results'
-    | 'web_fetch_results'
     | 'grep_results'
     | 'knowledge_chunks_list'
     | 'wiki_write_page'
     | 'wiki_replace_text'
     | 'wiki_rename_page'
-    | 'wiki_delete_page'
-    | 'shell_exec'
-    | 'list_sandbox_files'
-    | 'write_sandbox_file'
-    | 'edit_sandbox_file'
-    | 'read_skill'
-    | 'mcp_discovery'
-    | 'mcp_call';
+    | 'wiki_delete_page';
 
 // Search result item
 export interface SearchResultItem {
@@ -189,68 +180,6 @@ export interface DatabaseQueryData {
     row_count: number;
 }
 
-// Web search result item
-export interface WebSearchResultItem {
-    result_index: number;
-    title: string;
-    url: string;
-    snippet?: string;
-    content?: string;
-    source?: string;
-    published_at?: string;
-    age?: string;
-    page_status?: 'success' | 'failed';
-    page_verified?: boolean;
-    page_content?: string;
-    page_error?: string;
-    page_truncated?: boolean;
-    full_output_path?: string;
-    storage_error?: string;
-}
-
-// Web search results data
-export interface WebSearchResultsData {
-    display_type: 'web_search_results';
-    query: string;
-    results: WebSearchResultItem[];
-    count: number;
-}
-
-// Web fetch result item
-export interface WebFetchResultItem {
-    url: string;
-    status?: 'success' | 'failed' | 'skipped';
-    retryable?: boolean;
-    error_code?: string;
-    error_message?: string;
-    summary?: string;
-    summary_status?: string;
-    summary_error_code?: string;
-    summary_error_message?: string;
-    full_output_path?: string;
-    storage_error?: string;
-    raw_content?: string;
-    content_length?: number;
-    offset?: number;
-    returned_chars?: number;
-    truncated?: boolean;
-    next_offset?: number;
-    method?: string;
-    /** @deprecated use error_message */
-    error?: string;
-}
-
-// Web fetch results data
-export interface WebFetchResultsData {
-    display_type: 'web_fetch_results';
-    results: WebFetchResultItem[];
-    count?: number;
-    successful_count?: number;
-    failed_count?: number;
-    skipped_count?: number;
-    all_failed?: boolean;
-}
-
 // Grep knowledge aggregation item (legacy, grouped by knowledge_id)
 export interface GrepKnowledgeResult {
     knowledge_id: string;
@@ -392,63 +321,6 @@ export interface WikiDeletePageData {
     affected_pages?: string[];
 }
 
-export interface ShellExecData {
-    display_type: 'shell_exec';
-    command?: string;
-    work_dir?: string;
-    exit_code?: number;
-    duration_ms?: number;
-    killed?: boolean;
-    truncated?: boolean;
-    stdout?: string;
-    stderr?: string;
-    stdout_binary?: boolean;
-    stderr_binary?: boolean;
-    stdout_truncated?: boolean;
-    stderr_truncated?: boolean;
-}
-
-export interface SandboxFileEntry {
-    name?: string;
-    path: string;
-    size?: number;
-    modified_at?: string;
-}
-
-export interface ListSandboxFilesData {
-    display_type?: 'list_sandbox_files';
-    session_id?: string;
-    path?: string;
-    root?: string;
-    entries?: SandboxFileEntry[];
-    count?: number;
-    truncated?: boolean;
-}
-
-export interface WriteSandboxFileData {
-    display_type?: 'write_sandbox_file' | 'edit_sandbox_file';
-    session_id?: string;
-    path?: string;
-    root?: string;
-    name?: string;
-    size?: number;
-    replacements?: number;
-    added_lines?: number;
-    removed_lines?: number;
-    preview?: string;
-}
-
-export interface ReadSkillData {
-    display_type?: 'read_skill';
-    skill_name?: string;
-    file_path?: string;
-    description?: string;
-    instructions?: string;
-    content?: string;
-    files?: string[];
-    skill_dir?: string;
-}
-
 // Union type for all wiki edit data
 export type WikiEditData = WikiWritePageData | WikiReplaceTextData | WikiRenamePageData | WikiDeletePageData;
 
@@ -463,17 +335,12 @@ export type ToolResultData =
     | ThinkingData
     | PlanData
     | DatabaseQueryData
-    | WebSearchResultsData
-    | WebFetchResultsData
     | GrepResultsData
     | KnowledgeChunksListData
     | WikiWritePageData
     | WikiReplaceTextData
     | WikiRenamePageData
-    | WikiDeletePageData
-    | ShellExecData
-    | ListSandboxFilesData
-    | ReadSkillData;
+    | WikiDeletePageData;
 
 // Action data (from index.vue)
 export interface ActionData {

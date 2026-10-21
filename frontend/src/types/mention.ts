@@ -1,7 +1,4 @@
-export type MentionItemType = 'kb' | 'file' | 'tag' | 'mcp' | 'skill';
-
-/** TDesign icon for Skills in the agent editor, @-mention menu, and chat chips. */
-export const SKILL_ICON = 'system-code';
+export type MentionItemType = 'kb' | 'file' | 'tag';
 
 export interface MentionItem {
   id: string;
@@ -14,14 +11,7 @@ export interface MentionItem {
   kbName?: string;
   kbId?: string;
   orgName?: string;
-  serviceId?: string;
-  serviceName?: string;
-  skillName?: string;
   isAgentConfigured?: boolean;
-  /** MCP catalog tool count; omitted when the service has never been synced. */
-  toolCount?: number;
-  catalogStale?: boolean;
-  catalogSynced?: boolean;
 }
 
 export interface MentionRequestItem {
@@ -31,6 +21,4 @@ export interface MentionRequestItem {
   kb_type?: 'document' | 'faq';
   kb_id?: string;
   kb_name?: string;
-  service_id?: string;
-  skill_name?: string;
 }

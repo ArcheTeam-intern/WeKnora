@@ -1,6 +1,7 @@
-// Completion is authoritative after sandbox names and version references have
-// been reconciled. Update both plain content and the Agent timeline.
-export function applyFinalArtifactContent(message: any, content: unknown): void {
+// The completion event's final_content is authoritative: it carries the answer
+// after references and citation cleanup have been reconciled. Update both plain
+// content and the Agent timeline.
+export function applyFinalContent(message: any, content: unknown): void {
   if (typeof content !== 'string' || content.trim() === '') return;
   message.content = content;
   if (!Array.isArray(message.agentEventStream)) return;

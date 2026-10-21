@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -21,21 +21,6 @@ function walk(dir: string, out: string[] = []): string[] {
     else if (EXT.test(ent.name) && !SKIP.test(p)) out.push(p)
   }
   return out
-}
-
-function flattenMessages(root: unknown, path = ''): Set<string> {
-  const keys = new Set<string>()
-  if (typeof root === 'string') {
-    if (path) keys.add(path)
-    return keys
-  }
-  if (!root || typeof root !== 'object') return keys
-  for (const [key, value] of Object.entries(root as Record<string, unknown>)) {
-    const nextPath = path ? `${path}.${key}` : key
-    if (typeof value === 'string') keys.add(nextPath)
-    else for (const child of flattenMessages(value, nextPath)) keys.add(child)
-  }
-  return keys
 }
 
 const TEMPLATE_RE = /(?:\$t|(?<![.\w])t|i18n\.global\.t|globalSettingsText)\(\s*`([^`]+)`/g
@@ -156,47 +141,6 @@ for (const [root, files] of tmRoots) {
   }
 }
 
-// embed bundle audit
-const embedFile = join(dirname(fileURLToPath(import.meta.url)), 'embed.ts')
-const embedSource = readFileSync(embedFile, 'utf8')
-const embedMessagesMatch = embedSource.match(/const messages = (\{[\s\S]*?\n\}) as const/)
-const embedMessages = embedMessagesMatch
-  ? (Function(`"use strict"; return (${embedMessagesMatch[1]});`)() as Record<string, unknown>)
-  : {}
-
-const embedKeysByLocale = Object.fromEntries(
-  Object.entries(embedMessages).map(([locale, bundle]) => [locale, flattenMessages(bundle)]),
-) as Record<string, Set<string>>
-
-const embedStaticKeys = new Set<string>()
-const EMBED_STATIC_RE = /(?:\$t|(?<![.\w])t)\(\s*['"]([^'"]+)['"]/g
-const embedViewsDir = join(SOURCE_ROOT, 'views/embed')
-for (const file of existsSync(embedViewsDir) ? walk(embedViewsDir) : []) {
-  const content = readFileSync(file, 'utf8')
-  let match: RegExpExecArray | null
-  EMBED_STATIC_RE.lastIndex = 0
-  while ((match = EMBED_STATIC_RE.exec(content))) embedStaticKeys.add(match[1])
-}
-
-const embedReference = embedKeysByLocale['en-US'] ?? new Set<string>()
-const embedMissing: string[] = []
-for (const key of embedStaticKeys) {
-  for (const [locale, keys] of Object.entries(embedKeysByLocale)) {
-    if (!keys.has(key)) embedMissing.push(`${key} -> missing in embed ${locale}`)
-  }
-}
-
-const embedDrift: string[] = []
-for (const [locale, keys] of Object.entries(embedKeysByLocale)) {
-  if (locale === 'en-US') continue
-  for (const key of embedReference) {
-    if (!keys.has(key)) embedDrift.push(`${locale}: missing ${key}`)
-  }
-  for (const key of keys) {
-    if (!embedReference.has(key)) embedDrift.push(`${locale}: extra ${key}`)
-  }
-}
-
 console.log('=== Main app: dynamic prefix gaps ===')
 console.log(`Template literal prefixes: ${templatePrefixes.size}`)
 console.log(`String concat prefixes: ${concatPrefixes.size}`)
@@ -208,16 +152,6 @@ for (const gap of gaps.sort((a, b) => a.prefix.localeCompare(b.prefix))) {
   if (gap.missingKeys.length) console.log(`  sample missing: ${gap.missingKeys.join(', ')}`)
   console.log(`  files: ${gap.files.slice(0, 3).join(', ')}${gap.files.length > 3 ? '...' : ''}`)
 }
-
-console.log('\n=== Embed bundle (src/i18n/embed.ts) ===')
-for (const [locale, keys] of Object.entries(embedKeysByLocale)) {
-  console.log(`${locale}: ${keys.size} keys`)
-}
-console.log(`Embed static keys used in views/embed: ${embedStaticKeys.size}`)
-console.log(`Embed key parity issues: ${embedDrift.length}`)
-console.log(`Embed missing used keys: ${embedMissing.length}`)
-if (embedMissing.length) console.log(embedMissing.slice(0, 10).join('\n'))
-if (embedDrift.length) console.log(embedDrift.slice(0, 10).join('\n'))
 
 console.log('\n=== Main locale uncovered keys (in bundle, not referenced) ===')
 const uncovered = [...enKeys].filter((key) => !referenced.has(key))

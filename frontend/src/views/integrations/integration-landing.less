@@ -1,6 +1,3 @@
-@claw-accent: #e85d2a;
-@claw-accent-dark: #c44d1f;
-
 .integration-landing {
   container-type: inline-size;
   container-name: integration-landing;
@@ -95,11 +92,6 @@
     outline-offset: 2px;
   }
 
-  &--claw {
-    --integration-cta-accent: @claw-accent;
-    --integration-cta-foreground: @claw-accent-dark;
-  }
-
   &__badge {
     flex-shrink: 0;
     width: 18px;
@@ -141,71 +133,6 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-}
-
-.ext-cta-emoji {
-  font-size: 17px;
-  line-height: 1;
-  display: block;
-}
-
-// ── Claw / 龙虾主题色 ──
-.integration-landing--claw {
-  .landing-group {
-    .setting-drawer__section-title::before {
-      background: @claw-accent;
-    }
-
-    .section-head-extra {
-      color: @claw-accent-dark;
-      background: color-mix(in srgb, @claw-accent 12%, var(--td-bg-color-secondarycontainer));
-    }
-  }
-
-  .capability-card__icon {
-    color: @claw-accent-dark;
-    background: color-mix(in srgb, @claw-accent 10%, var(--td-bg-color-container));
-  }
-
-  .landing-step-num {
-    background: color-mix(in srgb, @claw-accent 14%, transparent);
-    color: @claw-accent-dark;
-  }
-
-  .landing-footer-bar {
-    border-color: color-mix(in srgb, @claw-accent 22%, var(--td-component-stroke));
-    background: color-mix(in srgb, @claw-accent 6%, var(--td-bg-color-secondarycontainer));
-  }
-
-  .landing-meta {
-    color: color-mix(in srgb, @claw-accent-dark 55%, var(--td-text-color-placeholder));
-  }
-
-  :deep(.t-button--variant-outline) {
-    color: @claw-accent-dark;
-    border-color: color-mix(in srgb, @claw-accent 38%, var(--td-component-border));
-
-    &:hover,
-    &:focus-visible {
-      color: @claw-accent-dark;
-      border-color: @claw-accent;
-      background-color: color-mix(in srgb, @claw-accent 8%, transparent);
-    }
-  }
-
-  :deep(.t-button--variant-text) {
-    color: @claw-accent-dark;
-
-    &:hover,
-    &:focus-visible {
-      color: @claw-accent-dark;
-      background-color: color-mix(in srgb, @claw-accent 10%, transparent);
-    }
-  }
-
-  :deep(.t-button--variant-text .t-icon) {
-    color: inherit;
   }
 }
 
@@ -310,12 +237,6 @@
 
   @container integration-landing (max-width: 520px) {
     grid-template-columns: 1fr;
-  }
-
-  &--claw {
-    .capability-card:last-child:nth-child(odd) {
-      grid-column: 1 / -1;
-    }
   }
 }
 

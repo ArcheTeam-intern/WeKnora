@@ -6,9 +6,7 @@
     <button ref="triggerRef" type="button" class="session-source-filter__trigger" :aria-expanded="open"
       aria-haspopup="listbox" @click.stop="toggleOpen">
       <span class="session-source-filter__leading">
-        <img v-if="currentOption?.logo" :src="currentOption.logo" :alt="currentOption.label"
-          class="session-source-filter__logo" />
-        <t-icon v-else :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
+        <t-icon :name="iconFor(currentOption)" class="session-source-filter__icon" size="14px" />
         <span class="session-source-filter__label" :title="currentOption?.label">{{ currentOption?.label }}</span>
       </span>
       <t-icon v-if="inline" name="chevron-down" class="session-source-filter__chevron"
@@ -22,8 +20,7 @@
           :class="{ 'session-source-filter__option--active': item.value === current }" role="option"
           :aria-selected="item.value === current" @click="handleSelect(item.value)">
           <span class="session-source-filter__option-leading">
-            <img v-if="item.logo" :src="item.logo" :alt="item.label" class="session-source-filter__logo" />
-            <t-icon v-else :name="iconFor(item)" class="session-source-filter__icon" size="14px" />
+            <t-icon :name="iconFor(item)" class="session-source-filter__icon" size="14px" />
             <span class="session-source-filter__option-label" :title="item.label">{{ item.label }}</span>
           </span>
           <t-icon
@@ -45,7 +42,6 @@ import { DEFAULT_SESSION_BUCKET_KEY } from './sessionSidebarSourceFilter'
 interface SourceItem {
   value: string
   label: string
-  logo?: string
 }
 
 const props = defineProps<{
@@ -76,8 +72,7 @@ const iconFor = (item: SourceItem | undefined): string => {
   if (!item) return 'chat'
   if (item.value === DEFAULT_SESSION_BUCKET_KEY) return 'chat'
   if (item.value === 'api') return 'server'
-  if (item.value.startsWith('embed:')) return 'code'
-  return 'link'
+  return 'chat'
 }
 
 const updatePanelPosition = (): void => {
@@ -228,20 +223,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.session-source-filter__logo {
-  flex: 0 0 auto;
-  width: 14px;
-  height: 14px;
-  object-fit: contain;
-  opacity: 0.82;
-
-  .session-source-filter--inline & {
-    width: 12px;
-    height: 12px;
-    opacity: 0.7;
-  }
-}
-
 .session-source-filter__icon {
   flex: 0 0 auto;
   color: var(--td-text-color-placeholder);
@@ -310,11 +291,6 @@ onBeforeUnmount(() => {
 
     .session-source-filter__icon {
       color: var(--td-brand-color);
-    }
-
-    .session-source-filter__logo {
-      opacity: 0.92;
-      filter: none;
     }
   }
 }

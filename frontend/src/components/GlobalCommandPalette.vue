@@ -71,24 +71,6 @@
             </template>
           </ResultGroup>
 
-          <!-- Messages -->
-          <ResultGroup v-if="isGroupVisible('messages') && messageGroups.length"
-            :label="t('commandPalette.group.messages')" :count="totalMessages">
-            <template v-for="(item, i) in flatMessageItems" :key="'m-' + item.msg.request_id">
-              <ResultItem :index="flatIndexFor('messages', i)" :selected="selectedIndex === flatIndexFor('messages', i)"
-                :shortcut="shortcutFor(flatIndexFor('messages', i))" icon-name="chat" :score="item.msg.score"
-                @primary="openMessage(item)" @hover="selectItemAt($event)">
-                <template #title>
-                  <span>{{ item.group.sessionTitle || t('commandPalette.untitledSession') }}</span>
-                </template>
-                <template #subtitle>
-                  <span class="cmdk-msg-role">{{ item.msg.query_content ? 'Q' : 'A' }}</span>
-                  <span v-html="highlight(item.msg.query_content || item.msg.answer_content)" />
-                </template>
-              </ResultItem>
-            </template>
-          </ResultGroup>
-
           <!-- KB name matches -->
           <ResultGroup v-if="isGroupVisible('kbs') && kbMatches.length" :label="t('commandPalette.group.kbs')">
             <ResultItem v-for="(kb, i) in kbMatches" :key="'k-' + kb.id" :index="flatIndexFor('kbs', i)"
@@ -166,14 +148,13 @@ import { storeToRefs } from 'pinia'
 import { useCommandPaletteStore } from '@/stores/commandPalette'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
-import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk, type CmdkMsgGroup } from './GlobalCommandPalette/useSearch'
+import { useCmdkSearch, type CmdkFileGroup, type CmdkChunk } from './GlobalCommandPalette/useSearch'
 import { highlightText } from './GlobalCommandPalette/useHighlight'
 import { useStartChat } from './GlobalCommandPalette/useStartChat'
 import { buildCommands, filterCommands } from './GlobalCommandPalette/commands'
 import ResultGroup from './GlobalCommandPalette/ResultGroup.vue'
 import ResultItem from './GlobalCommandPalette/ResultItem.vue'
 import RetrievalSettings from '@/views/settings/RetrievalSettings.vue'
-import type { MessageSearchGroupItem } from '@/api/chat-history'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -186,7 +167,6 @@ const { startChat } = useStartChat()
 
 // Per-group display caps — keep the palette compact.
 const CHUNK_LIMIT = 5
-const MSG_LIMIT = 4
 
 // Active KB scope: when the palette opens on a KB detail page, we default to
 // searching within that KB. The user can remove the chip to expand scope.
@@ -195,10 +175,10 @@ const scopeDismissed = ref(false) // user clicked ✕, remember for this session
 
 const {
   query, loading, hasSearched,
-  fileGroups, messageGroups, kbMatches,
+  fileGroups, kbMatches,
   knowledgeBases,
   agentMatches, sessionMatches,
-  totalChunks, totalMessages,
+  totalChunks,
   clearResults,
 } = useCmdkSearch({
   lockedKbIds: () => (activeKbScope.value ? [activeKbScope.value.id] : []),
@@ -226,7 +206,6 @@ const dialogVisible = computed<boolean>({
 
 // Flatten visible items into one indexable list for keyboard nav.
 interface FlatChunkItem { kind: 'chunk'; file: CmdkFileGroup; chunk: CmdkChunk }
-interface FlatMsgItem { kind: 'msg'; group: CmdkMsgGroup; msg: MessageSearchGroupItem }
 
 const flatChunkItems = computed<FlatChunkItem[]>(() => {
   const out: FlatChunkItem[] = []
@@ -234,17 +213,6 @@ const flatChunkItems = computed<FlatChunkItem[]>(() => {
     for (const c of f.chunks) {
       out.push({ kind: 'chunk', file: f, chunk: c })
       if (out.length >= CHUNK_LIMIT) return out
-    }
-  }
-  return out
-})
-
-const flatMessageItems = computed<FlatMsgItem[]>(() => {
-  const out: FlatMsgItem[] = []
-  for (const g of messageGroups.value) {
-    for (const m of g.items) {
-      out.push({ kind: 'msg', group: g, msg: m })
-      if (out.length >= MSG_LIMIT) return out
     }
   }
   return out
@@ -282,17 +250,16 @@ const groupOrder = computed<readonly string[]>(() => {
     return ['recent', 'commands'] as const
   }
   if (activeKbScope.value) {
-    // Scoped to one KB: only chunks make sense (messages disabled in useSearch).
+    // Scoped to one KB: only chunks make sense.
     return ['chunks'] as const
   }
-  return ['chunks', 'messages', 'kbs', 'agents', 'sessions', 'commands'] as const
+  return ['chunks', 'kbs', 'agents', 'sessions', 'commands'] as const
 })
 
 const groupSizes = computed<Record<string, number>>(() => ({
   recent: recentQueries.value.length,
   commands: query.value.trim() ? filteredCommands.value.length : allCommands.value.length,
   chunks: flatChunkItems.value.length,
-  messages: flatMessageItems.value.length,
   kbs: kbMatches.value.length,
   agents: agentMatches.value.length,
   sessions: sessionMatches.value.length,
@@ -340,14 +307,6 @@ const flatItems = computed<FlatItem[]>(() => {
           key: `chunk:${item.chunk.id}`,
           group: g,
           run: (ev) => (ev?.cmd ? cmdEnterChunk(item) : openChunk(item)),
-        })
-      })
-    } else if (g === 'messages') {
-      flatMessageItems.value.forEach((item) => {
-        out.push({
-          key: `msg:${item.msg.request_id}`,
-          group: g,
-          run: () => openMessage(item),
         })
       })
     } else if (g === 'kbs') {
@@ -424,14 +383,6 @@ const cmdEnterChunk = (item: FlatChunkItem) => {
   commandPaletteStore.closePalette()
   const kbIds = item.file.kbId ? [item.file.kbId] : []
   startChat(query.value, kbIds, [item.file.knowledgeId])
-}
-
-const openMessage = (item: FlatMsgItem) => {
-  commandPaletteStore.pushRecent(query.value)
-  commandPaletteStore.closePalette()
-  if (item.group.sessionId) {
-    router.push(`/platform/chat/${item.group.sessionId}`)
-  }
 }
 
 const openKb = (kbId: string) => {

@@ -20,7 +20,7 @@ test('unresolved desktop URLs use an explicit server placeholder', () => {
   assert.ok(buildCLIConnectCommand('/api/v1', 'wails://wails.localhost').includes("--host 'https://your-server.com'"))
 })
 
-test('copyable host arguments remain literal in a POSIX shell', () => {
+test('copyable host arguments remain literal in a POSIX shell', { skip: process.platform === 'win32' }, () => {
   const host = "https://kb.example.com/team'/$HOME/`printf-injected`/$(printf-injected)"
   const command = buildCLIConnectCommand(`${host}/api/v1`, 'https://kb.example.com')
   const argument = command.split(' --host ')[1]!.split(' --use')[0]!

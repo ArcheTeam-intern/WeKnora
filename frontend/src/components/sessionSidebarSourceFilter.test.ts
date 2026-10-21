@@ -15,25 +15,20 @@ test('shouldShowSessionSourceFilter hides when no channel buckets', () => {
 test('buildSessionSourceOptions puts web first then channels', () => {
   const options = buildSessionSourceOptions(
     'My chats',
-    [
-      { key: 'im:wechat', label: 'WeChat', platform: 'wechat' },
-      { key: 'embed:abc', label: 'Widget' },
-    ],
-    (platform) => `logo:${platform}`,
+    [{ key: 'api', label: 'API chats' }],
   )
-  assert.equal(options.length, 3)
+  assert.equal(options.length, 2)
   assert.equal(options[0].value, DEFAULT_SESSION_BUCKET_KEY)
-  assert.equal(options[1].logo, 'logo:wechat')
-  assert.equal(options[2].logo, undefined)
+  assert.equal(options[1].value, 'api')
 })
 
 test('findSessionBucketKey locates session bucket', () => {
   const key = findSessionBucketKey(
     {
       web: { items: [{ id: 'a' }] },
-      'im:wechat': { items: [{ id: 'b' }] },
+      api: { items: [{ id: 'b' }] },
     },
     'b',
   )
-  assert.equal(key, 'im:wechat')
+  assert.equal(key, 'api')
 })

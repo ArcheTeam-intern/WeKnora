@@ -28,12 +28,6 @@
     <!-- Database Query Display -->
     <DatabaseQuery v-else-if="displayType === 'database_query'" :data="toolData as DatabaseQueryData" />
 
-    <!-- Web Search Results Display -->
-    <WebSearchResults v-else-if="displayType === 'web_search_results'" :data="toolData as WebSearchResultsData" />
-
-    <!-- Web Fetch Results Display -->
-    <WebFetchResults v-else-if="displayType === 'web_fetch_results'" :data="toolData as WebFetchResultsData" />
-
     <!-- Grep Results Display -->
     <GrepResults v-else-if="displayType === 'grep_results'" :data="toolData as GrepResultsData" />
 
@@ -45,34 +39,6 @@
     <WikiEditResult
       v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
       :data="toolData as WikiEditData" />
-
-    <ShellExecResult
-      v-else-if="displayType === 'shell_exec'"
-      :data="toolData as ShellExecData"
-      :output="output"
-      :arguments="toolArguments"
-    />
-
-    <SandboxFilesResult
-      v-else-if="displayType === 'list_sandbox_files'"
-      :data="toolData as ListSandboxFilesData"
-    />
-
-    <WriteSandboxFileResult
-      v-else-if="displayType === 'write_sandbox_file' || displayType === 'edit_sandbox_file'"
-      :data="toolData as WriteSandboxFileData"
-    />
-
-    <ReadSkillResult
-      v-else-if="displayType === 'read_skill'"
-      :data="toolData as ReadSkillData"
-    />
-
-    <McpToolResult
-      v-else-if="displayType === 'mcp_discovery' || displayType === 'mcp_call'"
-      :discovery="displayType === 'mcp_discovery'" :data="toolData"
-      :output="output" :arguments="toolArguments" :success="success"
-    />
 
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
@@ -99,15 +65,9 @@ import type {
   ThinkingData,
   PlanData,
   DatabaseQueryData,
-  WebSearchResultsData,
-  WebFetchResultsData,
   GrepResultsData,
   KnowledgeChunksListData,
-  WikiEditData,
-  ShellExecData,
-  ListSandboxFilesData,
-  WriteSandboxFileData,
-  ReadSkillData
+  WikiEditData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -119,16 +79,9 @@ import GraphQueryResults from './tool-results/GraphQueryResults.vue';
 import ThinkingDisplay from './tool-results/ThinkingDisplay.vue';
 import PlanDisplay from './tool-results/PlanDisplay.vue';
 import DatabaseQuery from './tool-results/DatabaseQuery.vue';
-import WebSearchResults from './tool-results/WebSearchResults.vue';
-import WebFetchResults from './tool-results/WebFetchResults.vue';
 import GrepResults from './tool-results/GrepResults.vue';
 import KnowledgeChunksList from './tool-results/KnowledgeChunksList.vue';
 import WikiEditResult from './tool-results/WikiEditResult.vue';
-import ShellExecResult from './tool-results/ShellExecResult.vue';
-import SandboxFilesResult from './tool-results/SandboxFilesResult.vue';
-import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
-import ReadSkillResult from './tool-results/ReadSkillResult.vue';
-import McpToolResult from './tool-results/McpToolResult.vue';
 
 interface Props {
   success?: boolean;

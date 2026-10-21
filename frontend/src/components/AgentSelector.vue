@@ -131,8 +131,6 @@
             </span>
             <span v-if="getKbCapability(activeDetail.agent)" class="detail-tag">{{ getKbCapability(activeDetail.agent)
               }}</span>
-            <span v-if="getMcpCapability(activeDetail.agent)" class="detail-tag">{{ getMcpCapability(activeDetail.agent)
-              }}</span>
             <span v-if="activeDetail.agent.config?.multi_turn_enabled" class="detail-tag">{{
               $t('agent.capabilities.multiTurn')
               }}</span>
@@ -141,15 +139,6 @@
           <div class="detail-tag-group">
             <div class="detail-tag-group-title">{{ $t('agent.selector.capabilitiesSection') }}</div>
             <div class="detail-tags detail-tags--capabilities">
-              <span class="detail-tag detail-capability-tag"
-                :class="getWebSearchCapabilityClass(activeDetail.agent)">
-                <span class="detail-capability-icon-wrap">
-                  <TIcon :name="getWebSearchCapabilityIcon(activeDetail.agent)" size="10px"
-                    class="detail-capability-icon" />
-                </span>
-                <span class="detail-capability-name">{{ $t('agent.selector.webSearchCapability') }}</span>
-                <span class="detail-capability-state">{{ getWebSearchCapabilityState(activeDetail.agent) }}</span>
-              </span>
               <span class="detail-tag detail-capability-tag"
                 :class="isImageUploadEnabledForAgent(activeDetail.agent) ? 'detail-capability-tag--on' : 'detail-capability-tag--off'">
                 <span class="detail-capability-icon-wrap">
@@ -199,17 +188,11 @@ import {
   type AgentNotReadyReasonKey,
 } from '@/utils/agent-readiness';
 import { formatLocalizedList } from '@/utils/format-list';
-import { useChatResourcesStore } from '@/stores/chatResources';
-import {
-  isAgentWebSearchEnabled,
-  isAgentWebSearchReady,
-} from '@/utils/agentWebSearch';
 
 const { t, locale } = useI18n();
 const router = useRouter();
 const orgStore = useOrganizationStore();
 const settingsStore = useSettingsStore();
-const chatResources = useChatResourcesStore();
 
 const props = defineProps<{
   visible: boolean;
@@ -228,7 +211,7 @@ const emit = defineEmits<{
 type AgentDetailTarget = {
   agent: CustomAgent;
   sourceTenantId?: string;
-  sharedMeta?: { org_name?: string; shared_by_username?: string; web_search_ready?: boolean };
+  sharedMeta?: { org_name?: string; shared_by_username?: string };
 };
 
 type SharedAgentSelection = Omit<SharedAgentInfo, 'agent'> & {
@@ -247,7 +230,6 @@ const DETAIL_PANEL_GAP = 8;
 const DETAIL_HIDE_DELAY_MS = 400;
 
 const agentsList = computed(() => props.agents ?? []);
-const webSearchProviders = computed(() => chatResources.webSearchProviders);
 
 const builtinAgents = computed(() => {
   const apiBuiltins = agentsList.value.filter(a => a.is_builtin);
@@ -317,57 +299,15 @@ const getKbCapability = (agent: CustomAgent): string => {
   return '';
 };
 
-const isWebSearchEnabledForAgent = (agent: CustomAgent): boolean => {
-  return isAgentWebSearchEnabled(agent.config);
-};
-
-const isWebSearchReadyForAgent = (agent: CustomAgent): boolean => {
-  return isAgentWebSearchReady(
-    agent.config,
-    webSearchProviders.value,
-    activeDetail.value?.sourceTenantId ? activeDetail.value.sharedMeta?.web_search_ready : undefined,
-  );
-};
-
 const isImageUploadEnabledForAgent = (agent: CustomAgent): boolean => {
   const config = agent.config || {};
   return config.image_upload_enabled === true;
-};
-
-const getWebSearchCapabilityClass = (agent: CustomAgent): string => {
-  if (isWebSearchReadyForAgent(agent)) return 'detail-capability-tag--on';
-  if (isWebSearchEnabledForAgent(agent)) return 'detail-capability-tag--warning';
-  return 'detail-capability-tag--off';
-};
-
-const getWebSearchCapabilityIcon = (agent: CustomAgent): string => {
-  if (isWebSearchReadyForAgent(agent)) return 'check';
-  if (isWebSearchEnabledForAgent(agent)) return 'error-circle';
-  return 'close';
-};
-
-const getWebSearchCapabilityState = (agent: CustomAgent): string => {
-  if (isWebSearchReadyForAgent(agent)) return t('agent.selector.capabilityEnabled');
-  if (isWebSearchEnabledForAgent(agent)) return t('agent.selector.capabilityUnconfigured');
-  return t('agent.selector.capabilityDisabled');
 };
 
 const getImageUploadCapabilityState = (agent: CustomAgent): string => {
   return isImageUploadEnabledForAgent(agent)
     ? t('agent.selector.capabilitySupported')
     : t('agent.selector.capabilityUnsupported');
-};
-
-const getMcpCapability = (agent: CustomAgent): string => {
-  const config = agent.config || {};
-  if (config.mcp_selection_mode === 'none' || (!config.mcp_services?.length && config.mcp_selection_mode !== 'all')) {
-    return '';
-  }
-  if (config.mcp_selection_mode === 'all') return t('agent.shareScope.mcpAll');
-  if (config.mcp_services?.length) {
-    return t('agent.shareScope.mcpSelected', { count: config.mcp_services.length });
-  }
-  return t('agent.capabilities.mcpEnabled');
 };
 
 const modelsList = computed(() => props.allModels ?? []);
@@ -479,7 +419,6 @@ const onSharedOptionEnter = (shared: SharedAgentSelection, event: MouseEvent) =>
   onOptionEnter(shared.agent, event, String(shared.source_tenant_id), {
     org_name: shared.org_name,
     shared_by_username: shared.shared_by_username,
-    web_search_ready: shared.web_search_ready,
   });
 };
 
@@ -594,7 +533,6 @@ const updateDropdownPosition = () => {
 watch(() => props.visible, (newVal) => {
   if (newVal) {
     nextTick(() => updateDropdownPosition());
-    chatResources.ensureWebSearchProviders();
   } else {
     hideDetailPanel();
   }

@@ -4,7 +4,6 @@ import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
-import { downloadArtifact } from '@/api/chat';
 import hljs from 'highlight.js';
 import 'highlight.js/styles/github.css';
 import 'katex/dist/katex.min.css';
@@ -13,7 +12,6 @@ import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
 import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
-import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { renderMermaidToSvg } from '@/utils/mermaidShared';
 import {
@@ -55,7 +53,6 @@ const props = defineProps<{
   sessionId?: string;
   attachmentId?: string;
   messageId?: string;
-  artifactIndex?: number;
   fileType: string;
   fileName: string;
   active: boolean;
@@ -86,7 +83,6 @@ const highlightedCode = ref('');
 const markdownHtml = ref('');
 const excelHtml = ref('');
 const mermaidSvg = ref('');
-const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
 const pdfData = shallowRef<ArrayBuffer | null>(null);
 const epubHtml = ref('');
@@ -120,7 +116,7 @@ function focusPreviewContent() {
 }
 
 watch(
-  () => [props.active, previewRoot.value, getPreviewSourceKey(), props.sourceBlob, htmlViewMode.value, isFullscreen.value],
+  () => [props.active, previewRoot.value, getPreviewSourceKey(), props.sourceBlob, isFullscreen.value],
   async () => {
     if (!props.active) return;
     const previousFocus = document.activeElement;
@@ -351,22 +347,7 @@ function getPreviewSourceKey(): string {
   }
   if (props.knowledgeId) return `knowledge:${props.knowledgeId}`;
   if (props.sessionId && props.attachmentId) return `attachment:${props.sessionId}:${props.attachmentId}`;
-  if (
-    props.sessionId &&
-    props.messageId &&
-    Number.isInteger(props.artifactIndex) &&
-    (props.artifactIndex as number) >= 0
-  ) {
-    return `artifact:${props.sessionId}:${props.messageId}:${props.artifactIndex}`;
-  }
   return '';
-}
-
-// Skill-generated HTML is often a self-contained chart that needs its own
-// scripts. Knowledge-base files and chat attachments are untrusted uploads:
-// they stay as source, matching the previous text preview.
-function allowsHtmlScriptPreview(): boolean {
-  return getPreviewSourceKey().startsWith('artifact:');
 }
 
 async function fetchPreviewBlob(): Promise<Blob> {
@@ -376,14 +357,6 @@ async function fetchPreviewBlob(): Promise<Blob> {
   }
   if (props.sessionId && props.attachmentId) {
     return previewTemporaryAttachment(props.sessionId, props.attachmentId);
-  }
-  if (
-    props.sessionId &&
-    props.messageId &&
-    Number.isInteger(props.artifactIndex) &&
-    (props.artifactIndex as number) >= 0
-  ) {
-    return downloadArtifact(props.sessionId, props.messageId, props.artifactIndex as number);
   }
   throw new Error('Missing preview source');
 }
@@ -415,7 +388,6 @@ async function loadPreview() {
   cleanup();
   loading.value = true;
   error.value = '';
-  htmlViewMode.value = allowsHtmlScriptPreview() ? 'render' : 'source';
 
   let ft = resolveFilePreviewExt(props.fileName, props.fileType);
   previewType.value = resolvePreviewKind(ft);
@@ -465,10 +437,6 @@ async function loadPreview() {
         break;
       }
       case 'html': {
-        if (allowsHtmlScriptPreview()) {
-          const previewHtml = buildHtmlPreview(await blob.text());
-          blobUrl.value = URL.createObjectURL(new Blob([previewHtml], { type: 'text/html;charset=utf-8' }));
-        }
         await renderText(blob, ft || 'html');
         break;
       }
@@ -520,7 +488,6 @@ function cleanup() {
   markdownHtml.value = '';
   excelHtml.value = '';
   mermaidSvg.value = '';
-  htmlViewMode.value = 'render';
   pptxData.value = null;
   pdfData.value = null;
   for (const url of epubObjectUrls) URL.revokeObjectURL(url);
@@ -843,7 +810,7 @@ function applyLocate() {
 }
 
 watch(
-  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.artifactIndex, props.sourceBlob, props.fileName, props.fileType],
+  () => [props.active, props.knowledgeId, props.sessionId, props.attachmentId, props.messageId, props.sourceBlob, props.fileName, props.fileType],
   ([active]) => {
     if (active && getPreviewSourceKey()) {
       loadPreview();
@@ -864,15 +831,6 @@ onUnmounted(() => {
       <div class="preview-toolbar" :class="{ 'is-inline': toolbarTarget && !isFullscreen }" v-if="isFullscreen || (!loading && !error && previewType !== 'unsupported')">
         <span v-if="isFullscreen" class="preview-toolbar-title" :title="fileName">{{ fileName }}</span>
         <div class="preview-toolbar-actions">
-          <t-button
-            v-if="previewType === 'html' && allowsHtmlScriptPreview()"
-            theme="default" variant="text" size="small" shape="square"
-            :title="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
-            :aria-label="htmlViewMode === 'render' ? $t('preview.htmlSource') : $t('preview.htmlRendered')"
-            @click="htmlViewMode = htmlViewMode === 'render' ? 'source' : 'render'"
-          >
-            <template #icon><t-icon :name="htmlViewMode === 'render' ? 'code' : 'browse'" /></template>
-          </t-button>
           <t-button theme="default" variant="text" size="small" shape="square" :aria-pressed="isFullscreen"
             :title="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
             :aria-label="isFullscreen ? $t('preview.exitFullscreen') : $t('preview.fullscreen')"
@@ -913,20 +871,9 @@ onUnmounted(() => {
       <iframe ref="previewContent" tabindex="0" :title="fileName" :src="blobUrl" class="pdf-iframe" @load="onPreviewFrameLoad" />
     </div>
 
-    <!-- HTML: artifacts render in a unique-origin iframe; other sources stay as source. -->
+    <!-- HTML stays as source; it is an untrusted upload. -->
     <div v-else-if="previewType === 'html'" class="preview-html">
-      <iframe
-        v-if="allowsHtmlScriptPreview() && htmlViewMode === 'render' && blobUrl"
-        ref="previewContent"
-        tabindex="0"
-        :title="fileName"
-        :src="blobUrl"
-        class="html-iframe"
-        sandbox="allow-scripts"
-        referrerpolicy="no-referrer"
-        @load="onPreviewFrameLoad"
-      />
-      <pre v-else-if="!allowsHtmlScriptPreview() || htmlViewMode === 'source'" ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
+      <pre ref="previewContent" tabindex="0" :aria-label="fileName" class="code-preview"><code class="hljs" v-html="highlightedCode"></code></pre>
     </div>
 
     <!-- Image -->
@@ -1108,10 +1055,6 @@ onUnmounted(() => {
       max-height: none;
     }
 
-    .preview-html .html-iframe {
-      height: 100%;
-    }
-
     .preview-html {
       height: auto;
       min-height: 0;
@@ -1260,14 +1203,6 @@ onUnmounted(() => {
   min-height: 420px;
   display: flex;
   flex-direction: column;
-  .html-iframe {
-    flex: 1;
-    width: 100%;
-    min-height: 0;
-    border: 1px solid @border-color;
-    border-radius: @border-radius;
-    background: @bg-white;
-  }
   .code-preview {
     .preview-container();
     flex: 1;

@@ -1,5 +1,5 @@
 <template>
-    <div class="bot_msg" :class="{ 'is-embedded': embeddedMode }">
+    <div class="bot_msg">
         <div style="display: flex;flex-direction: column; gap:8px">
             <!-- 显示@的知识库和文件（非 Agent 模式下显示） -->
             <div v-if="!session.isAgentMode && mentionedItems && mentionedItems.length > 0" class="mentioned_items">
@@ -15,10 +15,9 @@
                 </span>
             </div>
             <div v-if="session.isRagMode" class="rag-answer-stack">
-                <RagPipelineProgress :session="session" :embedded-mode="embeddedMode" />
+                <RagPipelineProgress :session="session" />
                 <AgentStreamDisplay v-if="session.isAgentMode" :session="session" :session-id="sessionId"
                     :user-query="userQuery" :rag-mode="true" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -26,16 +25,9 @@
                     @render-complete-change="emit('render-complete-change', $event)" />
             </div>
             <template v-else>
-                <!-- A plain answer has no timeline to put the memory row on, so
-                     it gets the standalone row. Agent turns render theirs inside
-                     the agent timeline instead, next to the steps it belongs
-                     with. -->
-                <RagPipelineProgress v-if="!session.isAgentMode && session.used_memories?.length"
-                    :session="session" :embedded-mode="embeddedMode" memory-only />
                 <docInfo v-if="session.knowledge_references?.length" :session="session"></docInfo>
                 <AgentStreamDisplay :session="session" :session-id="sessionId" :user-query="userQuery"
                     v-if="session.isAgentMode" :follow-up-loading="followUpLoading"
-                    :embedded-mode="embeddedMode"
                     :can-fork="canFork"
                     :can-rewind="canRewind"
                     @fork="emit('fork', $event)"
@@ -83,22 +75,6 @@
                     :title="$t('agent.addToKnowledgeBase')">
                     <t-icon name="bookmark-add" />
                 </t-button>
-                <!-- Skill artifact download: only shown when this reply's
-                     assistant message actually recorded any generated files.
-                     Emptiness is the default: the button stays hidden for
-                     conversational messages that never touched a skill. -->
-                <span v-if="hasArtifacts || artifactsCollecting" class="answer-toolbar__artifact"
-                    :class="{ 'is-collecting': artifactButtonCollecting, 'is-arrived': artifactArrived }"
-                    @animationend="onArtifactArriveEnd">
-                    <t-button size="small" variant="outline" shape="round"
-                        :disabled="artifactButtonCollecting"
-                        :title="hasArtifacts ? $t('agent.artifactDrawer.buttonTitle') : $t('agent.artifactDrawer.collecting')"
-                        @click.stop="openArtifactDrawer()">
-                        <t-icon v-if="artifactButtonCollecting" name="loading" class="answer-toolbar__artifact-spinner" />
-                        <t-icon v-else name="folder" />
-                    </t-button>
-                    <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
-                </span>
                 <!-- Fallback 提示图标 -->
                 <t-tooltip v-if="session.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
                     <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
@@ -128,14 +104,6 @@
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
                 :on-leave="scheduleCitationClose" />
         </Teleport>
-        <ChatArtifactsDrawer
-            v-if="hasArtifacts && embeddedMode"
-            v-model:visible="showArtifactDrawer"
-            :session-id="sessionId"
-            :message-id="messageIdForArtifacts"
-            :artifacts="liveArtifacts"
-            :preview-index="artifactPreviewIndex"
-        />
     </div>
 </template>
 <script setup>
@@ -148,19 +116,9 @@ import RagPipelineProgress from './RagPipelineProgress.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
-import ChatArtifactsDrawer from './ChatArtifactsDrawer.vue';
-import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
-import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
-import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { persistedAssistantId } from '@/utils/steerStreamFork';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
 import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
-import {
-    artifactIndexFromEventTarget,
-    hydrateArtifactImages,
-    isArtifactRefHref,
-    renderArtifactReference,
-} from '@/utils/sandboxArtifactRefs';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -183,7 +141,6 @@ import { refreshMarkdownEnhancements } from '@/utils/markdownEnhancements';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useTypewriter } from '@/composables/useTypewriter';
 import { vStableHtml } from '@/directives/stableHtml';
-import { SKILL_ICON } from '@/types/mention';
 
 ensureMermaidInitialized();
 
@@ -194,8 +151,6 @@ const mentionTagClass = (item) => {
 
 const mentionTagIcon = (item) => {
     if (item.type === 'tag') return 'tag';
-    if (item.type === 'mcp') return 'tools';
-    if (item.type === 'skill') return SKILL_ICON;
     return 'file';
 };
 
@@ -225,10 +180,6 @@ const props = defineProps({
         type: Boolean,
         required: false
     },
-    embeddedMode: {
-        type: Boolean,
-        default: false
-    },
     sessionId: {
         type: String,
         default: ''
@@ -252,8 +203,8 @@ const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitati
     sessionId: () => props.sessionId,
 });
 
-const canFork = computed(() => props.canFork === true && !props.embeddedMode)
-const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
+const canFork = computed(() => props.canFork === true)
+const canRewind = computed(() => props.canRewind === true)
 const forkTooltip = '从这条回答继续分叉'
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
@@ -267,81 +218,12 @@ const emitRewind = () => {
 
 const showRequestInfo = computed(() => !!(props.session?.request_id || props.session?.id));
 
-// -----------------------------------------------------------------------------
-// Skill artifact download (drawer in embedded mode; sandbox panel otherwise)
-// -----------------------------------------------------------------------------
-// The download button is opt-in per message: the toolbar checks
-// `hasArtifacts` and only renders when the assistant message actually
-// recorded a file. In the main app this opens the sandbox panel's artifacts
-// tab. Embedded chat still uses ChatArtifactsDrawer.
-//
-// NOTE: this file's <script setup> block is plain JS (no lang="ts"), so we
-// stay away from TypeScript-only syntax like `as any[]`.
-const showArtifactDrawer = ref(false);
-const sandboxPanel = useChatSandboxPanel();
-const artifactList = computed(() => {
-    const raw = props.session && props.session.artifacts;
-    const list = Array.isArray(raw) ? raw : [];
-    // Enrich each entry with its position so the download endpoint can
-    // resolve it. Server responses already include `index` when they come
-    // via listMessageArtifacts; SSE payloads that land through Message.Artifacts
-    // omit it. Normalising here keeps ChatArtifactsDrawer index-agnostic.
-    return list.map((a, i) => ({ index: i, ...a }));
-});
-// Deleted files stay in artifactList on purpose: the inline renderer needs the
-// tombstone to tell "you deleted this" apart from "this handle belongs to some
-// other message", and its position is still the download address of the files
-// after it. Everything that counts or lists files uses the live view.
-const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
-const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
-const artifactCount = computed(() => liveArtifacts.value.length);
-const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
-const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session));
-const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
-const messageIdForArtifacts = computed(() => {
-    // Steered segments have synthetic row IDs; artifact APIs address the
-    // persisted assistant. Keep request_id as the in-flight fallback.
-    return persistedAssistantId(props.session) || String(props.session?.request_id || '');
-});
-// Set when the drawer is opened by clicking an inline artifact card, so it
-// lands directly on that file's preview instead of the list.
-const artifactPreviewIndex = ref(null);
-function openArtifactDrawer(previewIndex = null) {
-    if (!hasArtifacts.value) return;
-    if (sandboxPanel && !props.embeddedMode) {
-        if (previewIndex == null) {
-            sandboxPanel.toggleArtifacts(messageIdForArtifacts.value);
-        } else {
-            sandboxPanel.open('artifacts', {
-                messageId: messageIdForArtifacts.value,
-                previewIndex,
-            });
-        }
-        return;
-    }
-    artifactPreviewIndex.value = previewIndex;
-    showArtifactDrawer.value = true;
-}
-
-const artifactRefContext = computed(() => {
-    const messageId = messageIdForArtifacts.value;
-    if (!props.sessionId || !messageId) return null;
-    return { sessionId: props.sessionId, messageId };
-});
-
-// Shared replies must authorize files through the persisted message, just as
-// AgentStreamDisplay does. The default embed plane still takes precedence.
+// Shared replies must authorize files through the persisted message.
 const protectedFileAccess = computed(() => {
     const messageId = persistedAssistantId(props.session);
     if (!props.sessionId || !messageId) return undefined;
     return { mode: 'message', sessionId: props.sessionId, messageId };
 });
-
-const artifactRefLabels = computed(() => ({
-    previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
-    missingHint: t('agent.artifactDrawer.inlineMissing'),
-    deletedHint: t('agent.artifactDrawer.inlineDeleted'),
-}));
 
 const preview = (url) => {
     nextTick(() => {
@@ -357,24 +239,9 @@ const closePreImg = () => {
 
 const markdownRenderer = createChatMarkdownRenderer({
     codeRenderer: createMermaidCodeRenderer('mermaid-botmsg'),
-    imageRenderer: ({ href, title, text }) => {
-        // A sandbox-generated file shares the resource:// form with every other
-        // protected image, so it is matched against this message's artifacts
-        // first. Anything that does not belong to this reply falls through to
-        // the ordinary protected-image path.
-        const artifactHtml = renderArtifactReference({
-            href,
-            alt: text || '',
-            artifacts: artifactList.value,
-            labels: artifactRefLabels.value,
-            context: artifactRefContext.value,
-            streaming: !props.session?.is_completed,
-        });
-        if (artifactHtml !== null) return artifactHtml;
-        return createSafeImage(href, text || '', title || '');
-    },
+    imageRenderer: ({ href, title, text }) => createSafeImage(href, text || '', title || ''),
     invalidImageHtml: () => `<p>${t('error.invalidImageLink')}</p>`,
-    isValidImageUrl: (href) => isArtifactRefHref(href) || isValidImageURL(href),
+    isValidImageUrl: (href) => isValidImageURL(href),
 });
 
 // 计算属性：将 Markdown 文本转换为 tokens
@@ -470,13 +337,6 @@ const handleAddToKnowledge = () => {
 // 处理 markdown-content 中图片的点击事件
 const handleMarkdownImageClick = (e) => {
     const target = e.target;
-    const artifactIndex = artifactIndexFromEventTarget(target);
-    if (artifactIndex !== null) {
-        e.preventDefault();
-        e.stopPropagation();
-        openArtifactDrawer(artifactIndex);
-        return;
-    }
     if (target && target.tagName === 'IMG') {
         const src = target.getAttribute('src');
         if (src) {
@@ -497,7 +357,6 @@ watch(renderedHTML, () => {
 onUpdated(() => {
     nextTick(async () => {
         await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
-        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
             await renderMermaidInContainer(parentMd.value);
@@ -513,7 +372,6 @@ onMounted(async () => {
         }
         rebindCitations();
         await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
-        await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
     });
 });
@@ -530,13 +388,7 @@ onBeforeUnmount(() => {
 @import '../../../components/css/chat-citations.less';
 
 .bot_msg {
-    &.is-embedded {
-        width: 100%;
-
-        :deep(.agent-stream-display) {
-            width: 100%;
-        }
-    }
+    display: block;
 }
 
 .rag-answer-stack {

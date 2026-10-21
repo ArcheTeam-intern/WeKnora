@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { computed, createRenderer, nextTick, reactive } from 'vue'
 import { nextTypewriterReveal, useTypewriter } from './useTypewriter.ts'
-import { applyFinalArtifactContent } from '../utils/finalArtifactContent.ts'
+import { applyFinalContent } from '../utils/finalContent.ts'
 
 test('reveals Chinese text in compact phrase groups', () => {
   const text = '这是一个自然流畅的回答。'
@@ -29,7 +29,7 @@ test('never splits a surrogate pair', () => {
   assert.equal(nextTypewriterReveal(text, 0, 1), 2)
 })
 
-test('artifact reconciliation replaces completed text without replaying the typewriter', async () => {
+test('final content reconciliation replaces completed text without replaying the typewriter', async () => {
   const originalRequest = globalThis.requestAnimationFrame
   const originalCancel = globalThis.cancelAnimationFrame
   const frames = new Map<number, FrameRequestCallback>()
@@ -54,7 +54,7 @@ test('artifact reconciliation replaces completed text without replaying the type
   })
   try {
     app.mount({})
-    answer.value.content = 'PPT 已生成。![比赛文件](sandbox:很长的比赛信息文件名.pptx)'
+    answer.value.content = 'PPT 已生成。![比赛文件](resource://a-very-long-competition-file-name.pptx)'
     await nextTick()
     assert.equal(displayed.value, '', 'live content must still animate')
     answer.value.done = true
@@ -71,7 +71,7 @@ test('artifact reconciliation replaces completed text without replaying the type
       'PPT 已生成。![比赛文件](resource://a-much-longer-persistent-resource-reference)',
       'PPT 已生成。![比赛文件](resource://a-much-longer-persistent-resource-reference)\n历史版本说明',
     ]) {
-      applyFinalArtifactContent(message, content)
+      applyFinalContent(message, content)
       await nextTick()
       assert.equal(displayed.value, content, 'completed corrections must appear immediately')
       assert.equal(frames.size, 0, 'completed corrections must not restart animation')

@@ -6,12 +6,10 @@
 import { computed } from 'vue'
 import knowledgeIcon from '@/assets/img/zhishiku.svg'
 import agentIcon from '@/assets/img/agent.svg'
-import artifactIcon from '@/assets/img/artifact.svg'
 import organizationIcon from '@/assets/img/organization.svg'
-import toolboxIcon from '@/assets/img/toolbox.svg'
 
 const props = withDefaults(defineProps<{
-  type: 'knowledge' | 'agent' | 'artifact' | 'organization' | 'toolbox'
+  type: 'knowledge' | 'agent' | 'organization'
   size?: number
 }>(), { size: 20 })
 
@@ -19,9 +17,7 @@ const props = withDefaults(defineProps<{
 const icons = {
   knowledge: knowledgeIcon,
   agent: agentIcon,
-  artifact: artifactIcon,
   organization: organizationIcon,
-  toolbox: toolboxIcon,
 }
 const iconStyle = computed(() => ({
   width: `${props.size}px`,

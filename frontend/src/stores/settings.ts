@@ -17,13 +17,8 @@ interface Settings {
   selectedFiles: string[]; // 当前选中的文件ID列表
   selectedFileKbMap: Record<string, string>; // 文件ID -> 知识库ID，用于刷新后带 kb_id 拉取共享知识库文件
   selectedTags: Array<{ id: string; name: string; kbId: string; kbName?: string }>;
-  selectedMCPServices: string[];
-  selectedSkills: string[];
-  selectedTools?: string[];
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
-  localBrowserEnabled: boolean; // Explicit source preference; composer activates it only while the extension is online
-  webSearchEnabled: boolean;  // 网络搜索是否启用
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
   selectedAgentSourceTenantId: string | null;  // 当使用共享智能体时，来源空间 ID（用于后端 model/KB/MCP 解析）
@@ -35,7 +30,7 @@ interface AgentConfig {
   maxIterations: number;
   temperature: number;
   allowedTools: string[];
-  system_prompt?: string;  // Unified system prompt (uses {{web_search_status}} placeholder)
+  system_prompt?: string;  // Unified system prompt
 }
 
 interface ConversationModels {
@@ -87,8 +82,6 @@ const defaultSettings: Settings = {
   selectedFiles: [], // 默认为空数组
   selectedFileKbMap: {},  // 文件ID -> 知识库ID
   selectedTags: [],
-  selectedMCPServices: [],
-  selectedSkills: [],
   modelConfig: {
     chatModels: [],
     embeddingModels: [],
@@ -99,8 +92,6 @@ const defaultSettings: Settings = {
     baseUrl: "http://localhost:11434",
     enabled: true
   },
-  localBrowserEnabled: false,
-  webSearchEnabled: false,  // 默认关闭网络搜索
   conversationModels: {
     summaryModelId: "",
     rerankModelId: "",
@@ -168,10 +159,6 @@ export const useSettingsStore = defineStore("settings", {
     
     // 获取模型配置
     modelConfig: (state) => state.settings.modelConfig || defaultSettings.modelConfig,
-    
-    // 本轮查询来源
-    isLocalBrowserEnabled: (state) => state.settings.localBrowserEnabled === true,
-    isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
     // 是否自动检查并下载更新
     isAutoCheckUpdateEnabled: (state) => state.settings.autoCheckUpdate ?? true,
@@ -328,17 +315,6 @@ export const useSettingsStore = defineStore("settings", {
       return this.settings.selectedKnowledgeBases || [];
     },
     
-    // 本机浏览器与联网搜索可独立选择。
-    toggleLocalBrowser(enabled: boolean) {
-      this.settings.localBrowserEnabled = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
-    toggleWebSearch(enabled: boolean) {
-      this.settings.webSearchEnabled = enabled;
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
     // 启用/禁用自动检查更新
     toggleAutoCheckUpdate(enabled: boolean) {
       this.settings.autoCheckUpdate = enabled;
@@ -383,34 +359,6 @@ export const useSettingsStore = defineStore("settings", {
 
     clearTags() {
       this.settings.selectedTags = [];
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
-    addMCPService(serviceId: string) {
-      if (!this.settings.selectedMCPServices) this.settings.selectedMCPServices = [];
-      if (!this.settings.selectedMCPServices.includes(serviceId)) {
-        this.settings.selectedMCPServices.push(serviceId);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-      }
-    },
-
-    removeMCPService(serviceId: string) {
-      if (!this.settings.selectedMCPServices) return;
-      this.settings.selectedMCPServices = this.settings.selectedMCPServices.filter(id => id !== serviceId);
-      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-    },
-
-    addSkill(skillName: string) {
-      if (!this.settings.selectedSkills) this.settings.selectedSkills = [];
-      if (!this.settings.selectedSkills.includes(skillName)) {
-        this.settings.selectedSkills.push(skillName);
-        localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
-      }
-    },
-
-    removeSkill(skillName: string) {
-      if (!this.settings.selectedSkills) return;
-      this.settings.selectedSkills = this.settings.selectedSkills.filter(name => name !== skillName);
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 
@@ -462,10 +410,6 @@ export const useSettingsStore = defineStore("settings", {
       this.reasoningEffortOverride = '';
       this.settings.selectedAgentId = agentId;
       this.settings.selectedAgentSourceTenantId = (sourceTenantId != null && sourceTenantId !== "") ? sourceTenantId : null;
-      // 智能体配置只决定是否具备网络搜索能力，不替用户决定是否在本轮使用。
-      // 每次选择智能体都默认关闭，之后只能由用户从输入框主动开启。
-      this.settings.webSearchEnabled = false;
-      this.settings.localBrowserEnabled = false;
       // 根据智能体类型自动切换 Agent 模式
       if (agentId === BUILTIN_QUICK_ANSWER_ID) {
         this.settings.isAgentEnabled = false;
@@ -480,8 +424,6 @@ export const useSettingsStore = defineStore("settings", {
       this.settings.selectedFiles = [];
       this.settings.selectedFileKbMap = {};
       this.settings.selectedTags = [];
-      this.settings.selectedMCPServices = [];
-      this.settings.selectedSkills = [];
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
     
@@ -492,7 +434,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // —— 会话级输入态恢复 —— //
     //
-    // 输入栏的 agent / 模型 / KB / 联网 / MCP 等选择由本 store 持有，跨会话共享。
+    // 输入栏的 agent / 模型 / KB / 文件 / 标签等选择由本 store 持有，跨会话共享。
     // 但用户的诉求是：点开旧会话时，能看到当时发起请求的那一套状态。
     // 实现策略：进入会话时把"当前的全局默认"暂存到一个非持久化的 `_defaultsSnapshot`
     // 字段里，然后用 session.last_request_state 覆盖 store；离开会话时从快照还原。
@@ -578,28 +520,6 @@ export const useSettingsStore = defineStore("settings", {
         } else {
           this.settings.selectedTags = [];
         }
-        if (Array.isArray(state.mcp_service_ids)) {
-          this.settings.selectedMCPServices = [...state.mcp_service_ids];
-        } else if (Array.isArray(state.mentioned_items)) {
-          this.settings.selectedMCPServices = state.mentioned_items
-            .filter(item => item.type === "mcp" && item.id)
-            .map(item => item.id);
-        } else {
-          this.settings.selectedMCPServices = [];
-        }
-        if (Array.isArray(state.skill_names)) {
-          this.settings.selectedSkills = [...state.skill_names];
-        } else if (Array.isArray(state.mentioned_items)) {
-          this.settings.selectedSkills = state.mentioned_items
-            .filter(item => item.type === "skill" && item.id)
-            .map(item => item.skill_name || item.id);
-        } else {
-          this.settings.selectedSkills = [];
-        }
-        this.settings.localBrowserEnabled = state.local_browser_enabled === true;
-        if (typeof state.web_search_enabled === "boolean") {
-          this.settings.webSearchEnabled = state.web_search_enabled;
-        }
       } finally {
         // 复位必须延后到下一次 flush 之后：监听 selectedAgentId 的 watcher 默认
         // flush:'pre'，是异步执行的；若在此处同步复位，watcher 真正运行时标志早已
@@ -626,16 +546,11 @@ export interface SessionLastRequestStatePayload {
   knowledge_base_ids?: string[];
   knowledge_ids?: string[];
   tag_ids?: string[];
-  mcp_service_ids?: string[];
-  skill_names?: string[];
   mentioned_items?: Array<{
     id: string;
     name?: string;
     type: string;
     kb_id?: string;
     kb_name?: string;
-    skill_name?: string;
   }>;
-  local_browser_enabled?: boolean;
-  web_search_enabled?: boolean;
 }

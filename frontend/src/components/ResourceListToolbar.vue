@@ -67,7 +67,7 @@ onMounted(() => { if (!props.hideScopes) orgStore.fetchOrganizations() })
 </script>
 
 <style scoped lang="less">
-@import (reference) '@/components/css/artifact-filter-tabs.less';
+@import (reference) '@/components/css/filter-tabs.less';
 .resource-toolbar {
   flex-shrink: 0;
   display: flex;
@@ -85,7 +85,7 @@ onMounted(() => { if (!props.hideScopes) orgStore.fetchOrganizations() })
   gap: var(--app-space-3);
   min-width: 0;
 }
-.category-tabs { .artifact-filter-tabs(); }
+.category-tabs { .filter-tabs(); }
 .scope-count { margin-left: 5px; font-size: var(--app-text-xs); font-variant-numeric: tabular-nums; }
 .space-filter { width: 180px; }
 .space-filter-icon-active { color: var(--td-brand-color); }

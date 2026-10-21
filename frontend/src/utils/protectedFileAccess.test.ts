@@ -22,17 +22,6 @@ test('tenant access routes through the tenant-scoped proxy', () => {
   assert.equal(request?.url, `/files?file_path=${encodeURIComponent(RESOURCE)}`)
 })
 
-test('embed access routes through the channel-scoped proxy with the Embed header', () => {
-  const request = buildProtectedFileRequest(RESOURCE, {
-    mode: 'embed',
-    channelId: 'ch-1',
-    token: 'tok-1',
-  })
-
-  assert.equal(request?.url, `/api/v1/embed/ch-1/files?file_path=${encodeURIComponent(RESOURCE)}`)
-  assert.equal(request?.headers.Authorization, 'Embed tok-1')
-})
-
 test('knowledge-base access routes through the KB-scoped proxy', () => {
   const request = buildProtectedFileRequest(RESOURCE, { mode: 'knowledgeBase', kbId: 'kb 1' })
 
@@ -55,25 +44,10 @@ test('message access routes through the session-message-scoped proxy', () => {
   )
 })
 
-test('an embed context without a token yields no request instead of an unauthenticated one', () => {
-  const request = buildProtectedFileRequest(RESOURCE, { mode: 'embed', channelId: 'ch-1', token: '' })
-
-  assert.equal(request, null)
-})
-
 test('non-storage sources are not proxied', () => {
   assert.equal(buildProtectedFileRequest('https://example.com/a.png', { mode: 'tenant' }), null)
   assert.equal(isProviderFileURL('https://example.com/a.png'), false)
   assert.equal(isProviderFileURL('storage://backend-1/local://42/a.png'), true)
-})
-
-test('the registered embed plane wins over a component-level knowledge-base scope', () => {
-  // An embed visitor holds no Bearer token, so the KB proxy would answer 401.
-  setDefaultProtectedFileAccess({ mode: 'embed', channelId: 'ch-1', token: 'tok-1' })
-
-  const access = resolveProtectedFileAccess({ mode: 'knowledgeBase', kbId: 'kb-1' })
-
-  assert.deepEqual(access, { mode: 'embed', channelId: 'ch-1', token: 'tok-1' })
 })
 
 test('a component scope refines the default tenant plane', () => {
@@ -95,6 +69,4 @@ test('all file proxies are recognized as protected proxy paths', () => {
   assert.equal(isProtectedFileProxyPath('/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/knowledge-bases/kb-1/files'), true)
   assert.equal(isProtectedFileProxyPath('/api/v1/sessions/session-1/messages/message-1/files'), true)
-  assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/files'), true)
-  assert.equal(isProtectedFileProxyPath('/api/v1/embed/ch-1/config'), false)
 })

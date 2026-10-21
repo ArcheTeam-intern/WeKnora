@@ -11,14 +11,6 @@
             </div>
         </div>
         <div class="refer_box" v-show="contentOnly || showReferBox">
-            <!-- Web search references (ungrouped) -->
-            <div v-for="(item, index) in webSearchRefs" :key="'web-' + index">
-                <a :href="getWebSearchUrl(item)" target="_blank" rel="noopener noreferrer" class="doc doc-web"
-                    @click.stop>
-                    {{ webSearchRefs.length < 2 ? getWebSearchDisplayText(item) : `${index + 1}.
-                        ${getWebSearchDisplayText(item)}` }} </a>
-            </div>
-
             <!-- Knowledge references grouped by document -->
             <div v-for="(group, gIdx) in groupedKnowledgeRefs" :key="'grp-' + gIdx" class="doc-group">
                 <div class="doc-group-header" @click="toggleGroup(group.key)">
@@ -28,7 +20,7 @@
                         <span class="doc-group-count">{{ $t('chat.referenceChunkCount', { count: group.chunks.length })
                             }}</span>
                     </div>
-                    <div class="doc-group-actions" v-if="!embeddedMode && group.knowledgeBaseId" @click.stop>
+                    <div class="doc-group-actions" v-if="group.knowledgeBaseId" @click.stop>
                         <t-tooltip :content="$t('chat.navigateToDocument')">
                             <a
                                 class="doc-group-navigate"
@@ -80,10 +72,6 @@ const props = defineProps({
         type: Object,
         required: false
     },
-    embeddedMode: {
-        type: Boolean,
-        default: false
-    },
     timelineMode: {
         type: Boolean,
         default: false
@@ -110,18 +98,8 @@ const toggleGroup = (key) => {
     expandedGroups[key] = !expandedGroups[key];
 };
 
-const webSearchRefs = computed(() => {
-    if (!props.session?.knowledge_references) return [];
-    return props.session.knowledge_references.filter(item => item.chunk_type === 'web_search');
-});
-
-const knowledgeRefs = computed(() => {
-    if (!props.session?.knowledge_references) return [];
-    return props.session.knowledge_references.filter(item => item.chunk_type !== 'web_search');
-});
-
 const groupedKnowledgeRefs = computed(() => {
-    const refs = knowledgeRefs.value;
+    const refs = props.session?.knowledge_references || [];
     if (!refs.length) return [];
 
     const groupMap = new Map();
@@ -144,15 +122,8 @@ const groupedKnowledgeRefs = computed(() => {
 const headerText = computed(() => {
     const total = props.session?.knowledge_references?.length ?? 0;
     const docCount = groupedKnowledgeRefs.value.length;
-    const webCount = webSearchRefs.value.length;
-    if (docCount > 0 && webCount > 0) {
-        return t('chat.referencesDocAndWebCount', { docCount, webCount });
-    }
     if (docCount > 0) {
         return t('chat.referencesDocCount', { count: docCount });
-    }
-    if (webCount > 0) {
-        return t('chat.referencesWebCount', { count: webCount });
     }
     return t('chat.referencesTitle', { count: total });
 });
@@ -181,35 +152,6 @@ const getDocumentHref = (group) => {
         query
     }).href;
 };
-
-const getWebSearchUrl = (item) => {
-    if (item.metadata?.url) {
-        return item.metadata.url;
-    }
-    if (item.id && (item.id.startsWith('http://') || item.id.startsWith('https://'))) {
-        return item.id;
-    }
-    return '#';
-};
-
-const getWebSearchDisplayText = (item) => {
-    if (item.knowledge_title) {
-        return item.knowledge_title;
-    }
-    if (item.metadata?.title) {
-        return item.metadata.title;
-    }
-    const url = getWebSearchUrl(item);
-    if (url && url !== '#') {
-        try {
-            const urlObj = new URL(url);
-            return urlObj.hostname;
-        } catch {
-            return url;
-        }
-    }
-    return 'Web Search Result';
-};
 </script>
 <style lang="less" scoped>
 .refer {
@@ -233,7 +175,6 @@ const getWebSearchDisplayText = (item) => {
 
     &.refer-timeline {
         --td-brand-color: var(--td-text-color-placeholder);
-        --embed-primary: var(--td-text-color-placeholder);
         --refer-brand-4: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
         --refer-brand-8: color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
         --refer-brand-12: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
@@ -354,7 +295,7 @@ const getWebSearchDisplayText = (item) => {
     height: 16px;
     margin-right: 8px;
     flex-shrink: 0;
-    color: var(--embed-primary, var(--td-brand-color));
+    color: var(--td-brand-color);
 }
 
 .doc {
@@ -375,11 +316,6 @@ const getWebSearchDisplayText = (item) => {
         background-color: var(--refer-brand-8);
         border-radius: 3px;
         padding-right: 4px;
-    }
-
-    &.doc-web {
-        white-space: normal;
-        word-break: break-all;
     }
 }
 

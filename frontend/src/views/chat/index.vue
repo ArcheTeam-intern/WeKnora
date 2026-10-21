@@ -2,28 +2,11 @@
     <div class="chat" :class="{
         'is-embedded': embeddedMode,
         'has-references-panel': referencesDrawerVisible,
-        'has-sandbox-panel': sandboxPanel.visible.value,
     }" :style="{
-        '--sandbox-panel-width': `${sandboxPanel.width.value}px`,
         '--references-panel-width': `${referencesPanelWidth}px`,
     }">
         <div v-if="!embeddedMode" class="chat-topbar">
             <ChatHeader :session="currentSession" />
-            <div v-if="!sandboxPanel.visible.value" class="sandbox-header-toggle">
-                <t-tooltip placement="bottom">
-                    <template #content>{{ t('chatHeader.toggleSandboxPanel') }}</template>
-                    <button type="button" class="sandbox-header-toggle__btn"
-                        :aria-label="t('chatHeader.toggleSandboxPanel')" @click="sandboxPanel.open()">
-                        <svg viewBox="0 0 20 20" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg"
-                            aria-hidden="true">
-                            <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
-                            <line x1="12.5" y1="1.5" x2="12.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                            <line x1="16" y1="7.5" x2="16" y2="12.5" stroke="currentColor" stroke-width="1.2"
-                                stroke-linecap="round" />
-                        </svg>
-                    </button>
-                </t-tooltip>
-            </div>
         </div>
         <div class="chat_thread" :style="{ '--chat-composer-height': `${composerHeight}px`, '--chat-scrollbar-gutter': `${scrollbarGutter}px` }">
             <div ref="scrollContainer" class="chat_scroll_box" @scroll="handleScroll">
@@ -174,7 +157,6 @@
                 </div>
             </div>
             <div v-if="!embeddedMode" class="chat_overlays">
-                <BrowserTaskPreview v-if="session_id" :key="session_id" :session-id="session_id" />
                 <ChatQuestionMinimap :scroll-container="scrollContainer" :messages="messagesList"
                     @jump="jumpToQuestion" />
             </div>
@@ -185,13 +167,6 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
     <ChatReferencesDrawer />
     <ChatAttachmentPreviewDrawer />
-    <SandboxSidePanel v-if="!embeddedMode" :session-id="session_id"
-        :agent-id="useSettingsStoreInstance.selectedAgentId"
-        :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
-        :shifted="referencesDrawerVisible"
-        :shift-width="referencesPanelWidth"
-        :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting"
-        @artifact-deleted="handleArtifactDeleted" />
 </template>
 <script setup>
 import { makeSteerClientId } from '@/utils/steerId';
@@ -213,7 +188,6 @@ import { listSteerSession, promoteSteerSession, removeSteerSession, steerSession
 import { persistedAssistantId, previewSteerMessage, discardSteerPreview, reconcileSteerMessageId } from '@/utils/steerStreamFork';
 import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
-import { useBrowserConnectionStore } from '@/stores/browserConnection';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
@@ -241,14 +215,8 @@ import {
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
 import { provideChatAttachmentPreviewDrawer } from '@/composables/useChatAttachmentPreviewDrawer';
 import { useSessionActivityStore } from '@/stores/sessionActivity';
-import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
-import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
-import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
-import { collectSessionArtifacts, markSessionArtifactDeleted } from '@/utils/sessionArtifacts';
-import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
-const sandboxPanel = provideChatSandboxPanel();
 const { visible: referencesDrawerVisible, panelWidth: referencesPanelWidth } = referencesDrawer;
 
 const props = defineProps({
@@ -537,15 +505,6 @@ async function handleRewind(messageId) {
     }
 }
 
-const sessionArtifacts = computed(() => collectSessionArtifacts(messagesList));
-// The panel already deleted the file server side; flag it in the loaded
-// history so the computed drops it without reloading the conversation.
-function handleArtifactDeleted({ messageId, index }) {
-    markSessionArtifactDeleted(messagesList, messageId, index);
-}
-const sessionArtifactsCollecting = computed(() =>
-    messagesList.some((message) => isCollectingSkillArtifacts(message)),
-);
 const steerQueue = ref([]);
 const isReplying = ref(false);
 const currentAssistantMessageId = ref(''); // 当前正在生成的 assistant message ID
@@ -742,7 +701,7 @@ const handleFollowUpSelect = (message, item) => {
     };
     // Knowledge-backed follow-ups are generated from a specific KB. Keep that
     // authorized retrieval anchor for the immediate next request; model-backed
-    // suggestions intentionally do not inherit transient @file/@tag/MCP/Skill scope.
+    // suggestions intentionally do not inherit transient @file/@tag scope.
     pendingSuggestionKnowledgeBaseIds = [...new Set(item.knowledge_base_ids || [])];
     if (inputFieldRef.value?.triggerSend) inputFieldRef.value.triggerSend(item.text);
     else sendMsg(item.text);
@@ -760,15 +719,13 @@ const debouncedFetchSuggestions = () => {
     suggestedDebounceTimer = setTimeout(() => { fetchSuggestedQuestionsIfNeeded(); }, 300);
 };
 
-// 监听 Agent / 知识库 / 文件 / 标签 / MCP / Skill @mention，重新获取推荐问题
+// 监听 Agent / 知识库 / 文件 / 标签 @mention，重新获取推荐问题
 watch(
     () => ({
         agentId: useSettingsStoreInstance.selectedAgentId,
         kbs: useSettingsStoreInstance.settings.selectedKnowledgeBases,
         files: useSettingsStoreInstance.settings.selectedFiles,
         tags: useSettingsStoreInstance.settings.selectedTags,
-        mcps: useSettingsStoreInstance.settings.selectedMCPServices,
-        skills: useSettingsStoreInstance.settings.selectedSkills,
     }),
     debouncedFetchSuggestions,
     { deep: true },
@@ -1498,9 +1455,6 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         ? (props.agentId && props.agentId !== 'builtin-quick-answer')
         : useSettingsStoreInstance.isAgentStreamMode;
 
-    // Get web search status from settings store
-    const webSearchEnabled = props.embeddedMode ? false : useSettingsStoreInstance.isWebSearchEnabled;
-
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
     const sidebarKbIds = props.embeddedMode ? props.kbIds : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
@@ -1521,13 +1475,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
     const kbIds = [...kbIdSet];
     const knowledgeIds = [...fileIdSet];
     const tagIds = [...new Set((mentionedItems || []).filter(item => item.type === 'tag' && item.id).map(item => item.id))];
-    const mcpServiceIds = [...new Set((mentionedItems || []).filter(item => item.type === 'mcp' && item.id).map(item => item.id))];
-    const skillNames = [...new Set((mentionedItems || []).filter(item => item.type === 'skill' && item.id).map(item => item.skill_name || item.id))];
 
     const endpoint = agentEnabled ? '/api/v1/agent-chat' : '/api/v1/knowledge-chat';
-
-    const requestMcpServiceIds = agentEnabled ? mcpServiceIds : [];
-    const requestSkillNames = agentEnabled ? skillNames : [];
 
     const suggestionAttribution = pendingSuggestionAttribution;
     pendingSuggestionAttribution = null;
@@ -1539,12 +1488,8 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_enabled: agentEnabled,
         agent_id: selectedAgentId,
         agent_source_tenant_id: selectedAgentSourceTenantId,
-        web_search_enabled: webSearchEnabled,
-        local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
         reasoning_effort: reasoningEffort,
-        mcp_service_ids: requestMcpServiceIds,
-        skill_names: requestSkillNames,
         tag_ids: tagIds,
         mentioned_items: mentionedItems,
         images: imageAttachments.length > 0 ? imageAttachments : undefined,
@@ -1788,25 +1733,6 @@ onBeforeRouteUpdate((to, from, next) => {
         }
     }
 
-    // 沙箱可视化右侧面板：宽度可拖拽调整（--sandbox-panel-width 由
-    // composable 持久化），聊天区 padding 跟随面板宽度让位。
-    &.has-sandbox-panel:not(.is-embedded) {
-        @media (min-width: 960px) {
-            padding-right: var(--sandbox-panel-width, 420px);
-            box-sizing: border-box;
-        }
-    }
-
-    &.has-sandbox-panel.has-references-panel:not(.is-embedded) {
-        @media (min-width: 1400px) {
-            padding-right: calc(var(--references-panel-width, 420px) + var(--sandbox-panel-width, 420px));
-        }
-
-        @media (max-width: 1399.98px) and (min-width: 960px) {
-            padding-right: var(--sandbox-panel-width, 420px);
-        }
-    }
-
     &.is-embedded :deep(.answers-input) {
         position: relative;
         transform: translateX(0);
@@ -1858,37 +1784,6 @@ onBeforeRouteUpdate((to, from, next) => {
     box-sizing: border-box;
     border-bottom: 1px solid var(--td-component-stroke);
     background: var(--td-bg-color-container);
-}
-
-.sandbox-header-toggle {
-    display: inline-flex;
-    align-items: center;
-    flex-shrink: 0;
-    margin-left: auto;
-}
-
-.sandbox-header-toggle__btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    padding: 0;
-    border: 0;
-    border-radius: 5px;
-    color: var(--td-text-color-placeholder);
-    background: transparent;
-    cursor: pointer;
-    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
-
-    &:hover {
-        color: var(--td-text-color-primary);
-        background: var(--td-bg-color-container-hover);
-    }
-
-    &:active {
-        background: var(--td-bg-color-container-active);
-    }
 }
 
 .chat_scroll_box {
@@ -1962,10 +1857,6 @@ onBeforeRouteUpdate((to, from, next) => {
     position: absolute;
     inset: 0 0 var(--chat-composer-height, 0px);
     pointer-events: none;
-
-    :deep(.browser-task-preview) {
-        pointer-events: auto;
-    }
 }
 
 .scroll-to-bottom-btn {

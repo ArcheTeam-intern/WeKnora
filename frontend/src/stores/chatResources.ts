@@ -3,14 +3,12 @@ import { ref, computed, watch } from 'vue'
 import { listKnowledgeBases, getKnowledgeBaseById } from '@/api/knowledge-base'
 import { listAgents, type CustomAgent } from '@/api/agent'
 import { listModels, type ModelConfig } from '@/api/model'
-import { listWebSearchProviders, type WebSearchProviderEntity } from '@/api/web-search-provider'
-import { isNamedSandboxBackend, listSandboxConfigs, type SandboxConfigRecord } from '@/api/system'
 import { useOrganizationStore } from '@/stores/organization'
 import { getCurrentLanguage } from '@/utils/request'
 import { isLocalizedSnapshotUsable, shouldForceLocalizedRefetch } from './localizedResourceCache'
 import { createCachedResource, createKeyedSnapshotCache } from './resourceCache'
 
-type ResourceKey = 'knowledgeBases' | 'agents' | 'models' | 'webSearchProviders' | 'sandboxConfigs'
+type ResourceKey = 'knowledgeBases' | 'agents' | 'models'
 
 export type ListCreatorFilter = 'all' | 'mine' | 'others'
 
@@ -23,7 +21,7 @@ function isKbModelReady(kb: any): boolean {
 }
 
 /**
- * 空间级资源（知识库 / 智能体 / 模型 / 联网搜索 / 沙箱后端）的共享快照。
+ * 空间级资源（知识库 / 智能体 / 模型）的共享快照。
  *
  * 没有 TTL：每次 `ensureX()` 都会发请求（同一时刻只有一个在飞行，挂载突发共用它），
  * 写操作之后由调用方 `ensureX(true)`、`replaceModels()` 或 `invalidate()` 显式刷新。
@@ -34,8 +32,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
   const agents = ref<CustomAgent[]>([])
   const disabledOwnAgentIds = ref<string[]>([])
   const allModels = ref<ModelConfig[]>([])
-  const webSearchProviders = ref<WebSearchProviderEntity[]>([])
-  const sandboxConfigs = ref<SandboxConfigRecord[]>([])
 
   const validKnowledgeBases = computed(() => rawKnowledgeBases.value.filter(isKbModelReady))
   const chatModels = computed(() => allModels.value.filter((m) => m.type === 'KnowledgeQA'))
@@ -88,42 +84,10 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     },
   )
 
-  const webSearchProvidersResource = createCachedResource(
-    async () => {
-      const response = await listWebSearchProviders()
-      const providers = (response as any)?.data
-      return Array.isArray(providers) ? (providers as WebSearchProviderEntity[]) : []
-    },
-    (providers) => {
-      webSearchProviders.value = providers
-    },
-  )
-
-  // 失败只吞掉不抛：这是可选资源——拿不到就只剩「不启用沙箱」一项，
-  // 智能体照样能编辑保存。调用方通常把它和一堆必需资源放在同一个
-  // Promise.all 里，若在这里抛出，整个编辑器的依赖加载都会连坐
-  // （技能可用性拿不到 ⇒ 技能配置分组直接消失）。
-  const sandboxConfigsResource = createCachedResource(
-    async () => {
-      try {
-        const res = await listSandboxConfigs()
-        const rows = Array.isArray(res?.data) ? res.data : []
-        return rows.filter((cfg) => isNamedSandboxBackend(cfg.sandbox_type))
-      } catch {
-        return [] as SandboxConfigRecord[]
-      }
-    },
-    (rows) => {
-      sandboxConfigs.value = rows
-    },
-  )
-
   const resources: Record<ResourceKey, ReturnType<typeof createCachedResource>> = {
     knowledgeBases: knowledgeBasesResource,
     agents: agentsResource,
     models: modelsResource,
-    webSearchProviders: webSearchProvidersResource,
-    sandboxConfigs: sandboxConfigsResource,
   }
 
   // 智能体可见知识库、单个知识库详情：拿到过就一直用，直到显式失效。
@@ -238,18 +202,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     return ensureModels(force)
   }
 
-  async function ensureWebSearchProviders(force = false): Promise<void> {
-    return webSearchProvidersResource.ensure(force)
-  }
-
-  /**
-   * 沙箱后端配置，供智能体编辑器的后端选择器使用。
-   * 不进 prefetchChatInput：只有编辑智能体时才需要，对话输入栏用不到。
-   */
-  async function ensureSandboxConfigs(force = false): Promise<void> {
-    return sandboxConfigsResource.ensure(force)
-  }
-
   /** 并行预取对话输入栏及列表页常用的空间级资源 */
   async function prefetchChatInput(force = false): Promise<void> {
     const orgStore = useOrganizationStore()
@@ -257,7 +209,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       ensureKnowledgeBases(force),
       ensureAgents(force),
       ensureModels(force),
-      ensureWebSearchProviders(force),
       orgStore.fetchOrganizations({ force }),
     ])
   }
@@ -283,8 +234,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
       agents.value = []
       disabledOwnAgentIds.value = []
       allModels.value = []
-      webSearchProviders.value = []
-      sandboxConfigs.value = []
       agentsLoadedLocale = ''
       agentsInflightLocale = ''
       agentKbCache.invalidate()
@@ -308,8 +257,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     disabledOwnAgentIds,
     allModels,
     chatModels,
-    webSearchProviders,
-    sandboxConfigs,
     isLoaded,
     fetchKnowledgeBasesForList,
     fetchAgentsForList,
@@ -318,8 +265,6 @@ export const useChatResourcesStore = defineStore('chatResources', () => {
     ensureModels,
     replaceModels,
     ensureChatModels,
-    ensureWebSearchProviders,
-    ensureSandboxConfigs,
     ensureAgentKnowledgeBases,
     prefetchChatInput,
     fetchKnowledgeBaseById,

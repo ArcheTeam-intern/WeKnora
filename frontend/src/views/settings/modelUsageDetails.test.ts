@@ -14,7 +14,8 @@ test('model deletion renders structured usage groups and localized fallback erro
   assert.match(source, /error instanceof ModelInUseError/)
   assert.match(source, /usageConflict\.knowledge_bases/)
   assert.match(source, /usageConflict\.agents/)
-  assert.match(source, /usageConflict\.long_term_memory\.bindings/)
+  // The retired long-term memory binding group must not come back.
+  assert.doesNotMatch(source, /long_term_memory/)
   assert.match(source, /MessagePlugin\.error\(error\.message \|\| t\('modelSettings\.toasts\.deleteFailed'\)\)/)
 })
 

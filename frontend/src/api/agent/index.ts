@@ -57,22 +57,6 @@ export interface CustomAgentConfig {
   llm_call_timeout?: number;        // LLM调用超时时间（秒）
   allowed_tools?: string[];         // 允许的工具
   reflection_enabled?: boolean;     // 是否启用反思
-  // MCP服务选择模式：all=全部启用的MCP服务, selected=指定服务, none=不使用MCP
-  mcp_selection_mode?: 'all' | 'selected' | 'none';
-  mcp_services?: string[];          // 选择的MCP服务ID列表
-  // 对话中触发 OAuth 授权时的等待超时（秒）：到点后自动跳过授权提示。
-  // <=0 时使用服务端默认超时。仅对使用 OAuth 的 MCP 服务生效。
-  mcp_auth_wait_timeout?: number;
-
-  // ===== Skills设置（仅Agent模式）=====
-  // Skills选择模式：all=全部预装, selected=指定, none=不使用
-  skills_selection_mode?: 'all' | 'selected' | 'none';
-  selected_skills?: string[];       // 选择的Skill名称列表
-
-  // ===== 沙箱设置 =====
-  // 该智能体的技能脚本运行在哪个沙箱配置上；为空表示不启用沙箱执行。
-  // 指向逻辑配置而非某个具体版本，凭据轮换时无需重新指派每个智能体。
-  sandbox_config_id?: string;
 
   // ===== 知识库设置 =====
   // 知识库选择模式：all=全部知识库, selected=指定知识库, none=不使用知识库
@@ -105,20 +89,9 @@ export interface CustomAgentConfig {
   // 为空表示支持所有文件类型
   supported_file_types?: string[];
 
-  // ===== 网络搜索设置 =====
-  web_search_enabled?: boolean;
-  web_search_provider_id?: string;
-  web_search_max_results?: number;
-
   // ===== 多轮对话设置 =====
   multi_turn_enabled?: boolean;     // 是否启用多轮对话
   history_turns?: number;           // 保留历史轮数
-
-  // ===== 长期记忆 =====
-  // 该智能体是否可以读取用户的长期记忆。
-  // 缺省（旧数据）等同于 true：这是一个只能"关"的开关，空间设置关闭时
-  // 这里打开也不会生效。
-  memory_enabled?: boolean;
 
   // ===== 检索策略设置 =====
   embedding_top_k?: number;         // 向量召回TopK
@@ -282,7 +255,6 @@ export interface AgentTypePresetConfig {
   allowed_tools?: string[];
   retain_retrieval_history?: boolean;
   faq_priority_enabled?: boolean;
-  web_search_enabled?: boolean;
   supported_file_types?: string[];
   kb_selection_mode?: 'all' | 'selected' | 'none';
 }
@@ -304,68 +276,6 @@ export function getAgentTypePresets() {
   return get<{ data: AgentTypePreset[] }>('/api/v1/agents/type-presets');
 }
 
-// ===== IM渠道 =====
-
-export interface IMChannel {
-  id: string;
-  tenant_id?: number;
-  agent_id: string;
-  // 'lark' is Feishu's international edition; it shares Feishu's credentials and modes.
-  platform: 'wecom' | 'feishu' | 'lark' | 'slack' | 'telegram' | 'dingtalk' | 'mattermost' | 'wechat' | 'qqbot' | 'yunzhijia';
-  name: string;
-  enabled: boolean;
-  mode: 'webhook' | 'websocket' | 'longpoll';
-  output_mode: 'stream' | 'full';
-  locale?: '' | 'zh-CN' | 'zh-TW' | 'en-US' | 'ko-KR' | 'ja-JP' | 'ru-RU';
-  session_mode?: 'user' | 'thread';
-  knowledge_base_id?: string;
-  credentials: Record<string, any>;
-  created_at?: string;
-  updated_at?: string;
-}
-
-export function listIMChannels(agentId: string) {
-  return get<{ data: IMChannel[] }>(`/api/v1/agents/${agentId}/im-channels`);
-}
-
-// Tenant-wide overview row. Credentials are intentionally omitted — use
-// listIMChannels(agentId) when you need to edit a specific channel.
-export interface IMChannelOverview {
-  id: string;
-  tenant_id: number;
-  agent_id: string;
-  agent_name: string; // localized built-in name when the agent is built-in
-  platform: IMChannel['platform'];
-  name: string;
-  enabled: boolean;
-  mode: IMChannel['mode'];
-  output_mode: IMChannel['output_mode'];
-  locale?: IMChannel['locale'];
-  session_mode?: IMChannel['session_mode'];
-  bot_identity: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export function listAllIMChannels() {
-  return get<{ data: IMChannelOverview[] }>('/api/v1/im-channels');
-}
-
-export function createIMChannel(agentId: string, data: Partial<IMChannel>) {
-  return post<{ data: IMChannel }>(`/api/v1/agents/${agentId}/im-channels`, data);
-}
-
-export function updateIMChannel(id: string, data: Partial<IMChannel>) {
-  return put<{ data: IMChannel }>(`/api/v1/im-channels/${id}`, data);
-}
-
-export function deleteIMChannel(id: string) {
-  return del<{ success: boolean }>(`/api/v1/im-channels/${id}`);
-}
-
-export function toggleIMChannel(id: string) {
-  return post<{ data: IMChannel }>(`/api/v1/im-channels/${id}/toggle`);
-}
 
 // ===== 推荐问题 =====
 
@@ -395,28 +305,4 @@ export function getSuggestedQuestions(
   if (params?.limit) query.set('limit', String(params.limit));
   const qs = query.toString();
   return get<{ data: { questions: SuggestedQuestion[] } }>(`/api/v1/agents/${agentId}/suggested-questions${qs ? '?' + qs : ''}`);
-}
-// ===== WeChat QR Code Login =====
-
-export interface WeChatQRCodeResult {
-  qrcode_url: string;
-  qrcode: string;
-}
-
-export interface WeChatQRCodeStatus {
-  status: 'wait' | 'scaned' | 'confirmed' | 'expired';
-  credentials?: {
-    bot_token: string;
-    ilink_bot_id: string;
-    ilink_user_id: string;
-  };
-  baseurl?: string;
-}
-
-export function getWeChatQRCode() {
-  return post<{ data: WeChatQRCodeResult }>('/api/v1/wechat/qrcode');
-}
-
-export function pollWeChatQRCodeStatus(qrcode: string) {
-  return post<{ data: WeChatQRCodeStatus }>('/api/v1/wechat/qrcode/status', { qrcode });
 }

@@ -40,7 +40,7 @@ export function useStream() {
   let renderTimer: number | null = null
 
   // 启动流式请求
-  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; web_search_enabled?: boolean; local_browser_enabled?: boolean; summary_model_id?: string; reasoning_effort?: string; mcp_service_ids?: string[]; skill_names?: string[]; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string; service_id?: string; skill_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; method: string; url: string; embed_token?: string; embed_session_sig?: string; embed_visitor_id?: string }) => {
+  const startStream = async (params: { session_id: any; query: any; knowledge_base_ids?: string[]; knowledge_ids?: string[]; tag_ids?: string[]; agent_enabled?: boolean; agent_id?: string; agent_source_tenant_id?: string | number; summary_model_id?: string; reasoning_effort?: string; mentioned_items?: Array<{id: string; name: string; type: string; kb_type?: string; kb_id?: string; kb_name?: string}>; images?: Array<{data: string}>; attachment_uploads?: Array<{data: string; file_name: string; file_size: number}>; attachment_ids?: string[]; suggestion_attribution?: { suggestion_set_id: string; question_id: string }; question_origin?: { knowledge_base_id: string; knowledge_id?: string }; method: string; url: string }) => {
     const myGeneration = ++streamGeneration
     const streamAbort = controller
     // 重置状态
@@ -52,8 +52,7 @@ export function useStream() {
     // 获取API配置
     const apiUrl = getApiBaseUrl();
     
-    const embedToken = params.embed_token;
-    const token = embedToken || localStorage.getItem('weknora_token');
+    const token = localStorage.getItem('weknora_token');
     if (!token) {
       error.value = i18n.global.t('error.tokenNotFound');
       stopStream();
@@ -107,14 +106,6 @@ export function useStream() {
       if (params.agent_source_tenant_id) {
         postBody.agent_source_tenant_id = Number(params.agent_source_tenant_id);
       }
-      // Include web_search_enabled if provided
-      if (params.web_search_enabled !== undefined) {
-        postBody.web_search_enabled = params.web_search_enabled;
-      }
-      // Preserve the explicit browser choice when rebuilding the HTTP body.
-      if (params.local_browser_enabled !== undefined) {
-        postBody.local_browser_enabled = params.local_browser_enabled;
-      }
       // Include summary_model_id if provided (for non-Agent mode)
       if (params.summary_model_id) {
         postBody.summary_model_id = params.summary_model_id;
@@ -122,13 +113,6 @@ export function useStream() {
       // Omit inheritance so the agent's current default remains authoritative.
       if (params.reasoning_effort) {
         postBody.reasoning_effort = params.reasoning_effort;
-      }
-      // Include mcp_service_ids if provided (for Agent mode)
-      if (params.mcp_service_ids !== undefined && params.mcp_service_ids.length > 0) {
-        postBody.mcp_service_ids = params.mcp_service_ids;
-      }
-      if (params.skill_names !== undefined && params.skill_names.length > 0) {
-        postBody.skill_names = params.skill_names;
       }
       if (params.tag_ids !== undefined && params.tag_ids.length > 0) {
         postBody.tag_ids = params.tag_ids;
@@ -154,7 +138,7 @@ export function useStream() {
       if (params.question_origin) {
         postBody.question_origin = params.question_origin;
       }
-      postBody.channel = embedToken ? "embed" : "web";
+      postBody.channel = "web";
 
       lastStreamRequest.value = {
         requestId: requestID,
@@ -171,12 +155,10 @@ export function useStream() {
         method: params.method,
         headers: {
           "Content-Type": "application/json",
-          "Authorization": embedToken ? `Embed ${embedToken}` : `Bearer ${authToken}`,
+          "Authorization": `Bearer ${authToken}`,
           "Accept-Language": i18n.global.locale?.value || localStorage.getItem('locale') || 'zh-CN',
           "X-Request-ID": requestID,
-          ...(!embedToken && tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
-          ...(params.embed_session_sig ? { "X-Embed-Session": params.embed_session_sig } : {}),
-          ...(params.embed_visitor_id ? { "X-Embed-Visitor": params.embed_visitor_id } : {}),
+          ...(tenantIdHeader ? { "X-Tenant-ID": tenantIdHeader } : {}),
         },
         body:
           params.method == "POST"
@@ -223,7 +205,6 @@ export function useStream() {
       await runStreamWithAuthRetry({
         run: runStream,
         initialToken: token,
-        isEmbed: Boolean(embedToken),
         isCurrent: () => myGeneration === streamGeneration && !streamAbort.signal.aborted,
         refreshAccessToken: () => refreshAccessTokenShared({
           messages: {
